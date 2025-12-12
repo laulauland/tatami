@@ -1,0 +1,4 @@
+/target
+
+# FP snapshot directory (isolated git repo for workdir snapshots)
+.fp/snapshots/

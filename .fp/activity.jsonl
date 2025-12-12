@@ -1,0 +1,27 @@
+{"at":"2025-12-12T22:56:07.258Z","author":"top-earthworm","issue":"TAT-1","action":"issue_created","data":{"title":"Tatami MVP - Jujutsu GUI Client","parent":null}}
+{"at":"2025-12-12T22:56:15.004Z","author":"top-earthworm","issue":"TAT-2","action":"issue_created","data":{"title":"GPUI app foundation and window setup","parent":"TAT-1"}}
+{"at":"2025-12-12T22:56:21.912Z","author":"top-earthworm","issue":"TAT-3","action":"issue_created","data":{"title":"Repository integration with jj-lib","parent":"TAT-1"}}
+{"at":"2025-12-12T22:56:30.058Z","author":"top-earthworm","issue":"TAT-4","action":"issue_created","data":{"title":"Revision log display","parent":"TAT-1"}}
+{"at":"2025-12-12T22:56:37.957Z","author":"top-earthworm","issue":"TAT-5","action":"issue_created","data":{"title":"Working copy status view","parent":"TAT-1"}}
+{"at":"2025-12-12T22:56:45.528Z","author":"top-earthworm","issue":"TAT-6","action":"issue_created","data":{"title":"File diff viewer","parent":"TAT-1"}}
+{"at":"2025-12-12T22:56:52.283Z","author":"top-earthworm","issue":"TAT-7","action":"issue_created","data":{"title":"Commit and describe operations","parent":"TAT-1"}}
+{"at":"2025-12-12T22:57:01.424Z","author":"top-earthworm","issue":"TAT-8","action":"issue_created","data":{"title":"Squash and amend operations","parent":"TAT-1"}}
+{"at":"2025-12-12T22:57:09.177Z","author":"top-earthworm","issue":"TAT-9","action":"issue_created","data":{"title":"Rebase operations","parent":"TAT-1"}}
+{"at":"2025-12-12T22:57:17.109Z","author":"top-earthworm","issue":"TAT-10","action":"issue_created","data":{"title":"Conflict resolution UI","parent":"TAT-1"}}
+{"at":"2025-12-12T22:57:24.497Z","author":"top-earthworm","issue":"TAT-11","action":"issue_created","data":{"title":"Bookmark and branch management","parent":"TAT-1"}}
+{"at":"2025-12-12T22:57:31.703Z","author":"top-earthworm","issue":"TAT-12","action":"issue_created","data":{"title":"Remote operations (push/fetch)","parent":"TAT-1"}}
+{"at":"2025-12-12T22:57:38.430Z","author":"top-earthworm","issue":"TAT-13","action":"issue_created","data":{"title":"Undo/redo with operation log","parent":"TAT-1"}}
+{"at":"2025-12-12T22:57:46.764Z","author":"top-earthworm","issue":"TAT-14","action":"issue_created","data":{"title":"Repository file browser","parent":"TAT-1"}}
+{"at":"2025-12-12T22:57:54.111Z","author":"top-earthworm","issue":"TAT-15","action":"issue_created","data":{"title":"Keyboard shortcuts and command palette","parent":"TAT-1"}}
+{"at":"2025-12-12T23:01:40.688Z","author":"top-earthworm","issue":"TAT-2","action":"status_changed","data":{"from":"todo","to":"in-progress"}}
+{"at":"2025-12-12T23:01:40.692Z","author":"top-earthworm","issue":"TAT-2","action":"issue_updated","data":{"changes":["status: todo → in-progress","range: base set to zzyqryzx"]}}
+{"at":"2025-12-12T23:01:41.133Z","author":"top-earthworm","issue":"TAT-3","action":"status_changed","data":{"from":"todo","to":"in-progress"}}
+{"at":"2025-12-12T23:01:41.138Z","author":"top-earthworm","issue":"TAT-3","action":"issue_updated","data":{"changes":["status: todo → in-progress","range: base set to zzyqryzx"]}}
+{"at":"2025-12-12T23:50:42.130Z","author":"top-earthworm","issue":"TAT-2","action":"status_changed","data":{"from":"in-progress","to":"done"}}
+{"at":"2025-12-12T23:50:42.135Z","author":"top-earthworm","issue":"TAT-2","action":"issue_updated","data":{"changes":["status: in-progress → done","range: tip set to zzyqryzx"]}}
+{"at":"2025-12-12T23:50:42.614Z","author":"top-earthworm","issue":"TAT-3","action":"status_changed","data":{"from":"in-progress","to":"done"}}
+{"at":"2025-12-12T23:50:42.618Z","author":"top-earthworm","issue":"TAT-3","action":"issue_updated","data":{"changes":["status: in-progress → done","range: tip set to zzyqryzx"]}}
+{"at":"2025-12-12T23:53:02.473Z","author":"top-earthworm","issue":"TAT-4","action":"status_changed","data":{"from":"todo","to":"in-progress"}}
+{"at":"2025-12-12T23:53:02.478Z","author":"top-earthworm","issue":"TAT-4","action":"issue_updated","data":{"changes":["status: todo → in-progress","range: base set to zzyqryzx"]}}
+{"at":"2025-12-13T00:00:03.306Z","author":"top-earthworm","issue":"TAT-4","action":"status_changed","data":{"from":"in-progress","to":"done"}}
+{"at":"2025-12-13T00:00:03.311Z","author":"top-earthworm","issue":"TAT-4","action":"issue_updated","data":{"changes":["status: in-progress → done","range: tip set to zzyqryzx"]}}

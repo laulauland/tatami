@@ -1,0 +1,168 @@
+use anyhow::{Context, Result};
+use jj_lib::backend::CommitId;
+use jj_lib::commit::Commit;
+use jj_lib::config::ConfigSource;
+use jj_lib::merged_tree::MergedTree;
+use jj_lib::object_id::{HexPrefix, PrefixResolution};
+use jj_lib::repo::{Repo, StoreFactories};
+use jj_lib::repo_path::RepoPath;
+use jj_lib::workspace::{default_working_copy_factories, Workspace};
+use std::path::Path;
+use tokio::io::AsyncReadExt;
+
+pub struct JjRepo {
+    workspace: Workspace,
+}
+
+impl JjRepo {
+    pub fn open(path: &Path) -> Result<Self> {
+        let config = Self::load_config()?;
+        let user_settings = jj_lib::settings::UserSettings::from_config(config)
+            .context("Failed to create user settings")?;
+        let store_factories = StoreFactories::default();
+        let working_copy_factories = default_working_copy_factories();
+
+        let workspace = Workspace::load(
+            &user_settings,
+            path,
+            &store_factories,
+            &working_copy_factories,
+        )
+        .context("Failed to load jj workspace")?;
+
+        Ok(Self { workspace })
+    }
+
+    fn load_config() -> Result<jj_lib::config::StackedConfig> {
+        use jj_lib::config::{ConfigLayer, StackedConfig};
+
+        // Start with jj-lib's built-in defaults
+        let mut config = StackedConfig::with_defaults();
+
+        // Fill in empty values that jj-lib leaves for the CLI to set
+        let hostname = hostname::get()
+            .map(|h| h.to_string_lossy().to_string())
+            .unwrap_or_else(|_| "localhost".to_string());
+        let username = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
+
+        let env_defaults = format!(
+            r#"
+[user]
+name = "{username}"
+email = "{username}@localhost"
+
+[operation]
+hostname = "{hostname}"
+username = "{username}"
+"#
+        );
+        let env_doc: toml_edit::DocumentMut = env_defaults.parse().unwrap();
+        config.add_layer(ConfigLayer::with_data(ConfigSource::EnvBase, env_doc));
+
+        // Load user config (higher priority)
+        if let Ok(home) = std::env::var("HOME") {
+            let xdg_config = std::env::var("XDG_CONFIG_HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| Path::new(&home).join(".config"));
+
+            let jj_config = xdg_config.join("jj/config.toml");
+            if jj_config.exists() {
+                let _ = config.load_file(ConfigSource::User, &jj_config);
+            }
+
+            let legacy = Path::new(&home).join(".jjconfig.toml");
+            if legacy.exists() {
+                let _ = config.load_file(ConfigSource::User, &legacy);
+            }
+        }
+
+        Ok(config)
+    }
+
+    pub fn get_commit(&self, change_id: &str) -> Result<Commit> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let commit_id = self.resolve_change_id(repo.as_ref(), change_id)?;
+        Ok(repo.store().get_commit(&commit_id)?)
+    }
+
+    pub fn get_parent_tree(&self, commit: &Commit) -> Result<MergedTree> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let parents = commit.parents();
+        let parent = parents.into_iter().next().context("Commit has no parent")?;
+        let parent_commit = repo.store().get_commit(parent?.id())?;
+        Ok(parent_commit.tree()?)
+    }
+
+    pub fn get_file_content(&self, commit: &Commit, path: &str) -> Result<Vec<u8>> {
+        let repo_path = RepoPath::from_internal_string(path).context("Invalid path")?;
+        let tree = commit.tree()?;
+        let file_value = tree.path_value(&repo_path)?;
+
+        match file_value.into_resolved() {
+            Ok(Some(value)) => {
+                use jj_lib::backend::TreeValue;
+                match value {
+                    TreeValue::File { id, .. } => {
+                        let repo = self.workspace.repo_loader().load_at_head()?;
+                        let mut reader =
+                            pollster::block_on(async { repo.store().read_file(&repo_path, &id).await })?;
+                        let mut content = Vec::new();
+                        pollster::block_on(async { reader.read_to_end(&mut content).await })?;
+                        Ok(content)
+                    }
+                    _ => Ok(Vec::new()),
+                }
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    pub fn get_parent_file_content(&self, commit: &Commit, path: &str) -> Result<Vec<u8>> {
+        let repo_path = RepoPath::from_internal_string(path).context("Invalid path")?;
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let parents = commit.parents();
+        let parent = parents.into_iter().next().context("Commit has no parent")?;
+        let parent_commit = repo.store().get_commit(parent?.id())?;
+        let parent_tree = parent_commit.tree()?;
+        let file_value = parent_tree.path_value(&repo_path)?;
+
+        match file_value.into_resolved() {
+            Ok(Some(value)) => {
+                use jj_lib::backend::TreeValue;
+                match value {
+                    TreeValue::File { id, .. } => {
+                        let mut reader =
+                            pollster::block_on(async { repo.store().read_file(&repo_path, &id).await })?;
+                        let mut content = Vec::new();
+                        pollster::block_on(async { reader.read_to_end(&mut content).await })?;
+                        Ok(content)
+                    }
+                    _ => Ok(Vec::new()),
+                }
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    fn resolve_change_id(&self, repo: &impl Repo, change_id_prefix: &str) -> Result<CommitId> {
+        // Change IDs use reverse hex (z-k alphabet), not standard hex (0-9a-f)
+        let prefix = HexPrefix::try_from_reverse_hex(change_id_prefix)
+            .context("Invalid change ID prefix format")?;
+
+        let resolution = repo
+            .resolve_change_id_prefix(&prefix)
+            .context("Failed to resolve change ID")?;
+
+        match resolution {
+            PrefixResolution::SingleMatch(commit_ids) => {
+                commit_ids.first().cloned().context("No commit ID found")
+            }
+            PrefixResolution::NoMatch => {
+                anyhow::bail!("Change ID not found: {}", change_id_prefix)
+            }
+            PrefixResolution::AmbiguousMatch => {
+                anyhow::bail!("Ambiguous change ID prefix: {}", change_id_prefix)
+            }
+        }
+    }
+}

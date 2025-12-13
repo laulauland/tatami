@@ -44,4 +44,18 @@ impl Colors {
     pub const WORKING_COPY: u32 = 0x58a6ff;
     pub const MUTABLE: u32 = 0xe6edf3;
     pub const IMMUTABLE: u32 = 0x6e7681;
+
+    // Syntax highlighting (GitHub Dark theme inspired)
+    pub const SYNTAX_KEYWORD: u32 = 0xff7b72;
+    pub const SYNTAX_STRING: u32 = 0xa5d6ff;
+    pub const SYNTAX_COMMENT: u32 = 0x8b949e;
+    pub const SYNTAX_FUNCTION: u32 = 0xd2a8ff;
+    pub const SYNTAX_TYPE: u32 = 0x79c0ff;
+    pub const SYNTAX_CONSTANT: u32 = 0x79c0ff;
+    pub const SYNTAX_NUMBER: u32 = 0x79c0ff;
+    pub const SYNTAX_VARIABLE: u32 = 0xffa657;
+    pub const SYNTAX_PROPERTY: u32 = 0x7ee787;
+    pub const SYNTAX_OPERATOR: u32 = 0xff7b72;
+    pub const SYNTAX_PUNCTUATION: u32 = 0x8b949e;
+    pub const SYNTAX_ATTRIBUTE: u32 = 0x7ee787;
 }

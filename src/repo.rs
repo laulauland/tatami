@@ -1,3 +1,5 @@
+pub mod diff;
+pub mod jj;
 pub mod log;
 pub mod status;
 

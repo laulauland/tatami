@@ -1,8 +1,9 @@
 use gpui::{
-    div, px, rgb, prelude::FluentBuilder, Context, Hsla, InteractiveElement, IntoElement,
+    div, px, rgb, prelude::FluentBuilder, Context, Entity, Hsla, InteractiveElement, IntoElement,
     ParentElement, SharedString, StatefulInteractiveElement, Styled,
 };
 
+use super::diff_view::DiffView;
 use super::theme::{Colors, TextSize};
 use crate::app::Tatami;
 use crate::repo::log::{FileStatus, Revision};
@@ -10,9 +11,13 @@ use crate::repo::log::{FileStatus, Revision};
 pub fn render_log_view(
     revisions: &[Revision],
     selected_index: Option<usize>,
+    selected_file: &Option<(String, String)>,
+    diff_view: Option<Entity<DiffView>>,
     cx: &mut Context<Tatami>,
 ) -> impl IntoElement {
     let revision_count = revisions.len();
+    let selected_file_cloned = selected_file.clone();
+
     let entries: Vec<_> = revisions
         .iter()
         .enumerate()
@@ -22,33 +27,65 @@ pub fn render_log_view(
             let on_click = cx.listener(move |tatami, _event, _window, cx| {
                 tatami.select_revision(idx, cx);
             });
-            (rev.clone(), is_selected, is_last, on_click)
+
+            let file_handlers: Vec<_> = rev
+                .files
+                .iter()
+                .map(|f| {
+                    let change_id = rev.change_id.clone();
+                    let file_path = f.path.clone();
+                    cx.listener(move |tatami, _event, _window, cx| {
+                        tatami.select_file(change_id.clone(), file_path.clone(), cx);
+                    })
+                })
+                .collect();
+
+            (
+                rev.clone(),
+                is_selected,
+                is_last,
+                on_click,
+                selected_file_cloned.clone(),
+                diff_view.clone(),
+                file_handlers,
+            )
         })
         .collect();
 
     div()
+        .id("log-view")
         .flex()
         .flex_col()
         .flex_1()
-        .overflow_hidden()
+        .overflow_y_scroll()
         .text_size(TextSize::SM)
-        .children(
-            entries
-                .into_iter()
-                .map(|(rev, is_selected, is_last, on_click)| {
-                    render_revision_entry(rev, is_selected, is_last, on_click)
-                }),
-        )
+        .children(entries.into_iter().map(
+            |(rev, is_selected, is_last, on_click, selected_file, file_diff, file_handlers)| {
+                render_revision_entry(
+                    rev,
+                    is_selected,
+                    is_last,
+                    on_click,
+                    selected_file,
+                    file_diff,
+                    file_handlers,
+                )
+            },
+        ))
 }
 
-fn render_revision_entry<F>(
+fn render_revision_entry<F, G>(
     rev: Revision,
     is_selected: bool,
     is_last: bool,
     on_click: F,
+    selected_file: Option<(String, String)>,
+    diff_view: Option<Entity<DiffView>>,
+    file_handlers: Vec<G>,
 ) -> impl IntoElement
 where
     F: Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+    G: Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
 {
     let id_color = if rev.is_working_copy {
         rgb(Colors::WORKING_COPY)
@@ -126,7 +163,13 @@ where
                 ),
         )
         .when(is_selected, |el| {
-            el.child(render_expanded_detail(&rev, is_last))
+            el.child(render_expanded_detail(
+                &rev,
+                is_last,
+                &selected_file,
+                diff_view,
+                file_handlers,
+            ))
         })
 }
 
@@ -161,39 +204,92 @@ fn render_graph_column(symbol: &'static str, color: Hsla, is_last: bool) -> impl
         )
 }
 
-fn render_expanded_detail(rev: &Revision, is_last: bool) -> impl IntoElement + use<> {
+fn render_expanded_detail<G>(
+    rev: &Revision,
+    is_last: bool,
+    selected_file: &Option<(String, String)>,
+    diff_view: Option<Entity<DiffView>>,
+    file_handlers: Vec<G>,
+) -> impl IntoElement
+where
+    G: Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+{
     let files_content = if rev.files.is_empty() {
         div()
             .text_size(TextSize::XS)
             .text_color(rgb(Colors::TEXT_MUTED))
             .child("(no file changes)")
     } else {
-        div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .text_size(TextSize::XS)
-            .children(rev.files.iter().map(|f| {
+        let change_id = rev.change_id.clone();
+
+        let file_entries: Vec<_> = rev
+            .files
+            .iter()
+            .enumerate()
+            .zip(file_handlers.into_iter())
+            .map(|((_idx, f), on_file_click)| {
                 let (prefix, color) = match f.status {
                     FileStatus::Added => ("A", Colors::ADDED),
                     FileStatus::Modified => ("M", Colors::MODIFIED),
                     FileStatus::Deleted => ("D", Colors::DELETED),
                 };
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        div()
-                            .w(px(12.0))
-                            .text_color(rgb(color))
-                            .child(prefix),
-                    )
-                    .child(
-                        div()
-                            .text_color(rgb(Colors::TEXT))
-                            .child(f.path.clone()),
-                    )
-            }))
+
+                let file_path = f.path.clone();
+                let is_file_selected = selected_file
+                    .as_ref()
+                    .map(|(cid, path)| cid == &change_id && path == &file_path)
+                    .unwrap_or(false);
+
+                (f.path.clone(), prefix, color, is_file_selected, on_file_click)
+            })
+            .collect();
+
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .text_size(TextSize::XS)
+            .children(file_entries.into_iter().map(
+                |(file_path, prefix, color, is_file_selected, on_file_click)| {
+                    let file_id: SharedString =
+                        format!("file-{}-{}", change_id, file_path.replace('/', "-")).into();
+
+                    let show_diff = is_file_selected && diff_view.is_some();
+
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .id(file_id)
+                                .flex()
+                                .gap_2()
+                                .cursor_pointer()
+                                .hover(|s| s.bg(rgb(Colors::BG_HOVER)))
+                                .on_click(on_file_click)
+                                .child(
+                                    div()
+                                        .w(px(12.0))
+                                        .text_color(rgb(color))
+                                        .child(prefix),
+                                )
+                                .child(
+                                    div()
+                                        .text_color(rgb(Colors::TEXT))
+                                        .child(file_path),
+                                ),
+                        )
+                        .when(show_diff, |el| {
+                            el.child(
+                                div()
+                                    .ml(px(18.0))
+                                    .mt_1()
+                                    .child(diff_view.clone().unwrap()),
+                            )
+                        })
+                },
+            ))
     };
 
     div()

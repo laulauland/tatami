@@ -1,29 +1,55 @@
 use gpui::{
-    div, px, rgb, prelude::FluentBuilder, Hsla, InteractiveElement, IntoElement, ParentElement,
-    SharedString, Styled,
+    div, px, rgb, prelude::FluentBuilder, Context, Hsla, InteractiveElement, IntoElement,
+    ParentElement, SharedString, StatefulInteractiveElement, Styled,
 };
 
 use super::theme::{Colors, TextSize};
+use crate::app::Tatami;
 use crate::repo::log::Revision;
 
 pub fn render_log_view(
     revisions: &[Revision],
     selected_index: Option<usize>,
+    cx: &mut Context<Tatami>,
 ) -> impl IntoElement {
+    let revision_count = revisions.len();
+    let entries: Vec<_> = revisions
+        .iter()
+        .enumerate()
+        .map(|(idx, rev)| {
+            let is_selected = Some(idx) == selected_index;
+            let is_last = idx == revision_count - 1;
+            let on_click = cx.listener(move |tatami, _event, _window, cx| {
+                tatami.select_revision(idx, cx);
+            });
+            (rev.clone(), is_selected, is_last, on_click)
+        })
+        .collect();
+
     div()
         .flex()
         .flex_col()
         .flex_1()
         .overflow_hidden()
         .text_size(TextSize::SM)
-        .children(revisions.iter().enumerate().map(|(idx, rev)| {
-            let is_selected = Some(idx) == selected_index;
-            let is_last = idx == revisions.len() - 1;
-            render_revision_entry(rev, is_selected, is_last)
-        }))
+        .children(
+            entries
+                .into_iter()
+                .map(|(rev, is_selected, is_last, on_click)| {
+                    render_revision_entry(rev, is_selected, is_last, on_click)
+                }),
+        )
 }
 
-fn render_revision_entry(rev: &Revision, is_selected: bool, is_last: bool) -> impl IntoElement {
+fn render_revision_entry<F>(
+    rev: Revision,
+    is_selected: bool,
+    is_last: bool,
+    on_click: F,
+) -> impl IntoElement
+where
+    F: Fn(&gpui::ClickEvent, &mut gpui::Window, &mut gpui::App) + 'static,
+{
     let id_color = if rev.is_working_copy {
         rgb(Colors::WORKING_COPY)
     } else if rev.is_immutable {
@@ -46,29 +72,28 @@ fn render_revision_entry(rev: &Revision, is_selected: bool, is_last: bool) -> im
         .flex()
         .flex_col()
         .child(
-            // Main row
             div()
                 .id(row_id)
                 .w_full()
                 .h(px(24.0))
                 .flex()
                 .items_center()
+                .cursor_pointer()
                 .hover(|s| s.bg(rgb(Colors::BG_HOVER)))
+                .on_click(on_click)
                 .child(render_graph_column(graph_symbol, id_color.into(), is_last))
                 .child(
                     div()
                         .flex_1()
                         .flex()
                         .items_center()
-                        .gap_3()
+                        .gap_2()
+                        .min_w_0()
                         .pr_2()
                         .child(
                             div()
                                 .flex_shrink_0()
-                                .w(px(96.0))
                                 .text_color(id_color)
-                                .overflow_hidden()
-                                .whitespace_nowrap()
                                 .child(rev.change_id.clone()),
                         )
                         .child(
@@ -89,25 +114,19 @@ fn render_revision_entry(rev: &Revision, is_selected: bool, is_last: bool) -> im
                         .child(
                             div()
                                 .flex_shrink_0()
-                                .w(px(100.0))
                                 .text_color(rgb(Colors::TEXT_SUBTLE))
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
                                 .child(rev.author.clone()),
                         )
                         .child(
                             div()
                                 .flex_shrink_0()
-                                .w(px(88.0))
                                 .text_color(rgb(Colors::TEXT_SUBTLE))
-                                .whitespace_nowrap()
                                 .child(rev.timestamp.clone()),
                         ),
                 ),
         )
         .when(is_selected, |el| {
-            el.child(render_expanded_detail(rev, is_last))
+            el.child(render_expanded_detail(&rev, is_last))
         })
 }
 
@@ -142,11 +161,10 @@ fn render_graph_column(symbol: &'static str, color: Hsla, is_last: bool) -> impl
         )
 }
 
-fn render_expanded_detail(rev: &Revision, is_last: bool) -> impl IntoElement {
+fn render_expanded_detail(rev: &Revision, is_last: bool) -> impl IntoElement + use<> {
     div()
         .flex()
         .child(
-            // Graph continuation line
             div()
                 .flex_shrink_0()
                 .w(px(24.0))
@@ -160,7 +178,6 @@ fn render_expanded_detail(rev: &Revision, is_last: bool) -> impl IntoElement {
                 ),
         )
         .child(
-            // Detail panel
             div()
                 .flex_1()
                 .my_1()
@@ -177,16 +194,17 @@ fn render_expanded_detail(rev: &Revision, is_last: bool) -> impl IntoElement {
                     div()
                         .flex()
                         .gap_2()
+                        .items_baseline()
                         .child(
                             div()
                                 .text_color(rgb(Colors::WORKING_COPY))
-                                .child(format!("@ {}", rev.change_id)),
+                                .child(rev.change_id.clone()),
                         )
                         .child(
                             div()
                                 .text_color(rgb(Colors::TEXT_SUBTLE))
                                 .text_size(TextSize::XS)
-                                .child(rev.commit_id.chars().take(12).collect::<String>()),
+                                .child(rev.commit_id.clone()),
                         ),
                 )
                 .child(
@@ -203,6 +221,16 @@ fn render_expanded_detail(rev: &Revision, is_last: bool) -> impl IntoElement {
                         .text_size(TextSize::XS)
                         .text_color(rgb(Colors::TEXT_SUBTLE))
                         .child(format!("{} · {}", rev.author, rev.timestamp)),
+                )
+                .child(
+                    div()
+                        .mt_2()
+                        .pt_2()
+                        .border_t_1()
+                        .border_color(rgb(Colors::BORDER_MUTED))
+                        .text_size(TextSize::XS)
+                        .text_color(rgb(Colors::TEXT_MUTED))
+                        .child("(file changes not yet loaded)"),
                 ),
         )
 }

@@ -36,8 +36,19 @@ impl Tatami {
     }
 }
 
+impl Tatami {
+    pub fn select_revision(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.selected_revision == Some(index) {
+            self.selected_revision = None;
+        } else {
+            self.selected_revision = Some(index);
+        }
+        cx.notify();
+    }
+}
+
 impl Render for Tatami {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = match &self.repo {
             RepoState::NotFound { path } => div()
                 .flex_1()
@@ -45,7 +56,7 @@ impl Render for Tatami {
                 .child(format!("No jj repository at {}", path.display())),
             RepoState::Loaded { revisions, .. } => div()
                 .flex_1()
-                .child(render_log_view(revisions, self.selected_revision)),
+                .child(render_log_view(revisions, self.selected_revision, cx)),
             RepoState::Error { message } => {
                 div().flex_1().p_3().child(format!("Error: {}", message))
             }

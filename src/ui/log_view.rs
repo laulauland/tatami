@@ -5,7 +5,7 @@ use gpui::{
 
 use super::theme::{Colors, TextSize};
 use crate::app::Tatami;
-use crate::repo::log::Revision;
+use crate::repo::log::{FileStatus, Revision};
 
 pub fn render_log_view(
     revisions: &[Revision],
@@ -162,6 +162,40 @@ fn render_graph_column(symbol: &'static str, color: Hsla, is_last: bool) -> impl
 }
 
 fn render_expanded_detail(rev: &Revision, is_last: bool) -> impl IntoElement + use<> {
+    let files_content = if rev.files.is_empty() {
+        div()
+            .text_size(TextSize::XS)
+            .text_color(rgb(Colors::TEXT_MUTED))
+            .child("(no file changes)")
+    } else {
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .text_size(TextSize::XS)
+            .children(rev.files.iter().map(|f| {
+                let (prefix, color) = match f.status {
+                    FileStatus::Added => ("A", Colors::ADDED),
+                    FileStatus::Modified => ("M", Colors::MODIFIED),
+                    FileStatus::Deleted => ("D", Colors::DELETED),
+                };
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        div()
+                            .w(px(12.0))
+                            .text_color(rgb(color))
+                            .child(prefix),
+                    )
+                    .child(
+                        div()
+                            .text_color(rgb(Colors::TEXT))
+                            .child(f.path.clone()),
+                    )
+            }))
+    };
+
     div()
         .flex()
         .child(
@@ -228,9 +262,7 @@ fn render_expanded_detail(rev: &Revision, is_last: bool) -> impl IntoElement + u
                         .pt_2()
                         .border_t_1()
                         .border_color(rgb(Colors::BORDER_MUTED))
-                        .text_size(TextSize::XS)
-                        .text_color(rgb(Colors::TEXT_MUTED))
-                        .child("(file changes not yet loaded)"),
+                        .child(files_content),
                 ),
         )
 }

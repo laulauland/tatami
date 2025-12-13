@@ -5,6 +5,7 @@ use gpui::{
 
 use crate::repo::RepoState;
 use crate::ui::log_view::render_log_view;
+use crate::ui::status_view::render_status_view;
 
 pub struct Tatami {
     repo: RepoState,
@@ -22,21 +23,38 @@ impl Tatami {
 
 impl Render for Tatami {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let main_content = match &self.repo {
-            RepoState::NotFound { path } => {
+        let (main_content, right_panel) = match &self.repo {
+            RepoState::NotFound { path } => (
                 div()
                     .flex_1()
                     .h_full()
                     .p_4()
-                    .child(format!("No jj repository at {}", path.display()))
-            }
-            RepoState::Loaded { revisions, .. } => div()
-                .flex_1()
-                .h_full()
-                .child(render_log_view(revisions, self.selected_revision)),
-            RepoState::Error { message } => {
-                div().flex_1().h_full().p_4().child(format!("Error: {}", message))
-            }
+                    .child(format!("No jj repository at {}", path.display())),
+                div().w(px(300.0)).h_full(),
+            ),
+            RepoState::Loaded {
+                revisions, status, ..
+            } => (
+                div()
+                    .flex_1()
+                    .h_full()
+                    .child(render_log_view(revisions, self.selected_revision)),
+                div()
+                    .w(px(300.0))
+                    .h_full()
+                    .bg(rgb(0x252525))
+                    .border_l_1()
+                    .border_color(rgb(0x3d3d3d))
+                    .children(status.as_ref().map(render_status_view)),
+            ),
+            RepoState::Error { message } => (
+                div()
+                    .flex_1()
+                    .h_full()
+                    .p_4()
+                    .child(format!("Error: {}", message)),
+                div().w(px(300.0)).h_full(),
+            ),
         };
 
         let status_text = match &self.repo {
@@ -44,11 +62,19 @@ impl Render for Tatami {
             RepoState::Loaded {
                 workspace_root,
                 revisions,
-            } => format!(
-                "{} • {} revisions",
-                workspace_root.file_name().unwrap_or_default().to_string_lossy(),
-                revisions.len()
-            ),
+                status,
+            } => {
+                let file_count = status.as_ref().map(|s| s.files.len()).unwrap_or(0);
+                format!(
+                    "{} • {} revisions • {} changed files",
+                    workspace_root
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy(),
+                    revisions.len(),
+                    file_count
+                )
+            }
             RepoState::Error { .. } => "Error".to_string(),
         };
 
@@ -85,7 +111,8 @@ impl Render for Tatami {
                             .p_2()
                             .child("Bookmarks"),
                     )
-                    .child(main_content),
+                    .child(main_content)
+                    .child(right_panel),
             )
             .child(
                 div()

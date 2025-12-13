@@ -2,12 +2,16 @@
 id: 164a234a-bf6f-43ca-b959-9634ddcd6ead
 short_id: TAT-5
 title: Working copy status view
-status: todo
+status: in-progress
 parent: TAT-1
 branch: ""
-range: null
+range:
+  base: &a1
+    _tag: jj
+    changeId: zzyqryzxvuxszunslpsulqwtsrowtvop
+  tip: *a1
 created_at: 2025-12-12T22:56:37.954Z
-updated_at: 2025-12-12T22:56:37.954Z
+updated_at: 2025-12-13T00:02:15.418Z
 ---
 
 Display current working copy status and changed files.

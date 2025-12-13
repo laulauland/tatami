@@ -1,8 +1,10 @@
 pub mod log;
+pub mod status;
 
 use std::path::PathBuf;
 
 use crate::repo::log::Revision;
+use crate::repo::status::WorkingCopyStatus;
 
 #[derive(Clone)]
 pub enum RepoState {
@@ -10,6 +12,7 @@ pub enum RepoState {
     Loaded {
         workspace_root: PathBuf,
         revisions: Vec<Revision>,
+        status: Option<WorkingCopyStatus>,
     },
     Error { message: String },
 }
@@ -33,9 +36,11 @@ pub fn load_workspace(path: &std::path::Path) -> RepoState {
     match find_jj_repo(path) {
         Some(workspace_root) => {
             let revisions = log::fetch_log(&workspace_root, 50).unwrap_or_default();
+            let status = status::fetch_status(&workspace_root).ok();
             RepoState::Loaded {
                 workspace_root,
                 revisions,
+                status,
             }
         }
         None => RepoState::NotFound {

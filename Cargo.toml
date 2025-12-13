@@ -2,7 +2,18 @@
 name = "tatami"
 version = "0.1.0"
 edition = "2024"
+build = "build.rs"
+
+[package.metadata.bundle]
+name = "Tatami"
+identifier = "com.laulauland.tatami"
+icon = ["resources/AppIcon.png"]
+osx_minimum_system_version = "10.15.7"
 
 [dependencies]
+anyhow = "1.0.100"
+futures = "0.3.31"
 gpui = "0.2.2"
 jj-lib = "0.35.0"
+notify = "8.2.0"
+notify-debouncer-mini = "0.7.0"

@@ -1,60 +1,54 @@
+use futures::StreamExt;
 use gpui::{
     div, px, rgb, size, App, AppContext, Bounds, Context, IntoElement, ParentElement, Render,
     Styled, Window, WindowBounds, WindowOptions,
 };
+use std::path::PathBuf;
 
 use crate::repo::RepoState;
 use crate::ui::log_view::render_log_view;
-use crate::ui::status_view::render_status_view;
+use crate::ui::theme::{self, Colors, TextSize};
+use crate::watcher::RepoWatcher;
 
 pub struct Tatami {
     repo: RepoState,
+    workspace_root: PathBuf,
     selected_revision: Option<usize>,
+    _watcher: Option<RepoWatcher>,
 }
 
 impl Tatami {
-    pub fn new(repo: RepoState) -> Self {
+    pub fn new(repo: RepoState, workspace_root: PathBuf) -> Self {
         Self {
             repo,
+            workspace_root,
             selected_revision: Some(0),
+            _watcher: None,
         }
+    }
+
+    pub fn set_watcher(&mut self, watcher: RepoWatcher) {
+        self._watcher = Some(watcher);
+    }
+
+    pub fn reload_repo(&mut self) {
+        self.repo = crate::repo::load_workspace(&self.workspace_root);
     }
 }
 
 impl Render for Tatami {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let (main_content, right_panel) = match &self.repo {
-            RepoState::NotFound { path } => (
-                div()
-                    .flex_1()
-                    .h_full()
-                    .p_4()
-                    .child(format!("No jj repository at {}", path.display())),
-                div().w(px(300.0)).h_full(),
-            ),
-            RepoState::Loaded {
-                revisions, status, ..
-            } => (
-                div()
-                    .flex_1()
-                    .h_full()
-                    .child(render_log_view(revisions, self.selected_revision)),
-                div()
-                    .w(px(300.0))
-                    .h_full()
-                    .bg(rgb(0x252525))
-                    .border_l_1()
-                    .border_color(rgb(0x3d3d3d))
-                    .children(status.as_ref().map(render_status_view)),
-            ),
-            RepoState::Error { message } => (
-                div()
-                    .flex_1()
-                    .h_full()
-                    .p_4()
-                    .child(format!("Error: {}", message)),
-                div().w(px(300.0)).h_full(),
-            ),
+        let content = match &self.repo {
+            RepoState::NotFound { path } => div()
+                .flex_1()
+                .p_3()
+                .child(format!("No jj repository at {}", path.display())),
+            RepoState::Loaded { revisions, .. } => div()
+                .flex_1()
+                .child(render_log_view(revisions, self.selected_revision)),
+            RepoState::Error { message } => {
+                div().flex_1().p_3().child(format!("Error: {}", message))
+            }
         };
 
         let status_text = match &self.repo {
@@ -62,17 +56,15 @@ impl Render for Tatami {
             RepoState::Loaded {
                 workspace_root,
                 revisions,
-                status,
+                ..
             } => {
-                let file_count = status.as_ref().map(|s| s.files.len()).unwrap_or(0);
                 format!(
-                    "{} • {} revisions • {} changed files",
+                    "{} · {} revisions",
                     workspace_root
                         .file_name()
                         .unwrap_or_default()
                         .to_string_lossy(),
                     revisions.len(),
-                    file_count
                 )
             }
             RepoState::Error { .. } => "Error".to_string(),
@@ -82,53 +74,30 @@ impl Render for Tatami {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(0x1e1e1e))
-            .text_color(rgb(0xcccccc))
+            .font_family(theme::font_family())
+            .text_size(TextSize::BASE)
+            .bg(rgb(Colors::BG_BASE))
+            .text_color(rgb(Colors::TEXT))
+            .child(content)
             .child(
                 div()
-                    .h(px(40.0))
+                    .h(px(22.0))
                     .w_full()
                     .flex()
+                    .flex_shrink_0()
                     .items_center()
-                    .px_4()
-                    .bg(rgb(0x2d2d2d))
-                    .border_b_1()
-                    .border_color(rgb(0x3d3d3d))
-                    .child("Tatami"),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .w(px(200.0))
-                            .h_full()
-                            .bg(rgb(0x252525))
-                            .border_r_1()
-                            .border_color(rgb(0x3d3d3d))
-                            .p_2()
-                            .child("Bookmarks"),
-                    )
-                    .child(main_content)
-                    .child(right_panel),
-            )
-            .child(
-                div()
-                    .h(px(24.0))
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .px_4()
-                    .bg(rgb(0x007acc))
-                    .text_color(rgb(0xffffff))
+                    .px_3()
+                    .bg(rgb(Colors::BG_SURFACE))
+                    .border_t_1()
+                    .border_color(rgb(Colors::BORDER_MUTED))
+                    .text_size(TextSize::XS)
+                    .text_color(rgb(Colors::TEXT_SUBTLE))
                     .child(status_text),
             )
     }
 }
 
-pub fn open_window(cx: &mut App, repo: RepoState) {
+pub fn open_window(cx: &mut App, repo: RepoState, workspace_root: PathBuf) {
     let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
 
     cx.open_window(
@@ -136,7 +105,43 @@ pub fn open_window(cx: &mut App, repo: RepoState) {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             ..Default::default()
         },
-        |_window, cx| cx.new(|_cx| Tatami::new(repo)),
+        |_window, cx| {
+            let entity = cx.new(|_cx| {
+                let tatami = Tatami::new(repo.clone(), workspace_root.clone());
+                tatami
+            });
+
+            if let RepoState::Loaded { .. } = &repo {
+                let (watcher, mut receiver) = crate::watcher::watch_repo(workspace_root.clone());
+
+                entity.update(cx, |tatami, cx| {
+                    tatami.set_watcher(watcher);
+
+                    cx.spawn(|weak_self: gpui::WeakEntity<Tatami>, async_cx: &mut gpui::AsyncApp| {
+                        let mut async_cx = async_cx.clone();
+                        async move {
+                            while let Some(()) = receiver.next().await {
+                                let Some(entity) = weak_self.upgrade() else {
+                                    break;
+                                };
+                                if async_cx
+                                    .update_entity(&entity, |tatami, ctx| {
+                                        tatami.reload_repo();
+                                        ctx.notify();
+                                    })
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                    })
+                    .detach();
+                });
+            }
+
+            entity
+        },
     )
     .expect("Failed to open window");
 }

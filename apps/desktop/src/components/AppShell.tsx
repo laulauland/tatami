@@ -165,7 +165,40 @@ export function AppShell() {
 		};
 	}, [activeProject, queryClient]);
 
-	const currentBranch = revisions.find((r) => r.is_working_copy)?.bookmarks[0] ?? null;
+	const closestBookmark = useMemo(() => {
+		const workingCopy = revisions.find((r) => r.is_working_copy);
+		if (!workingCopy) return null;
+
+		if (workingCopy.bookmarks.length > 0) {
+			return workingCopy.bookmarks[0];
+		}
+
+		// BFS to find closest ancestor with bookmarks
+		const byCommitId = new Map<string, Revision>();
+		for (const rev of revisions) {
+			byCommitId.set(rev.commit_id, rev);
+		}
+
+		const visited = new Set<string>();
+		const queue = [...workingCopy.parent_ids];
+
+		while (queue.length > 0) {
+			const commitId = queue.shift()!;
+			if (visited.has(commitId)) continue;
+			visited.add(commitId);
+
+			const rev = byCommitId.get(commitId);
+			if (!rev) continue;
+
+			if (rev.bookmarks.length > 0) {
+				return rev.bookmarks[0];
+			}
+
+			queue.push(...rev.parent_ids);
+		}
+
+		return null;
+	}, [revisions]);
 
 	return (
 		<SidebarProvider>
@@ -186,7 +219,7 @@ export function AppShell() {
 						isLoading={isLoading}
 					/>
 				</div>
-				<StatusBar branch={currentBranch} isConnected={!!activeProject} />
+				<StatusBar branch={closestBookmark} isConnected={!!activeProject} />
 			</SidebarInset>
 		</SidebarProvider>
 	);

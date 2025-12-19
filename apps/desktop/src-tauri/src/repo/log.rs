@@ -12,6 +12,8 @@ use super::jj::JjRepo;
 pub struct Revision {
     pub commit_id: String,
     pub change_id: String,
+    pub change_id_short: String,
+    pub parent_ids: Vec<String>,
     pub description: String,
     pub author: String,
     pub timestamp: String,
@@ -65,13 +67,29 @@ pub fn fetch_log(repo_path: &Path, limit: usize) -> Result<Vec<Revision>> {
         let author = commit.author();
         let author_name = author.name.clone();
 
-        let timestamp = format_timestamp(&author.timestamp, change_id);
+        // Use committer timestamp (when commit was created/modified) for relative time display
+        let committer = commit.committer();
+        let timestamp = format_timestamp(&committer.timestamp, change_id);
 
         let bookmarks = get_bookmarks_for_commit(repo.as_ref(), commit_id);
 
+        let parent_ids: Vec<String> = commit
+            .parent_ids()
+            .iter()
+            .map(|id| hex::encode(&id.to_bytes()[..6]))
+            .collect();
+
+        let full_change_id = format_change_id(change_id);
+        let prefix_len = repo
+            .shortest_unique_change_id_prefix_len(change_id)
+            .unwrap_or(full_change_id.len());
+        let change_id_short = full_change_id[..prefix_len].to_string();
+
         revisions.push(Revision {
             commit_id: hex::encode(&commit_id.to_bytes()[..6]),
-            change_id: format_change_id(change_id),
+            change_id: full_change_id,
+            change_id_short,
+            parent_ids,
             description: first_line,
             author: author_name,
             timestamp,
@@ -110,8 +128,9 @@ fn format_timestamp(
         .unwrap()
         .as_millis() as i64;
 
+    // jj-lib stores timestamps in milliseconds
     let diff_ms = now - timestamp.timestamp.0;
-    let diff_seconds = diff_ms / 1000;
+    let diff_seconds = diff_ms.abs() / 1000;
 
     if diff_seconds < 60 {
         format!("{} seconds ago", diff_seconds)

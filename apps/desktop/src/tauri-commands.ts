@@ -42,6 +42,19 @@ export interface FileDiff {
 	hunks: DiffHunk[];
 }
 
+export interface Project {
+	id: string;
+	path: string;
+	name: string;
+	last_opened_at: number;
+}
+
+export interface AppLayout {
+	active_project_id: string | null;
+	selected_change_id: string | null;
+	sidebar_width: number;
+}
+
 export async function findRepository(startPath: string): Promise<string | null> {
 	return invoke<string | null>("find_repository", { startPath });
 }
@@ -60,4 +73,24 @@ export async function getFileDiff(
 	filePath: string,
 ): Promise<FileDiff> {
 	return invoke<FileDiff>("get_file_diff", { repoPath, changeId, filePath });
+}
+
+export async function getProjects(): Promise<Project[]> {
+	return invoke<Project[]>("get_projects");
+}
+
+export async function upsertProject(project: Project): Promise<void> {
+	return invoke("upsert_project", { project });
+}
+
+export async function findProjectByPath(path: string): Promise<Project | null> {
+	return invoke<Project | null>("find_project_by_path", { path });
+}
+
+export async function getLayout(): Promise<AppLayout> {
+	return invoke<AppLayout>("get_layout");
+}
+
+export async function updateLayout(layout: Partial<AppLayout>): Promise<void> {
+	return invoke("update_layout", { layout });
 }

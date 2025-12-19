@@ -6,7 +6,7 @@ use jj_lib::merged_tree::MergedTree;
 use jj_lib::object_id::{HexPrefix, PrefixResolution};
 use jj_lib::repo::{Repo, StoreFactories};
 use jj_lib::repo_path::RepoPath;
-use jj_lib::workspace::{default_working_copy_factories, Workspace};
+use jj_lib::workspace::{Workspace, default_working_copy_factories};
 use std::path::Path;
 use tokio::io::AsyncReadExt;
 
@@ -101,8 +101,9 @@ username = "{username}"
                 match value {
                     TreeValue::File { id, .. } => {
                         let repo = self.workspace.repo_loader().load_at_head()?;
-                        let mut reader =
-                            pollster::block_on(async { repo.store().read_file(repo_path, &id).await })?;
+                        let mut reader = pollster::block_on(async {
+                            repo.store().read_file(repo_path, &id).await
+                        })?;
                         let mut content = Vec::new();
                         pollster::block_on(async { reader.read_to_end(&mut content).await })?;
                         Ok(content)
@@ -128,8 +129,9 @@ username = "{username}"
                 use jj_lib::backend::TreeValue;
                 match value {
                     TreeValue::File { id, .. } => {
-                        let mut reader =
-                            pollster::block_on(async { repo.store().read_file(repo_path, &id).await })?;
+                        let mut reader = pollster::block_on(async {
+                            repo.store().read_file(repo_path, &id).await
+                        })?;
                         let mut content = Vec::new();
                         pollster::block_on(async { reader.read_to_end(&mut content).await })?;
                         Ok(content)

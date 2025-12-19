@@ -45,9 +45,7 @@ pub fn fetch_log(repo_path: &Path, limit: usize) -> Result<Vec<Revision>> {
 
     let immutable_expression = RevsetExpression::root();
     let immutable_revset = immutable_expression.evaluate(repo.as_ref())?;
-    let immutable_ids: Vec<CommitId> = immutable_revset
-        .iter()
-        .collect::<Result<Vec<_>, _>>()?;
+    let immutable_ids: Vec<CommitId> = immutable_revset.iter().collect::<Result<Vec<_>, _>>()?;
 
     let mut revisions = Vec::new();
 
@@ -98,7 +96,10 @@ fn format_change_id(change_id: &jj_lib::backend::ChangeId) -> String {
     result
 }
 
-fn format_timestamp(timestamp: &jj_lib::backend::Timestamp, change_id: &jj_lib::backend::ChangeId) -> String {
+fn format_timestamp(
+    timestamp: &jj_lib::backend::Timestamp,
+    change_id: &jj_lib::backend::ChangeId,
+) -> String {
     let change_id_str = format_change_id(change_id);
     if change_id_str == "zzzzzzzz" {
         return "root".to_string();

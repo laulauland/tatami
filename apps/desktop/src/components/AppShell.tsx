@@ -186,7 +186,7 @@ export function AppShell() {
 						isLoading={isLoading}
 					/>
 				</div>
-				<StatusBar branch={currentBranch} lastRefresh={null} isConnected={!!activeProject} />
+				<StatusBar branch={currentBranch} isConnected={!!activeProject} />
 			</SidebarInset>
 		</SidebarProvider>
 	);

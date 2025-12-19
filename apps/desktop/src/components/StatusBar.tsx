@@ -4,16 +4,10 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 
 interface StatusBarProps {
 	branch: string | null;
-	lastRefresh: Date | null;
 	isConnected: boolean;
 }
 
-export function StatusBar({ branch, lastRefresh, isConnected }: StatusBarProps) {
-	const formatRefreshTime = (date: Date | null) => {
-		if (!date) return "Never";
-		return date.toLocaleTimeString();
-	};
-
+export function StatusBar({ branch, isConnected }: StatusBarProps) {
 	return (
 		<div className="flex items-center h-8 px-2 border-t border-border bg-card text-xs text-muted-foreground">
 			<SidebarTrigger />
@@ -27,13 +21,6 @@ export function StatusBar({ branch, lastRefresh, isConnected }: StatusBarProps) 
 						<Separator orientation="vertical" className="h-4" />
 					</>
 				)}
-
-				<div className="flex items-center gap-1.5">
-					<span className="font-medium">Last refresh:</span>
-					<span>{formatRefreshTime(lastRefresh)}</span>
-				</div>
-
-				<Separator orientation="vertical" className="h-4" />
 
 				<div className="flex items-center gap-1.5">
 					<Circle

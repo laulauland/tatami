@@ -17,8 +17,8 @@ const NODE_RADIUS = 5;
 const MAX_LANES = 6;
 
 const LANE_COLORS = [
+	"hsl(45 100% 55%)", // yellow (main branch)
 	"hsl(210 100% 65%)", // bright blue
-	"hsl(35 100% 60%)", // orange
 	"hsl(140 70% 50%)", // green
 	"hsl(280 80% 65%)", // purple
 	"hsl(180 80% 50%)", // cyan
@@ -38,37 +38,88 @@ interface GraphData {
 	orderedRevisions: Revision[];
 }
 
-function reorderWithWorkingCopyFirst(revisions: Revision[]): Revision[] {
+function reorderForGraph(revisions: Revision[]): Revision[] {
 	if (revisions.length === 0) return [];
 
-	const workingCopy = revisions.find((r) => r.is_working_copy);
-	if (!workingCopy) return revisions;
-
+	// Build parent->children map
+	const childrenMap = new Map<string, string[]>();
 	const commitMap = new Map(revisions.map((r) => [r.commit_id, r]));
+
+	for (const rev of revisions) {
+		for (const parentId of rev.parent_ids) {
+			const children = childrenMap.get(parentId) ?? [];
+			children.push(rev.commit_id);
+			childrenMap.set(parentId, children);
+		}
+	}
+
+	// Find heads (commits with no children in our set)
+	const heads = revisions.filter((r) => {
+		const children = childrenMap.get(r.commit_id) ?? [];
+		return children.length === 0 || !children.some((c) => commitMap.has(c));
+	});
+
+	// DFS from heads, prioritizing working copy's branch
 	const ordered: Revision[] = [];
 	const seen = new Set<string>();
 
-	// Build the working copy's ancestor stack first (DFS following first parent)
-	function addAncestorStack(rev: Revision) {
+	function visit(rev: Revision) {
 		if (seen.has(rev.commit_id)) return;
 		seen.add(rev.commit_id);
 		ordered.push(rev);
 
-		// Follow first parent to build the main stack
-		if (rev.parent_ids.length > 0) {
-			const firstParent = commitMap.get(rev.parent_ids[0]);
-			if (firstParent) {
-				addAncestorStack(firstParent);
+		// Visit parents (first parent first for main line)
+		for (const parentId of rev.parent_ids) {
+			const parent = commitMap.get(parentId);
+			if (parent) {
+				visit(parent);
 			}
 		}
 	}
 
-	addAncestorStack(workingCopy);
+	// Find which heads have working copy in their ancestry
+	const workingCopy = revisions.find((r) => r.is_working_copy);
+	const headsWithWorkingCopy = new Set<string>();
 
-	// Add remaining revisions in their original order
+	if (workingCopy) {
+		for (const head of heads) {
+			// Check if working copy is reachable from this head
+			const visited = new Set<string>();
+			const stack = [head.commit_id];
+			while (stack.length > 0) {
+				const id = stack.pop()!;
+				if (visited.has(id)) continue;
+				visited.add(id);
+				if (id === workingCopy.commit_id) {
+					headsWithWorkingCopy.add(head.commit_id);
+					break;
+				}
+				const rev = commitMap.get(id);
+				if (rev) {
+					stack.push(...rev.parent_ids.filter((pid) => commitMap.has(pid)));
+				}
+			}
+		}
+	}
+
+	// Sort heads: working copy itself first, then heads containing it, then others
+	const sortedHeads = [...heads].sort((a, b) => {
+		if (a.is_working_copy) return -1;
+		if (b.is_working_copy) return 1;
+		const aHasWc = headsWithWorkingCopy.has(a.commit_id);
+		const bHasWc = headsWithWorkingCopy.has(b.commit_id);
+		if (aHasWc && !bHasWc) return -1;
+		if (!aHasWc && bHasWc) return 1;
+		return 0;
+	});
+
+	for (const head of sortedHeads) {
+		visit(head);
+	}
+
+	// Add any remaining (shouldn't happen, but safety)
 	for (const rev of revisions) {
 		if (!seen.has(rev.commit_id)) {
-			seen.add(rev.commit_id);
 			ordered.push(rev);
 		}
 	}
@@ -79,8 +130,8 @@ function reorderWithWorkingCopyFirst(revisions: Revision[]): Revision[] {
 function buildGraph(revisions: Revision[]): GraphData {
 	if (revisions.length === 0) return { nodes: [], laneCount: 1, orderedRevisions: [] };
 
-	// Reorder so working copy and its stack come first
-	const orderedRevisions = reorderWithWorkingCopyFirst(revisions);
+	// Reorder: heads first (children before parents), working copy branch prioritized
+	const orderedRevisions = reorderForGraph(revisions);
 
 	const commitToRow = new Map<string, number>();
 	const commitToLane = new Map<string, number>();
@@ -117,8 +168,8 @@ function buildGraph(revisions: Revision[]): GraphData {
 
 		let lane = commitToLane.get(revision.commit_id);
 		if (lane === undefined) {
-			// Working copy and its ancestors get lane 0
-			const preferLane = revision.is_working_copy || row < 10 ? 0 : undefined;
+			// First branch gets lane 0 (working copy's branch due to our ordering)
+			const preferLane = row === 0 ? 0 : undefined;
 			lane = claimLane(revision.commit_id, preferLane);
 			commitToLane.set(revision.commit_id, lane);
 		} else {

@@ -26,9 +26,14 @@ pub fn fetch_log(repo_path: &Path, limit: usize) -> Result<Vec<Revision>> {
     let jj_repo = JjRepo::open(repo_path)?;
     let repo = jj_repo.repo_loader().load_at_head()?;
 
-    // Use visible_heads().ancestors() to get all commits reachable from visible heads
-    // This includes children of working copy if they exist
-    let revset_expression = RevsetExpression::visible_heads().ancestors();
+    // Use working copy ancestors - excludes orphaned descendants from rebases
+    let wc_id = repo
+        .view()
+        .wc_commit_ids()
+        .values()
+        .next()
+        .context("No working copy")?;
+    let revset_expression = RevsetExpression::commit(wc_id.clone()).ancestors();
 
     let revset = revset_expression
         .evaluate(repo.as_ref())
@@ -45,7 +50,6 @@ pub fn fetch_log(repo_path: &Path, limit: usize) -> Result<Vec<Revision>> {
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let wc_commit_id = repo.view().wc_commit_ids().iter().next().map(|(_, id)| id);
 
     let immutable_expression = RevsetExpression::root();
     let immutable_revset = immutable_expression.evaluate(repo.as_ref())?;
@@ -56,7 +60,7 @@ pub fn fetch_log(repo_path: &Path, limit: usize) -> Result<Vec<Revision>> {
     for commit in commits {
         let commit_id = commit.id();
         let change_id = commit.change_id();
-        let is_working_copy = wc_commit_id == Some(commit_id);
+        let is_working_copy = wc_id == commit_id;
         let is_immutable = immutable_ids.contains(commit_id);
 
         let description = commit.description().to_string();

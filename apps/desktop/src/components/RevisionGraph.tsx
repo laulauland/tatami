@@ -268,7 +268,7 @@ function RevisionRow({
 			type="button"
 			onClick={onSelect}
 			style={{ height: ROW_HEIGHT }}
-			className={`w-full text-left px-2 flex items-center transition-colors ${
+			className={`w-full text-left px-2 flex items-center transition-colors animate-in fade-in slide-in-from-left-1 duration-150 ${
 				isSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted/50"
 			} ${revision.is_immutable ? "opacity-60" : ""}`}
 		>

@@ -1,4 +1,5 @@
-import * as React from "react";
+"use client";
+
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
 
 import { cn } from "@/lib/utils";
@@ -15,14 +16,8 @@ function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
 	);
 }
 
-function TooltipTrigger({ children, ...props }: TooltipPrimitive.Trigger.Props) {
-	return (
-		<TooltipPrimitive.Trigger
-			data-slot="tooltip-trigger"
-			render={children as React.ReactElement}
-			{...props}
-		/>
-	);
+function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
+	return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />;
 }
 
 function TooltipContent({

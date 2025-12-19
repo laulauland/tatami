@@ -38,24 +38,17 @@ impl JjRepo {
 
         let mut config = StackedConfig::with_defaults();
 
-        let hostname = hostname::get()
-            .map(|h| h.to_string_lossy().to_string())
-            .unwrap_or_else(|_| "localhost".to_string());
-        let username = std::env::var("USER").unwrap_or_else(|_| "user".to_string());
-
-        let env_defaults = format!(
-            r#"
-[user]
-name = "{username}"
-email = "{username}@localhost"
-
-[operation]
-hostname = "{hostname}"
-username = "{username}"
-"#
-        );
-        let env_doc: toml_edit::DocumentMut = env_defaults.parse().unwrap();
-        config.add_layer(ConfigLayer::with_data(ConfigSource::EnvBase, env_doc));
+        // Add environment-based defaults for operation metadata (matching jj-cli behavior)
+        let mut env_layer = ConfigLayer::empty(ConfigSource::EnvBase);
+        if let Ok(hostname) = whoami::fallible::hostname() {
+            env_layer.set_value("operation.hostname", hostname).unwrap();
+        }
+        if let Ok(username) = whoami::fallible::username() {
+            env_layer.set_value("operation.username", username).unwrap();
+        } else if let Ok(username) = std::env::var("USER") {
+            env_layer.set_value("operation.username", username).unwrap();
+        }
+        config.add_layer(env_layer);
 
         if let Ok(home) = std::env::var("HOME") {
             let xdg_config = std::env::var("XDG_CONFIG_HOME")

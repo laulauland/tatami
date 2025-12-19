@@ -26,7 +26,9 @@ pub fn fetch_log(repo_path: &Path, limit: usize) -> Result<Vec<Revision>> {
     let jj_repo = JjRepo::open(repo_path)?;
     let repo = jj_repo.repo_loader().load_at_head()?;
 
-    let revset_expression = RevsetExpression::all();
+    // Use visible_heads().ancestors() to get all commits reachable from visible heads
+    // This includes children of working copy if they exist
+    let revset_expression = RevsetExpression::visible_heads().ancestors();
 
     let revset = revset_expression
         .evaluate(repo.as_ref())

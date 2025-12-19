@@ -1,0 +1,19 @@
+{
+  "name": "tatami",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "bun --filter desktop dev",
+    "build": "bun --filter desktop build",
+    "tauri": "bun --filter desktop tauri"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

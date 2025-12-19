@@ -14,6 +14,7 @@
     "tauri": "bun --filter desktop tauri"
   },
   "devDependencies": {
+    "shadcn": "^3.6.2",
     "typescript": "^5.3.3"
   }
 }

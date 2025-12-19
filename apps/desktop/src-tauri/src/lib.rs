@@ -1,5 +1,6 @@
 mod repo;
 mod storage;
+mod watcher;
 
 use repo::diff;
 use repo::jj::JjRepo;
@@ -10,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use storage::{AppLayout, Project, Storage, get_storage};
 use tauri::Manager;
+use watcher::{WatcherManager, get_watcher_manager};
 
 #[derive(Serialize)]
 pub struct ChangedFile {
@@ -152,6 +154,18 @@ async fn update_layout(app: tauri::AppHandle, layout: AppLayout) -> Result<(), S
         .map_err(|e| format!("Failed to update layout: {}", e))
 }
 
+#[tauri::command]
+fn watch_repository(app: tauri::AppHandle, repo_path: String) -> Result<(), String> {
+    let watcher_manager = get_watcher_manager(&app);
+    watcher_manager.watch(&app, PathBuf::from(repo_path))
+}
+
+#[tauri::command]
+fn unwatch_repository(app: tauri::AppHandle, repo_path: String) -> Result<(), String> {
+    let watcher_manager = get_watcher_manager(&app);
+    watcher_manager.unwatch(&PathBuf::from(repo_path))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -171,6 +185,8 @@ pub fn run() {
                 handle.manage(Arc::new(storage));
             });
 
+            app.handle().manage(WatcherManager::new());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -183,6 +199,8 @@ pub fn run() {
             find_project_by_path,
             get_layout,
             update_layout,
+            watch_repository,
+            unwatch_repository,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

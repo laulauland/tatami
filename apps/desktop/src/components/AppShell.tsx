@@ -1,9 +1,10 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { listen } from "@tauri-apps/api/event";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Effect } from "effect";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { activeProjectIdAtom, selectedChangeIdAtom } from "@/atoms";
 import { AppSidebar } from "@/components/AppSidebar";
 import { RevisionGraph } from "@/components/RevisionGraph";
@@ -17,7 +18,9 @@ import {
 	getRevisions,
 	type Project,
 	type Revision,
+	unwatchRepository,
 	upsertProject,
+	watchRepository,
 } from "@/tauri-commands";
 
 const openDirectoryDialogEffect = Effect.gen(function* () {
@@ -128,6 +131,39 @@ export function AppShell() {
 		},
 		[setSelectedChangeId],
 	);
+
+	useEffect(() => {
+		if (!activeProject) return;
+
+		let unlisten: (() => void) | undefined;
+
+		const setupWatcher = async () => {
+			try {
+				await watchRepository(activeProject.path);
+
+				unlisten = await listen<string>("repo-changed", (event) => {
+					if (event.payload === activeProject.path) {
+						queryClient.invalidateQueries({ queryKey: ["revisions", activeProject.path] });
+					}
+				});
+			} catch (error) {
+				console.error("Failed to set up repository watcher:", error);
+			}
+		};
+
+		setupWatcher();
+
+		return () => {
+			if (unlisten) {
+				unlisten();
+			}
+			if (activeProject) {
+				unwatchRepository(activeProject.path).catch((error) => {
+					console.error("Failed to unwatch repository:", error);
+				});
+			}
+		};
+	}, [activeProject, queryClient]);
 
 	const currentBranch = revisions.find((r) => r.is_working_copy)?.bookmarks[0] ?? null;
 

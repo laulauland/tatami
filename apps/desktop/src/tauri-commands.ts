@@ -81,3 +81,11 @@ export async function upsertProject(project: Project): Promise<void> {
 export async function findProjectByPath(path: string): Promise<Project | null> {
 	return invoke<Project | null>("find_project_by_path", { path });
 }
+
+export async function watchRepository(repoPath: string): Promise<void> {
+	return invoke("watch_repository", { repoPath });
+}
+
+export async function unwatchRepository(repoPath: string): Promise<void> {
+	return invoke("unwatch_repository", { repoPath });
+}

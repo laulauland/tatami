@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export interface Revision {
 	commit_id: string;
 	change_id: string;
+	change_id_short: string;
 	parent_ids: string[];
 	description: string;
 	author: string;

@@ -275,7 +275,7 @@ function RevisionRow({
 			<div className="flex-1 min-w-0">
 				<div className="flex items-center gap-2 flex-wrap">
 					<code className="text-xs font-mono text-muted-foreground">
-						{revision.change_id.slice(0, 8)}
+						{revision.change_id_short}
 					</code>
 					{revision.bookmarks.length > 0 &&
 						revision.bookmarks.map((bookmark) => (

@@ -1,4 +1,5 @@
 mod repo;
+mod storage;
 
 use repo::diff;
 use repo::jj::JjRepo;
@@ -6,6 +7,9 @@ use repo::log::Revision;
 use repo::status::WorkingCopyStatus;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use storage::{AppLayout, Project, Storage, get_storage};
+use tauri::Manager;
 
 #[derive(Serialize)]
 pub struct ChangedFile {
@@ -104,20 +108,81 @@ async fn get_file_diff(
 }
 
 #[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! Welcome to Tatami.", name)
+async fn get_projects(app: tauri::AppHandle) -> Result<Vec<Project>, String> {
+    let storage = get_storage(&app);
+    storage
+        .get_projects()
+        .await
+        .map_err(|e| format!("Failed to get projects: {}", e))
+}
+
+#[tauri::command]
+async fn upsert_project(app: tauri::AppHandle, project: Project) -> Result<(), String> {
+    let storage = get_storage(&app);
+    storage
+        .upsert_project(&project)
+        .await
+        .map_err(|e| format!("Failed to upsert project: {}", e))
+}
+
+#[tauri::command]
+async fn find_project_by_path(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<Option<Project>, String> {
+    let storage = get_storage(&app);
+    storage
+        .find_project_by_path(&path)
+        .await
+        .map_err(|e| format!("Failed to find project: {}", e))
+}
+
+#[tauri::command]
+async fn get_layout(app: tauri::AppHandle) -> AppLayout {
+    let storage = get_storage(&app);
+    storage.get_layout().await
+}
+
+#[tauri::command]
+async fn update_layout(app: tauri::AppHandle, layout: AppLayout) -> Result<(), String> {
+    let storage = get_storage(&app);
+    storage
+        .update_layout(layout)
+        .await
+        .map_err(|e| format!("Failed to update layout: {}", e))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("Failed to get app data dir");
+
+            let handle = app.handle().clone();
+            tauri::async_runtime::block_on(async move {
+                let storage = Storage::new(app_data_dir)
+                    .await
+                    .expect("Failed to initialize storage");
+                handle.manage(Arc::new(storage));
+            });
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
-            greet,
             find_repository,
             get_revisions,
             get_status,
-            get_file_diff
+            get_file_diff,
+            get_projects,
+            upsert_project,
+            find_project_by_path,
+            get_layout,
+            update_layout,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

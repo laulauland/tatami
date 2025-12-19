@@ -1,5 +1,6 @@
-import { Separator } from "@/components/ui/separator";
 import { Circle } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 interface StatusBarProps {
 	branch: string | null;
@@ -14,12 +15,13 @@ export function StatusBar({ branch, lastRefresh, isConnected }: StatusBarProps) 
 	};
 
 	return (
-		<div className="flex items-center h-8 px-4 border-t border-border bg-card text-xs text-muted-foreground">
-			<div className="flex items-center gap-3">
+		<div className="flex items-center h-8 px-2 border-t border-border bg-card text-xs text-muted-foreground">
+			<SidebarTrigger />
+			<div className="flex items-center gap-3 ml-auto">
 				{branch && (
 					<>
 						<div className="flex items-center gap-1.5">
-							<span className="font-medium">Branch:</span>
+							<span className="font-medium">Closest bookmark:</span>
 							<span>{branch}</span>
 						</div>
 						<Separator orientation="vertical" className="h-4" />

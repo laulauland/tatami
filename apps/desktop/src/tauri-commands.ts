@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 export interface Revision {
 	commit_id: string;
 	change_id: string;
+	parent_ids: string[];
 	description: string;
 	author: string;
 	timestamp: string;
@@ -49,12 +50,6 @@ export interface Project {
 	last_opened_at: number;
 }
 
-export interface AppLayout {
-	active_project_id: string | null;
-	selected_change_id: string | null;
-	sidebar_width: number;
-}
-
 export async function findRepository(startPath: string): Promise<string | null> {
 	return invoke<string | null>("find_repository", { startPath });
 }
@@ -85,12 +80,4 @@ export async function upsertProject(project: Project): Promise<void> {
 
 export async function findProjectByPath(path: string): Promise<Project | null> {
 	return invoke<Project | null>("find_project_by_path", { path });
-}
-
-export async function getLayout(): Promise<AppLayout> {
-	return invoke<AppLayout>("get_layout");
-}
-
-export async function updateLayout(layout: Partial<AppLayout>): Promise<void> {
-	return invoke("update_layout", { layout });
 }

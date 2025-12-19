@@ -1,23 +1,23 @@
+import { useAtom } from "@effect-atom/atom-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Effect } from "effect";
 import { useCallback, useMemo } from "react";
-import { DetailPanel } from "@/components/DetailPanel";
-import { Sidebar } from "@/components/Sidebar";
+import { activeProjectIdAtom, selectedChangeIdAtom } from "@/atoms";
+import { AppSidebar } from "@/components/AppSidebar";
+import { RevisionGraph } from "@/components/RevisionGraph";
 import { StatusBar } from "@/components/StatusBar";
 import { Toolbar } from "@/components/Toolbar";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import {
 	findProjectByPath,
 	findRepository,
-	getLayout,
 	getProjects,
 	getRevisions,
-	updateLayout,
-	upsertProject,
 	type Project,
 	type Revision,
+	upsertProject,
 } from "@/tauri-commands";
 
 const openDirectoryDialogEffect = Effect.gen(function* () {
@@ -46,11 +46,8 @@ const findRepositoryEffect = (startPath: string) =>
 
 export function AppShell() {
 	const queryClient = useQueryClient();
-
-	const { data: layout } = useQuery({
-		queryKey: ["layout"],
-		queryFn: getLayout,
-	});
+	const [activeProjectId, setActiveProjectId] = useAtom(activeProjectIdAtom);
+	const [selectedChangeId, setSelectedChangeId] = useAtom(selectedChangeIdAtom);
 
 	const { data: projects = [] } = useQuery({
 		queryKey: ["projects"],
@@ -58,8 +55,8 @@ export function AppShell() {
 	});
 
 	const activeProject = useMemo(
-		() => projects.find((p) => p.id === layout?.active_project_id) ?? null,
-		[projects, layout?.active_project_id],
+		() => projects.find((p) => p.id === activeProjectId) ?? null,
+		[projects, activeProjectId],
 	);
 
 	const { data: revisions = [], isLoading } = useQuery({
@@ -70,18 +67,12 @@ export function AppShell() {
 
 	const selectedRevision = useMemo(() => {
 		if (revisions.length === 0) return null;
-		if (layout?.selected_change_id) {
-			const found = revisions.find((r) => r.change_id === layout.selected_change_id);
+		if (selectedChangeId) {
+			const found = revisions.find((r) => r.change_id === selectedChangeId);
 			if (found) return found;
 		}
 		return revisions.find((r) => r.is_working_copy) || revisions[0];
-	}, [revisions, layout?.selected_change_id]);
-
-	const handleRefresh = useCallback(() => {
-		if (activeProject) {
-			queryClient.invalidateQueries({ queryKey: ["revisions", activeProject.path] });
-		}
-	}, [activeProject, queryClient]);
+	}, [revisions, selectedChangeId]);
 
 	const handleOpenRepo = useCallback(() => {
 		const program = Effect.gen(function* () {
@@ -111,65 +102,56 @@ export function AppShell() {
 				catch: (error) => new Error(`Failed to save project: ${error}`),
 			});
 
-			yield* Effect.tryPromise({
-				try: () => updateLayout({ active_project_id: projectId, selected_change_id: null }),
-				catch: (error) => new Error(`Failed to update layout: ${error}`),
-			});
-
 			yield* Effect.sync(() => {
 				queryClient.invalidateQueries({ queryKey: ["projects"] });
-				queryClient.invalidateQueries({ queryKey: ["layout"] });
+				setActiveProjectId(projectId);
+				setSelectedChangeId(null);
 			});
-		}).pipe(Effect.catchAll(() => Effect.void));
-
+		}).pipe(
+			Effect.tapError((error) => Effect.logError("handleOpenRepo failed", error)),
+			Effect.catchAll(() => Effect.void),
+		);
 		Effect.runPromise(program);
-	}, [queryClient]);
+	}, [queryClient, setActiveProjectId, setSelectedChangeId]);
+
+	const handleSelectProject = useCallback(
+		(project: Project) => {
+			setActiveProjectId(project.id);
+			setSelectedChangeId(null);
+		},
+		[setActiveProjectId, setSelectedChangeId],
+	);
 
 	const handleSelectRevision = useCallback(
 		(revision: Revision) => {
-			Effect.runPromise(
-				Effect.tryPromise({
-					try: async () => {
-						await updateLayout({ selected_change_id: revision.change_id });
-						queryClient.invalidateQueries({ queryKey: ["layout"] });
-					},
-					catch: () => new Error("Failed to update layout"),
-				}).pipe(Effect.catchAll(() => Effect.void)),
-			);
+			setSelectedChangeId(revision.change_id);
 		},
-		[queryClient],
+		[setSelectedChangeId],
 	);
 
 	const currentBranch = revisions.find((r) => r.is_working_copy)?.bookmarks[0] ?? null;
 
 	return (
-		<div className="flex flex-col h-screen w-screen overflow-hidden">
-			<Toolbar
-				repoPath={activeProject?.path ?? null}
-				isLoading={isLoading}
-				onRefresh={handleRefresh}
+		<SidebarProvider>
+			<AppSidebar
+				projects={projects}
+				activeProject={activeProject}
+				onSelectProject={handleSelectProject}
 				onOpenRepo={handleOpenRepo}
 				onOpenSettings={() => {}}
 			/>
-
-			<ResizablePanelGroup orientation="horizontal" className="flex-1">
-				<ResizablePanel id="sidebar" defaultSize="25%">
-					<Sidebar
+			<SidebarInset className="flex flex-col h-screen overflow-hidden">
+				<Toolbar repoPath={activeProject?.path ?? null} />
+				<div className="flex-1 min-h-0">
+					<RevisionGraph
 						revisions={revisions}
 						selectedRevision={selectedRevision}
 						onSelectRevision={handleSelectRevision}
 						isLoading={isLoading}
 					/>
-				</ResizablePanel>
-
-				<ResizableHandle withHandle />
-
-				<ResizablePanel id="detail" defaultSize="75%">
-					<DetailPanel />
-				</ResizablePanel>
-			</ResizablePanelGroup>
-
-			<StatusBar branch={currentBranch} lastRefresh={null} isConnected={!!activeProject} />
-		</div>
+				</div>
+				<StatusBar branch={currentBranch} lastRefresh={null} isConnected={!!activeProject} />
+			</SidebarInset>
+		</SidebarProvider>
 	);
 }

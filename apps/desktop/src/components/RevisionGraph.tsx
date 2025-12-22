@@ -353,7 +353,7 @@ export function RevisionGraph({
 	}
 
 	return (
-		<ScrollArea className="h-full bg-background">
+		<ScrollArea className="h-full bg-background" tabIndex={0}>
 			<div className="flex">
 				<GraphColumn nodes={nodes} laneCount={laneCount} />
 				<div className="flex-1 min-w-0">

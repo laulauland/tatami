@@ -1,6 +1,5 @@
 import { Circle } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 
 interface StatusBarProps {
 	branch: string | null;
@@ -10,7 +9,6 @@ interface StatusBarProps {
 export function StatusBar({ branch, isConnected }: StatusBarProps) {
 	return (
 		<div className="flex items-center h-8 px-2 border-t border-border bg-card text-xs text-muted-foreground">
-			<SidebarTrigger />
 			<div className="flex items-center gap-3 ml-auto">
 				{branch && (
 					<>

@@ -7,6 +7,19 @@ interface UseKeyboardNavigationOptions {
 	onNavigate: (changeId: string) => void;
 }
 
+interface UseKeyboardShortcutOptions {
+	key: string;
+	modifiers?: {
+		meta?: boolean;
+		ctrl?: boolean;
+		alt?: boolean;
+		shift?: boolean;
+	};
+	onPress: () => void;
+	enabled?: boolean;
+	ignoreInputFocus?: boolean;
+}
+
 const GG_TIMEOUT_MS = 300;
 
 export function useKeyboardNavigation({
@@ -120,4 +133,57 @@ export function useKeyboardNavigation({
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [orderedRevisions, selectedChangeId, onNavigate]);
+}
+
+export function useKeyboardShortcut({
+	key,
+	modifiers = {},
+	onPress,
+	enabled = true,
+	ignoreInputFocus = false,
+}: UseKeyboardShortcutOptions) {
+	useEffect(() => {
+		if (!enabled) return;
+
+		function handleKeyDown(event: KeyboardEvent) {
+			// Don't handle if input/textarea is focused (unless explicitly ignored)
+			if (!ignoreInputFocus) {
+				const activeElement = document.activeElement;
+				if (activeElement?.tagName === "INPUT" || activeElement?.tagName === "TEXTAREA") {
+					return;
+				}
+			}
+
+			// Check if the key matches
+			if (event.key !== key) return;
+
+			// Check modifiers
+			// For meta/ctrl: if both are true, accept either; if one is true, require that one
+			let metaCtrlMatch = true;
+			if (modifiers.meta !== undefined || modifiers.ctrl !== undefined) {
+				if (modifiers.meta === true && modifiers.ctrl === true) {
+					// Either meta OR ctrl (cross-platform support)
+					metaCtrlMatch = event.metaKey || event.ctrlKey;
+				} else if (modifiers.meta === true) {
+					metaCtrlMatch = event.metaKey;
+				} else if (modifiers.ctrl === true) {
+					metaCtrlMatch = event.ctrlKey;
+				} else {
+					// Both false - require neither
+					metaCtrlMatch = !event.metaKey && !event.ctrlKey;
+				}
+			}
+
+			const altMatch = modifiers.alt === undefined || event.altKey === modifiers.alt;
+			const shiftMatch = modifiers.shift === undefined || event.shiftKey === modifiers.shift;
+
+			if (metaCtrlMatch && altMatch && shiftMatch) {
+				event.preventDefault();
+				onPress();
+			}
+		}
+
+		document.addEventListener("keydown", handleKeyDown);
+		return () => document.removeEventListener("keydown", handleKeyDown);
+	}, [key, modifiers.meta, modifiers.ctrl, modifiers.alt, modifiers.shift, onPress, enabled, ignoreInputFocus]);
 }

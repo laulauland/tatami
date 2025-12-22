@@ -4,13 +4,13 @@ import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Effect } from "effect";
 import { useCallback, useMemo } from "react";
-import { activeProjectIdAtom, focusedPanelAtom, selectedChangeIdAtom } from "@/atoms";
-import { AppSidebar } from "@/components/AppSidebar";
-import { RevisionGraph } from "@/components/RevisionGraph";
+import { activeProjectIdAtom, selectedChangeIdAtom } from "@/atoms";
+import { CommandPalette } from "@/components/CommandPalette";
+import { reorderForGraph, RevisionGraph } from "@/components/RevisionGraph";
 import { StatusBar } from "@/components/StatusBar";
 import { Toolbar } from "@/components/Toolbar";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { emptyRevisionsCollection, getRevisionsCollection, projectsCollection } from "@/db";
+import { useKeyboardNavigation } from "@/hooks/useKeyboard";
 import {
 	findProjectByPath,
 	findRepository,
@@ -46,7 +46,6 @@ const findRepositoryEffect = (startPath: string) =>
 export function AppShell() {
 	const [activeProjectId, setActiveProjectId] = useAtom(activeProjectIdAtom);
 	const [selectedChangeId, setSelectedChangeId] = useAtom(selectedChangeIdAtom);
-	const [, setFocusedPanel] = useAtom(focusedPanelAtom);
 
 	const { data: projects = [] } = useLiveQuery(projectsCollection);
 
@@ -61,6 +60,8 @@ export function AppShell() {
 	);
 
 	const { data: revisions = [], isLoading = false } = useLiveQuery(revisionsCollection);
+
+	const orderedRevisions = useMemo(() => reorderForGraph(revisions), [revisions]);
 
 	const selectedRevision = useMemo(() => {
 		if (revisions.length === 0) return null;
@@ -126,6 +127,19 @@ export function AppShell() {
 		[setSelectedChangeId],
 	);
 
+	const handleNavigateToChangeId = useCallback(
+		(changeId: string) => {
+			setSelectedChangeId(changeId);
+		},
+		[setSelectedChangeId],
+	);
+
+	useKeyboardNavigation({
+		orderedRevisions,
+		selectedChangeId,
+		onNavigate: handleNavigateToChangeId,
+	});
+
 	const closestBookmark = useMemo(() => {
 		const workingCopy = revisions.find((r) => r.is_working_copy);
 		if (!workingCopy) return null;
@@ -162,31 +176,24 @@ export function AppShell() {
 	}, [revisions]);
 
 	return (
-		<SidebarProvider>
-			<AppSidebar
+		<>
+			<CommandPalette
 				projects={projects}
-				activeProject={activeProject}
 				onSelectProject={handleSelectProject}
 				onOpenRepo={handleOpenRepo}
-				onOpenSettings={() => {}}
 			/>
-			<SidebarInset className="flex flex-col h-screen overflow-hidden">
+			<div className="flex flex-col h-screen overflow-hidden">
 				<Toolbar repoPath={activeProject?.path ?? null} />
-				<div
-					className="flex-1 min-h-0"
-					role="region"
-					aria-label="Revision list"
-					onMouseDown={() => setFocusedPanel("revisions")}
-				>
+				<section className="flex-1 min-h-0" aria-label="Revision list">
 					<RevisionGraph
 						revisions={revisions}
 						selectedRevision={selectedRevision}
 						onSelectRevision={handleSelectRevision}
 						isLoading={isLoading}
 					/>
-				</div>
+				</section>
 				<StatusBar branch={closestBookmark} isConnected={!!activeProject} />
-			</SidebarInset>
-		</SidebarProvider>
+			</div>
+		</>
 	);
 }

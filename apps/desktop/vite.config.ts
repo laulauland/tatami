@@ -13,6 +13,7 @@ const tauriMocks = isTauri
 			"@tauri-apps/api/path": path.resolve(__dirname, "./src/mocks/tauri-path.ts"),
 			"@tauri-apps/api/event": path.resolve(__dirname, "./src/mocks/tauri-event.ts"),
 			"@tauri-apps/plugin-dialog": path.resolve(__dirname, "./src/mocks/tauri-dialog.ts"),
+			"@tauri-apps/plugin-deep-link": path.resolve(__dirname, "./src/mocks/tauri-deep-link.ts"),
 		};
 
 const reactCompilerConfig = {};

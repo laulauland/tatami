@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Revision } from "@/tauri-commands";
@@ -38,7 +38,7 @@ interface GraphData {
 	orderedRevisions: Revision[];
 }
 
-function reorderForGraph(revisions: Revision[]): Revision[] {
+export function reorderForGraph(revisions: Revision[]): Revision[] {
 	if (revisions.length === 0) return [];
 
 	// Build parent->children map
@@ -295,23 +295,24 @@ function GraphColumn({ nodes, laneCount }: { nodes: GraphNode[]; laneCount: numb
 	);
 }
 
-function RevisionRow({
+const RevisionRow = memo(function RevisionRow({
 	revision,
 	isSelected,
 	onSelect,
 }: {
 	revision: Revision;
 	isSelected: boolean;
-	onSelect: () => void;
+	onSelect: (changeId: string) => void;
 }) {
 	const description = revision.description.split("\n")[0] || "(no description)";
 
 	return (
 		<button
 			type="button"
-			onClick={onSelect}
+			onClick={() => onSelect(revision.change_id)}
+			data-change-id={revision.change_id}
 			style={{ height: ROW_HEIGHT }}
-			className={`w-full text-left px-2 flex items-center transition-colors animate-in fade-in slide-in-from-left-1 duration-150 ${
+			className={`w-full text-left px-2 flex items-center transition-colors animate-in fade-in slide-in-from-left-1 duration-150 focus:outline-none ${
 				isSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted/50"
 			} ${revision.is_immutable ? "opacity-60" : ""}`}
 		>
@@ -334,7 +335,7 @@ function RevisionRow({
 			</div>
 		</button>
 	);
-}
+});
 
 export function RevisionGraph({
 	revisions,
@@ -343,6 +344,19 @@ export function RevisionGraph({
 	isLoading,
 }: RevisionGraphProps) {
 	const { nodes, laneCount, orderedRevisions } = useMemo(() => buildGraph(revisions), [revisions]);
+
+	const revisionMap = useMemo(
+		() => new Map(revisions.map((r) => [r.change_id, r])),
+		[revisions],
+	);
+
+	const handleSelect = useCallback(
+		(changeId: string) => {
+			const revision = revisionMap.get(changeId);
+			if (revision) onSelectRevision(revision);
+		},
+		[revisionMap, onSelectRevision],
+	);
 
 	if (revisions.length === 0) {
 		return (
@@ -353,7 +367,7 @@ export function RevisionGraph({
 	}
 
 	return (
-		<ScrollArea className="h-full bg-background" tabIndex={0}>
+		<ScrollArea className="h-full bg-background">
 			<div className="flex">
 				<GraphColumn nodes={nodes} laneCount={laneCount} />
 				<div className="flex-1 min-w-0">
@@ -362,7 +376,7 @@ export function RevisionGraph({
 							key={revision.change_id}
 							revision={revision}
 							isSelected={selectedRevision?.change_id === revision.change_id}
-							onSelect={() => onSelectRevision(revision)}
+							onSelect={handleSelect}
 						/>
 					))}
 				</div>

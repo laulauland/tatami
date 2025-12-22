@@ -9,6 +9,7 @@ interface RevisionGraphProps {
 	selectedRevision: Revision | null;
 	onSelectRevision: (revision: Revision) => void;
 	isLoading: boolean;
+	flash?: { changeId: string; key: number } | null;
 }
 
 const ROW_HEIGHT = 56;
@@ -300,10 +301,12 @@ const RevisionRow = memo(function RevisionRow({
 	revision,
 	isSelected,
 	onSelect,
+	isFlashing,
 }: {
 	revision: Revision;
 	isSelected: boolean;
 	onSelect: (changeId: string) => void;
+	isFlashing: boolean;
 }) {
 	const description = revision.description.split("\n")[0] || "(no description)";
 
@@ -319,7 +322,11 @@ const RevisionRow = memo(function RevisionRow({
 		>
 			<div className="flex-1 min-w-0">
 				<div className="flex items-center gap-2 flex-wrap">
-					<code className="text-xs font-mono text-muted-foreground">
+					<code
+						className={`text-xs font-mono text-muted-foreground rounded px-0.5 ${
+							isFlashing ? "bg-green-500/50 animate-pulse" : ""
+						}`}
+					>
 						{revision.change_id_short}
 					</code>
 					{revision.bookmarks.length > 0 &&
@@ -343,13 +350,11 @@ export function RevisionGraph({
 	selectedRevision,
 	onSelectRevision,
 	isLoading,
+	flash,
 }: RevisionGraphProps) {
 	const { nodes, laneCount, orderedRevisions } = useMemo(() => buildGraph(revisions), [revisions]);
 
-	const revisionMap = useMemo(
-		() => new Map(revisions.map((r) => [r.change_id, r])),
-		[revisions],
-	);
+	const revisionMap = useMemo(() => new Map(revisions.map((r) => [r.change_id, r])), [revisions]);
 
 	const handleSelect = useCallback(
 		(changeId: string) => {
@@ -372,14 +377,18 @@ export function RevisionGraph({
 			<div className="flex">
 				<GraphColumn nodes={nodes} laneCount={laneCount} />
 				<div className="flex-1 min-w-0">
-					{orderedRevisions.map((revision) => (
-						<RevisionRow
-							key={revision.change_id}
-							revision={revision}
-							isSelected={selectedRevision?.change_id === revision.change_id}
-							onSelect={handleSelect}
-						/>
-					))}
+					{orderedRevisions.map((revision) => {
+						const isFlashing = flash?.changeId === revision.change_id;
+						return (
+							<RevisionRow
+								key={isFlashing ? `${revision.change_id}-${flash.key}` : revision.change_id}
+								revision={revision}
+								isSelected={selectedRevision?.change_id === revision.change_id}
+								onSelect={handleSelect}
+								isFlashing={isFlashing}
+							/>
+						);
+					})}
 				</div>
 			</div>
 		</ScrollArea>

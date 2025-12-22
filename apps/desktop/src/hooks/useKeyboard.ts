@@ -20,38 +20,60 @@ interface UseKeyboardShortcutOptions {
 	ignoreInputFocus?: boolean;
 }
 
-const GG_TIMEOUT_MS = 300;
+interface UseKeySequenceOptions {
+	sequence: string;
+	onTrigger: () => void;
+	enabled?: boolean;
+	timeoutMs?: number;
+}
+
+const DEFAULT_SEQUENCE_TIMEOUT_MS = 500;
 
 export function useKeyboardNavigation({
 	orderedRevisions,
 	selectedChangeId,
 	onNavigate,
 }: UseKeyboardNavigationOptions) {
-	const lastKeyPressRef = useRef<{ key: string; timestamp: number } | null>(null);
+	const navigateToChangeId = (targetChangeId: string | null) => {
+		if (!targetChangeId) return;
+		onNavigate(targetChangeId);
+		requestAnimationFrame(() => {
+			const element = document.querySelector<HTMLElement>(`[data-change-id="${targetChangeId}"]`);
+			if (element) {
+				element.focus({ preventScroll: true });
+				element.scrollIntoView({ block: "nearest", behavior: "smooth" });
+			}
+		});
+	};
+
+	const getCurrentContext = () => {
+		let currentIndex = orderedRevisions.findIndex((r) => r.change_id === selectedChangeId);
+		if (currentIndex < 0) {
+			currentIndex = orderedRevisions.findIndex((r) => r.is_working_copy);
+			if (currentIndex < 0) currentIndex = 0;
+		}
+		return { currentIndex, currentRevision: orderedRevisions[currentIndex] ?? null };
+	};
+
+	useKeySequence({
+		sequence: "gg",
+		onTrigger: () => navigateToChangeId(orderedRevisions[0]?.change_id || null),
+		enabled: orderedRevisions.length > 0,
+	});
 
 	useEffect(() => {
 		function handleKeyDown(event: KeyboardEvent) {
-			// Don't handle if input/textarea is focused
 			const activeElement = document.activeElement;
 			if (activeElement?.tagName === "INPUT" || activeElement?.tagName === "TEXTAREA") {
 				return;
 			}
 
-			// Find current revision and index in display order
-			// If no selection, default to working copy or first revision
-			let currentIndex = orderedRevisions.findIndex((r) => r.change_id === selectedChangeId);
-			if (currentIndex < 0) {
-				currentIndex = orderedRevisions.findIndex((r) => r.is_working_copy);
-				if (currentIndex < 0) currentIndex = 0;
-			}
-			const currentRevision = orderedRevisions[currentIndex] ?? null;
-
+			const { currentIndex, currentRevision } = getCurrentContext();
 			let targetChangeId: string | null = null;
 
 			switch (event.key) {
 				case "j":
 				case "ArrowDown":
-					// Move down in display order
 					if (currentIndex >= 0 && currentIndex < orderedRevisions.length - 1) {
 						targetChangeId = orderedRevisions[currentIndex + 1].change_id;
 					}
@@ -60,7 +82,6 @@ export function useKeyboardNavigation({
 
 				case "k":
 				case "ArrowUp":
-					// Move up in display order
 					if (currentIndex > 0) {
 						targetChangeId = orderedRevisions[currentIndex - 1].change_id;
 					}
@@ -68,7 +89,6 @@ export function useKeyboardNavigation({
 					break;
 
 				case "J":
-					// Jump to parent
 					if (currentRevision && currentRevision.parent_ids.length > 0) {
 						const parentId = currentRevision.parent_ids[0];
 						const parentRevision = orderedRevisions.find((r) => r.commit_id === parentId);
@@ -78,7 +98,6 @@ export function useKeyboardNavigation({
 					break;
 
 				case "K":
-					// Jump to child (find revision where current is in parent_ids)
 					if (currentRevision) {
 						const childRevision = orderedRevisions.find((r) =>
 							r.parent_ids.includes(currentRevision.commit_id),
@@ -89,54 +108,22 @@ export function useKeyboardNavigation({
 					break;
 
 				case "@":
-					// Jump to working copy
 					targetChangeId = orderedRevisions.find((r) => r.is_working_copy)?.change_id || null;
 					event.preventDefault();
 					break;
 
-				case "g": {
-					// Check for gg (double g within timeout)
-					const now = Date.now();
-					const lastPress = lastKeyPressRef.current;
-
-					if (lastPress && lastPress.key === "g" && now - lastPress.timestamp < GG_TIMEOUT_MS) {
-						// Jump to first revision
-						targetChangeId = orderedRevisions[0]?.change_id || null;
-						lastKeyPressRef.current = null;
-						event.preventDefault();
-					} else {
-						// Record first g press
-						lastKeyPressRef.current = { key: "g", timestamp: now };
-					}
-					break;
-				}
-
 				case "G":
-					// Jump to last revision
 					targetChangeId = orderedRevisions[orderedRevisions.length - 1]?.change_id || null;
 					event.preventDefault();
 					break;
 
 				case "Escape":
-					// Deselect current revision
 					onNavigate("");
 					event.preventDefault();
 					break;
 			}
 
-			// Navigate to target and focus element
-			if (targetChangeId) {
-				onNavigate(targetChangeId);
-
-				// Focus the element (triggers :focus-visible for keyboard navigation)
-				requestAnimationFrame(() => {
-					const element = document.querySelector<HTMLElement>(`[data-change-id="${targetChangeId}"]`);
-					if (element) {
-						element.focus({ preventScroll: true });
-						element.scrollIntoView({ block: "nearest", behavior: "smooth" });
-					}
-				});
-			}
+			navigateToChangeId(targetChangeId);
 		}
 
 		window.addEventListener("keydown", handleKeyDown);
@@ -194,5 +181,64 @@ export function useKeyboardShortcut({
 
 		document.addEventListener("keydown", handleKeyDown);
 		return () => document.removeEventListener("keydown", handleKeyDown);
-	}, [key, modifiers.meta, modifiers.ctrl, modifiers.alt, modifiers.shift, onPress, enabled, ignoreInputFocus]);
+	}, [
+		key,
+		modifiers.meta,
+		modifiers.ctrl,
+		modifiers.alt,
+		modifiers.shift,
+		onPress,
+		enabled,
+		ignoreInputFocus,
+	]);
+}
+
+const MODIFIER_KEYS = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock"]);
+
+export function useKeySequence({
+	sequence,
+	onTrigger,
+	enabled = true,
+	timeoutMs = DEFAULT_SEQUENCE_TIMEOUT_MS,
+}: UseKeySequenceOptions) {
+	const bufferRef = useRef<{ keys: string; timestamp: number }>({ keys: "", timestamp: 0 });
+
+	useEffect(() => {
+		if (!enabled || sequence.length === 0) return;
+
+		function handleKeyDown(event: KeyboardEvent) {
+			if (MODIFIER_KEYS.has(event.key)) return;
+
+			const activeElement = document.activeElement;
+			if (activeElement?.tagName === "INPUT" || activeElement?.tagName === "TEXTAREA") {
+				return;
+			}
+
+			const now = Date.now();
+			const buffer = bufferRef.current;
+
+			// Reset buffer if timeout elapsed
+			if (now - buffer.timestamp > timeoutMs) {
+				buffer.keys = "";
+			}
+
+			buffer.keys += event.key;
+			buffer.timestamp = now;
+
+			// Check if buffer ends with our sequence
+			if (buffer.keys.endsWith(sequence)) {
+				onTrigger();
+				buffer.keys = "";
+				event.preventDefault();
+			}
+
+			// Trim buffer to max sequence length to avoid memory growth
+			if (buffer.keys.length > sequence.length) {
+				buffer.keys = buffer.keys.slice(-sequence.length);
+			}
+		}
+
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [sequence, onTrigger, enabled, timeoutMs]);
 }

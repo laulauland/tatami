@@ -1,18 +1,16 @@
-import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Effect } from "effect";
-import { useCallback, useMemo } from "react";
-import { activeProjectIdAtom, selectedChangeIdAtom } from "@/atoms";
+import { useCallback, useMemo, useState } from "react";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
 import { reorderForGraph, RevisionGraph } from "@/components/RevisionGraph";
 import { StatusBar } from "@/components/StatusBar";
 import { Toolbar } from "@/components/Toolbar";
 import { emptyRevisionsCollection, getRevisionsCollection, projectsCollection } from "@/db";
-import { useKeyboardNavigation, useKeyboardShortcut } from "@/hooks/useKeyboard";
+import { useKeyboardNavigation, useKeyboardShortcut, useKeySequence } from "@/hooks/useKeyboard";
 import {
 	findProjectByPath,
 	findRepository,
@@ -47,8 +45,9 @@ const findRepositoryEffect = (startPath: string) =>
 
 export function AppShell() {
 	const navigate = useNavigate();
-	const [activeProjectId, setActiveProjectId] = useAtom(activeProjectIdAtom);
-	const [selectedChangeId, setSelectedChangeId] = useAtom(selectedChangeIdAtom);
+	const { projectId } = useParams({ strict: false });
+	const { rev } = useSearch({ strict: false });
+	const [flash, setFlash] = useState<{ changeId: string; key: number } | null>(null);
 
 	useKeyboardShortcut({
 		key: ",",
@@ -59,8 +58,8 @@ export function AppShell() {
 	const { data: projects = [] } = useLiveQuery(projectsCollection);
 
 	const activeProject = useMemo(
-		() => projects.find((p) => p.id === activeProjectId) ?? null,
-		[projects, activeProjectId],
+		() => projects.find((p) => p.id === projectId) ?? null,
+		[projects, projectId],
 	);
 
 	const revisionsCollection = useMemo(
@@ -74,12 +73,12 @@ export function AppShell() {
 
 	const selectedRevision = useMemo(() => {
 		if (revisions.length === 0) return null;
-		if (selectedChangeId) {
-			const found = revisions.find((r) => r.change_id === selectedChangeId);
+		if (rev) {
+			const found = revisions.find((r) => r.change_id === rev);
 			if (found) return found;
 		}
 		return revisions.find((r) => r.is_working_copy) || revisions[0];
-	}, [revisions, selectedChangeId]);
+	}, [revisions, rev]);
 
 	const handleOpenRepo = useCallback(() => {
 		const program = Effect.gen(function* () {
@@ -111,43 +110,72 @@ export function AppShell() {
 
 			yield* Effect.sync(() => {
 				projectsCollection.utils.writeUpsert([project]);
-				setActiveProjectId(projectId);
-				setSelectedChangeId(null);
+				navigate({ to: "/project/$projectId", params: { projectId } });
 			});
 		}).pipe(
 			Effect.tapError((error) => Effect.logError("handleOpenRepo failed", error)),
 			Effect.catchAll(() => Effect.void),
 		);
 		Effect.runPromise(program);
-	}, [setActiveProjectId, setSelectedChangeId]);
+	}, [navigate]);
 
 	const handleSelectProject = useCallback(
 		(project: Project) => {
-			setActiveProjectId(project.id);
-			setSelectedChangeId(null);
+			navigate({ to: "/project/$projectId", params: { projectId: project.id } });
 		},
-		[setActiveProjectId, setSelectedChangeId],
+		[navigate],
 	);
 
 	const handleSelectRevision = useCallback(
 		(revision: Revision) => {
-			setSelectedChangeId(revision.change_id);
+			if (!projectId) return;
+			navigate({
+				to: "/project/$projectId",
+				params: { projectId },
+				search: { rev: revision.change_id },
+			});
 		},
-		[setSelectedChangeId],
+		[navigate, projectId],
 	);
 
 	const handleNavigateToChangeId = useCallback(
 		(changeId: string) => {
-			setSelectedChangeId(changeId || null);
+			if (!projectId) return;
+			navigate({
+				to: "/project/$projectId",
+				params: { projectId },
+				search: { rev: changeId || undefined },
+			});
 		},
-		[setSelectedChangeId],
+		[navigate, projectId],
 	);
 
 	useKeyboardNavigation({
 		orderedRevisions,
-		selectedChangeId,
+		selectedChangeId: rev ?? null,
 		onNavigate: handleNavigateToChangeId,
 	});
+
+	const triggerFlash = useCallback((changeId: string) => {
+		setFlash({ changeId, key: Date.now() });
+		setTimeout(() => setFlash(null), 400);
+	}, []);
+
+	const handleYankId = useCallback(() => {
+		if (!selectedRevision) return;
+		navigator.clipboard.writeText(selectedRevision.change_id);
+		triggerFlash(selectedRevision.change_id);
+	}, [selectedRevision, triggerFlash]);
+
+	const handleYankLink = useCallback(() => {
+		if (!selectedRevision || !projectId) return;
+		const link = `tatami://project/${projectId}/revision/${selectedRevision.change_id}`;
+		navigator.clipboard.writeText(link);
+		triggerFlash(selectedRevision.change_id);
+	}, [selectedRevision, projectId, triggerFlash]);
+
+	useKeySequence({ sequence: "yy", onTrigger: handleYankId, enabled: !!selectedRevision });
+	useKeySequence({ sequence: "yY", onTrigger: handleYankLink, enabled: !!selectedRevision && !!projectId });
 
 	const closestBookmark = useMemo(() => {
 		const workingCopy = revisions.find((r) => r.is_working_copy);
@@ -200,6 +228,7 @@ export function AppShell() {
 						selectedRevision={selectedRevision}
 						onSelectRevision={handleSelectRevision}
 						isLoading={isLoading}
+						flash={flash}
 					/>
 				</section>
 				<StatusBar branch={closestBookmark} isConnected={!!activeProject} />

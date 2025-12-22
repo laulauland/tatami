@@ -50,6 +50,12 @@ function createRevisionsCollection(repoPath: string) {
 		const unlisten = await listen<string>("repo-changed", async (event) => {
 			if (event.payload === repoPath) {
 				const revisions = await getRevisions(repoPath, 100);
+				const newIds = new Set(revisions.map((r) => r.change_id));
+				for (const key of collection.state.keys()) {
+					if (!newIds.has(key)) {
+						collection.utils.writeDelete(key);
+					}
+				}
 				collection.utils.writeUpsert(revisions);
 			}
 		});

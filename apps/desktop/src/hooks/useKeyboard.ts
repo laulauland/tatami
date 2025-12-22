@@ -116,16 +116,25 @@ export function useKeyboardNavigation({
 					targetChangeId = orderedRevisions[orderedRevisions.length - 1]?.change_id || null;
 					event.preventDefault();
 					break;
+
+				case "Escape":
+					// Deselect current revision
+					onNavigate("");
+					event.preventDefault();
+					break;
 			}
 
-			// Navigate to target and scroll into view
+			// Navigate to target and focus element
 			if (targetChangeId) {
 				onNavigate(targetChangeId);
 
-				// Scroll into view after state update
+				// Focus the element (triggers :focus-visible for keyboard navigation)
 				requestAnimationFrame(() => {
-					const element = document.querySelector(`[data-change-id="${targetChangeId}"]`);
-					element?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+					const element = document.querySelector<HTMLElement>(`[data-change-id="${targetChangeId}"]`);
+					if (element) {
+						element.focus({ preventScroll: true });
+						element.scrollIntoView({ block: "nearest", behavior: "smooth" });
+					}
 				});
 			}
 		}

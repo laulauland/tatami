@@ -313,7 +313,7 @@ const RevisionRow = memo(function RevisionRow({
 			onClick={() => onSelect(revision.change_id)}
 			data-change-id={revision.change_id}
 			style={{ height: ROW_HEIGHT }}
-			className={`w-full justify-start text-left px-2 animate-in fade-in slide-in-from-left-1 duration-150 ${
+			className={`w-full justify-start text-left px-2 animate-in fade-in slide-in-from-left-1 duration-150 rounded-sm focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:ring-0 focus-visible:ring-offset-0 ${
 				isSelected ? "bg-accent text-accent-foreground" : ""
 			} ${revision.is_immutable ? "opacity-60" : ""}`}
 		>

@@ -1,16 +1,18 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
+import { useNavigate } from "@tanstack/react-router";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Effect } from "effect";
 import { useCallback, useMemo } from "react";
 import { activeProjectIdAtom, selectedChangeIdAtom } from "@/atoms";
 import { CommandPalette } from "@/components/CommandPalette";
+import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
 import { reorderForGraph, RevisionGraph } from "@/components/RevisionGraph";
 import { StatusBar } from "@/components/StatusBar";
 import { Toolbar } from "@/components/Toolbar";
 import { emptyRevisionsCollection, getRevisionsCollection, projectsCollection } from "@/db";
-import { useKeyboardNavigation } from "@/hooks/useKeyboard";
+import { useKeyboardNavigation, useKeyboardShortcut } from "@/hooks/useKeyboard";
 import {
 	findProjectByPath,
 	findRepository,
@@ -44,8 +46,15 @@ const findRepositoryEffect = (startPath: string) =>
 	});
 
 export function AppShell() {
+	const navigate = useNavigate();
 	const [activeProjectId, setActiveProjectId] = useAtom(activeProjectIdAtom);
 	const [selectedChangeId, setSelectedChangeId] = useAtom(selectedChangeIdAtom);
+
+	useKeyboardShortcut({
+		key: ",",
+		modifiers: { meta: true, ctrl: true },
+		onPress: () => navigate({ to: "/settings" }),
+	});
 
 	const { data: projects = [] } = useLiveQuery(projectsCollection);
 
@@ -129,7 +138,7 @@ export function AppShell() {
 
 	const handleNavigateToChangeId = useCallback(
 		(changeId: string) => {
-			setSelectedChangeId(changeId);
+			setSelectedChangeId(changeId || null);
 		},
 		[setSelectedChangeId],
 	);
@@ -182,6 +191,7 @@ export function AppShell() {
 				onSelectProject={handleSelectProject}
 				onOpenRepo={handleOpenRepo}
 			/>
+			<KeyboardShortcutsHelp />
 			<div className="flex flex-col h-screen overflow-hidden">
 				<Toolbar repoPath={activeProject?.path ?? null} />
 				<section className="flex-1 min-h-0" aria-label="Revision list">

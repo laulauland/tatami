@@ -27,5 +27,12 @@
 			"csp": null
 		}
 	},
-	"plugins": {}
+	"plugins": {
+		"deep-link": {
+			"mobile": [],
+			"desktop": {
+				"schemes": ["tatami"]
+			}
+		}
+	}
 }

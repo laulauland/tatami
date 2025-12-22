@@ -289,15 +289,7 @@ function GraphColumn({ nodes, laneCount }: { nodes: GraphNode[]; laneCount: numb
 					);
 				}
 
-				return (
-					<circle
-						key={node.revision.change_id}
-						cx={x}
-						cy={y}
-						r={NODE_RADIUS}
-						fill={color}
-					/>
-				);
+				return <circle key={node.revision.change_id} cx={x} cy={y} r={NODE_RADIUS} fill={color} />;
 			})}
 		</svg>
 	);

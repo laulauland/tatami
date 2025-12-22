@@ -1,26 +1,22 @@
 import { useAtom } from "@effect-atom/atom-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { listen } from "@tauri-apps/api/event";
+import { useLiveQuery } from "@tanstack/react-db";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Effect } from "effect";
-import { useCallback, useEffect, useMemo } from "react";
-import { activeProjectIdAtom, selectedChangeIdAtom } from "@/atoms";
+import { useCallback, useMemo } from "react";
+import { activeProjectIdAtom, focusedPanelAtom, selectedChangeIdAtom } from "@/atoms";
 import { AppSidebar } from "@/components/AppSidebar";
 import { RevisionGraph } from "@/components/RevisionGraph";
 import { StatusBar } from "@/components/StatusBar";
 import { Toolbar } from "@/components/Toolbar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { emptyRevisionsCollection, getRevisionsCollection, projectsCollection } from "@/db";
 import {
 	findProjectByPath,
 	findRepository,
-	getProjects,
-	getRevisions,
 	type Project,
 	type Revision,
-	unwatchRepository,
 	upsertProject,
-	watchRepository,
 } from "@/tauri-commands";
 
 const openDirectoryDialogEffect = Effect.gen(function* () {
@@ -48,25 +44,23 @@ const findRepositoryEffect = (startPath: string) =>
 	});
 
 export function AppShell() {
-	const queryClient = useQueryClient();
 	const [activeProjectId, setActiveProjectId] = useAtom(activeProjectIdAtom);
 	const [selectedChangeId, setSelectedChangeId] = useAtom(selectedChangeIdAtom);
+	const [, setFocusedPanel] = useAtom(focusedPanelAtom);
 
-	const { data: projects = [] } = useQuery({
-		queryKey: ["projects"],
-		queryFn: getProjects,
-	});
+	const { data: projects = [] } = useLiveQuery(projectsCollection);
 
 	const activeProject = useMemo(
 		() => projects.find((p) => p.id === activeProjectId) ?? null,
 		[projects, activeProjectId],
 	);
 
-	const { data: revisions = [], isLoading } = useQuery({
-		queryKey: ["revisions", activeProject?.path],
-		queryFn: () => (activeProject ? getRevisions(activeProject.path, 100) : []),
-		enabled: !!activeProject,
-	});
+	const revisionsCollection = useMemo(
+		() => (activeProject ? getRevisionsCollection(activeProject.path) : emptyRevisionsCollection),
+		[activeProject],
+	);
+
+	const { data: revisions = [], isLoading = false } = useLiveQuery(revisionsCollection);
 
 	const selectedRevision = useMemo(() => {
 		if (revisions.length === 0) return null;
@@ -106,7 +100,7 @@ export function AppShell() {
 			});
 
 			yield* Effect.sync(() => {
-				queryClient.invalidateQueries({ queryKey: ["projects"] });
+				projectsCollection.utils.writeUpsert([project]);
 				setActiveProjectId(projectId);
 				setSelectedChangeId(null);
 			});
@@ -115,7 +109,7 @@ export function AppShell() {
 			Effect.catchAll(() => Effect.void),
 		);
 		Effect.runPromise(program);
-	}, [queryClient, setActiveProjectId, setSelectedChangeId]);
+	}, [setActiveProjectId, setSelectedChangeId]);
 
 	const handleSelectProject = useCallback(
 		(project: Project) => {
@@ -131,39 +125,6 @@ export function AppShell() {
 		},
 		[setSelectedChangeId],
 	);
-
-	useEffect(() => {
-		if (!activeProject) return;
-
-		let unlisten: (() => void) | undefined;
-
-		const setupWatcher = async () => {
-			try {
-				await watchRepository(activeProject.path);
-
-				unlisten = await listen<string>("repo-changed", (event) => {
-					if (event.payload === activeProject.path) {
-						queryClient.invalidateQueries({ queryKey: ["revisions", activeProject.path] });
-					}
-				});
-			} catch (error) {
-				console.error("Failed to set up repository watcher:", error);
-			}
-		};
-
-		setupWatcher();
-
-		return () => {
-			if (unlisten) {
-				unlisten();
-			}
-			if (activeProject) {
-				unwatchRepository(activeProject.path).catch((error) => {
-					console.error("Failed to unwatch repository:", error);
-				});
-			}
-		};
-	}, [activeProject, queryClient]);
 
 	const closestBookmark = useMemo(() => {
 		const workingCopy = revisions.find((r) => r.is_working_copy);
@@ -211,7 +172,12 @@ export function AppShell() {
 			/>
 			<SidebarInset className="flex flex-col h-screen overflow-hidden">
 				<Toolbar repoPath={activeProject?.path ?? null} />
-				<div className="flex-1 min-h-0">
+				<div
+					className="flex-1 min-h-0"
+					role="region"
+					aria-label="Revision list"
+					onMouseDown={() => setFocusedPanel("revisions")}
+				>
 					<RevisionGraph
 						revisions={revisions}
 						selectedRevision={selectedRevision}

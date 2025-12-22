@@ -1,5 +1,6 @@
 import { memo, useCallback, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Revision } from "@/tauri-commands";
 
@@ -307,13 +308,13 @@ const RevisionRow = memo(function RevisionRow({
 	const description = revision.description.split("\n")[0] || "(no description)";
 
 	return (
-		<button
-			type="button"
+		<Button
+			variant="ghost"
 			onClick={() => onSelect(revision.change_id)}
 			data-change-id={revision.change_id}
 			style={{ height: ROW_HEIGHT }}
-			className={`w-full text-left px-2 flex items-center transition-colors animate-in fade-in slide-in-from-left-1 duration-150 focus:outline-none ${
-				isSelected ? "bg-accent text-accent-foreground" : "hover:bg-muted/50"
+			className={`w-full justify-start text-left px-2 animate-in fade-in slide-in-from-left-1 duration-150 ${
+				isSelected ? "bg-accent text-accent-foreground" : ""
 			} ${revision.is_immutable ? "opacity-60" : ""}`}
 		>
 			<div className="flex-1 min-w-0">
@@ -333,7 +334,7 @@ const RevisionRow = memo(function RevisionRow({
 				</div>
 				<div className="text-sm truncate">{description}</div>
 			</div>
-		</button>
+		</Button>
 	);
 });
 

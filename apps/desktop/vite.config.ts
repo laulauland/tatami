@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 const host = process.env.TAURI_DEV_HOST;
-const isTauri = !!host;
+const isTauri = !!process.env.TAURI_ENV_DEBUG;
 
 const tauriMocks = isTauri
 	? {}
@@ -15,8 +15,17 @@ const tauriMocks = isTauri
 			"@tauri-apps/plugin-dialog": path.resolve(__dirname, "./src/mocks/tauri-dialog.ts"),
 		};
 
+const reactCompilerConfig = {};
+
 export default defineConfig({
-	plugins: [react(), tailwindcss()],
+	plugins: [
+		react({
+			babel: {
+				plugins: [["babel-plugin-react-compiler", reactCompilerConfig]],
+			},
+		}),
+		tailwindcss(),
+	],
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),

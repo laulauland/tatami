@@ -43,10 +43,7 @@ export function CommandPalette({ projects, onSelectProject, onOpenRepo }: Comman
 				<CommandEmpty>No projects found.</CommandEmpty>
 				<CommandGroup heading="Projects">
 					{projects.map((project) => (
-						<CommandItem
-							key={project.id}
-							onSelect={() => handleSelectProject(project)}
-						>
+						<CommandItem key={project.id} onSelect={() => handleSelectProject(project)}>
 							<FolderOpen className="mr-2 h-4 w-4" />
 							<span>{project.name}</span>
 						</CommandItem>

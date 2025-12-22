@@ -44,7 +44,9 @@ function InputGroupAddon({
 	align = "inline-start",
 	...props
 }: React.ComponentProps<"fieldset"> & VariantProps<typeof inputGroupAddonVariants>) {
-	const handleFocusInput = (e: React.MouseEvent<HTMLFieldSetElement> | React.KeyboardEvent<HTMLFieldSetElement>) => {
+	const handleFocusInput = (
+		e: React.MouseEvent<HTMLFieldSetElement> | React.KeyboardEvent<HTMLFieldSetElement>,
+	) => {
 		if ((e.target as HTMLElement).closest("button")) {
 			return;
 		}

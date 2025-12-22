@@ -50,7 +50,6 @@ pub fn fetch_log(repo_path: &Path, limit: usize) -> Result<Vec<Revision>> {
         })
         .collect::<Result<Vec<_>>>()?;
 
-
     let immutable_expression = RevsetExpression::root();
     let immutable_revset = immutable_expression.evaluate(repo.as_ref())?;
     let immutable_ids: Vec<CommitId> = immutable_revset.iter().collect::<Result<Vec<_>, _>>()?;

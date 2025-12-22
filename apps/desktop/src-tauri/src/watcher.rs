@@ -1,5 +1,5 @@
 use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_mini::{new_debouncer, DebounceEventResult, Debouncer};
+use notify_debouncer_mini::{DebounceEventResult, Debouncer, new_debouncer};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -27,10 +27,7 @@ impl WatcherManager {
         let jj_repo_path = repo_path.join(".jj").join("repo");
 
         if !jj_repo_path.exists() {
-            return Err(format!(
-                "Not a jj repository: {}",
-                repo_path.display()
-            ));
+            return Err(format!("Not a jj repository: {}", repo_path.display()));
         }
 
         let app_handle = app.clone();
@@ -40,7 +37,10 @@ impl WatcherManager {
             Duration::from_millis(500),
             move |result: DebounceEventResult| {
                 if result.is_ok() {
-                    let _ = app_handle.emit("repo-changed", repo_path_clone.to_string_lossy().to_string());
+                    let _ = app_handle.emit(
+                        "repo-changed",
+                        repo_path_clone.to_string_lossy().to_string(),
+                    );
                 }
             },
         )

@@ -207,9 +207,24 @@ const handlers: Record<string, (args?: unknown) => unknown> = {
 				new_count: 4,
 				lines: [
 					{ line_type: "context", content: "fn main() {", old_line_number: 1, new_line_number: 1 },
-					{ line_type: "remove", content: '    println!("old");', old_line_number: 2, new_line_number: null },
-					{ line_type: "add", content: '    println!("new");', old_line_number: null, new_line_number: 2 },
-					{ line_type: "add", content: '    println!("extra");', old_line_number: null, new_line_number: 3 },
+					{
+						line_type: "remove",
+						content: '    println!("old");',
+						old_line_number: 2,
+						new_line_number: null,
+					},
+					{
+						line_type: "add",
+						content: '    println!("new");',
+						old_line_number: null,
+						new_line_number: 2,
+					},
+					{
+						line_type: "add",
+						content: '    println!("extra");',
+						old_line_number: null,
+						new_line_number: 3,
+					},
 					{ line_type: "context", content: "}", old_line_number: 3, new_line_number: 4 },
 				],
 			},

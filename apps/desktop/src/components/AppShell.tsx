@@ -19,6 +19,7 @@ import {
 	type Revision,
 	upsertProject,
 } from "@/tauri-commands";
+import { editRevision, newRevision } from "@/db";
 
 const openDirectoryDialogEffect = Effect.gen(function* () {
 	const home = yield* Effect.tryPromise({
@@ -180,6 +181,29 @@ export function AppShell() {
 		sequence: "yY",
 		onTrigger: handleYankLink,
 		enabled: !!selectedRevision && !!projectId,
+	});
+
+	const handleNew = useCallback(() => {
+		if (!activeProject || !selectedRevision) return;
+		newRevision(activeProject.path, [selectedRevision.change_id]);
+	}, [activeProject, selectedRevision]);
+
+	const handleEdit = useCallback(() => {
+		if (!activeProject || !selectedRevision) return;
+		const currentWC = revisions.find((r) => r.is_working_copy);
+		editRevision(activeProject.path, selectedRevision.change_id, currentWC?.change_id ?? null);
+	}, [activeProject, selectedRevision, revisions]);
+
+	useKeyboardShortcut({
+		key: "n",
+		onPress: handleNew,
+		enabled: !!activeProject && !!selectedRevision,
+	});
+
+	useKeyboardShortcut({
+		key: "e",
+		onPress: handleEdit,
+		enabled: !!activeProject && !!selectedRevision,
 	});
 
 	const closestBookmark = useMemo(() => {

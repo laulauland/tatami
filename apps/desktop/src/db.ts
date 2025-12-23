@@ -1,9 +1,9 @@
-import { createCollection } from "@tanstack/db";
+import { createCollection, createTransaction } from "@tanstack/db";
 import { QueryClient } from "@tanstack/query-core";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { listen } from "@tauri-apps/api/event";
 import type { Project, Revision } from "@/tauri-commands";
-import { getProjects, getRevisions, watchRepository } from "@/tauri-commands";
+import { getProjects, getRevisions, jjEdit, jjNew, watchRepository } from "@/tauri-commands";
 
 export const queryClient = new QueryClient();
 
@@ -75,4 +75,45 @@ export function getRevisionsCollection(repoPath: string) {
 		revisionCollections.set(repoPath, collection);
 	}
 	return collection;
+}
+
+export function editRevision(
+	repoPath: string,
+	targetChangeId: string,
+	currentWcChangeId: string | null,
+) {
+	const collection = getRevisionsCollection(repoPath);
+	const tx = createTransaction({
+		mutationFn: async () => {
+			await jjEdit(repoPath, targetChangeId);
+		},
+	});
+
+	tx.mutate(() => {
+		if (currentWcChangeId && currentWcChangeId !== targetChangeId) {
+			collection.update(currentWcChangeId, (draft) => {
+				draft.is_working_copy = false;
+			});
+		}
+		collection.update(targetChangeId, (draft) => {
+			draft.is_working_copy = true;
+		});
+	});
+
+	return tx;
+}
+
+export function newRevision(repoPath: string, parentChangeIds: string[]) {
+	const tx = createTransaction({
+		mutationFn: async () => {
+			await jjNew(repoPath, parentChangeIds);
+		},
+	});
+
+	tx.mutate(() => {
+		// No optimistic update - we don't know the new revision's ID
+		// File watcher will add it to the collection
+	});
+
+	return tx;
 }

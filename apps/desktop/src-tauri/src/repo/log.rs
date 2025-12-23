@@ -26,14 +26,14 @@ pub fn fetch_log(repo_path: &Path, limit: usize) -> Result<Vec<Revision>> {
     let jj_repo = JjRepo::open(repo_path)?;
     let repo = jj_repo.repo_loader().load_at_head()?;
 
-    // Use working copy ancestors - excludes orphaned descendants from rebases
+    // Show all commits reachable from heads (includes WC descendants)
     let wc_id = repo
         .view()
         .wc_commit_ids()
         .values()
         .next()
         .context("No working copy")?;
-    let revset_expression = RevsetExpression::commit(wc_id.clone()).ancestors();
+    let revset_expression = RevsetExpression::visible_heads().ancestors();
 
     let revset = revset_expression
         .evaluate(repo.as_ref())

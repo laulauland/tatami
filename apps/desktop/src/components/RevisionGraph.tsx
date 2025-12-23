@@ -79,43 +79,7 @@ export function reorderForGraph(revisions: Revision[]): Revision[] {
 		}
 	}
 
-	// Find which heads have working copy in their ancestry
-	const workingCopy = revisions.find((r) => r.is_working_copy);
-	const headsWithWorkingCopy = new Set<string>();
-
-	if (workingCopy) {
-		for (const head of heads) {
-			// Check if working copy is reachable from this head
-			const visited = new Set<string>();
-			const stack = [head.commit_id];
-			while (stack.length > 0) {
-				const id = stack.pop()!;
-				if (visited.has(id)) continue;
-				visited.add(id);
-				if (id === workingCopy.commit_id) {
-					headsWithWorkingCopy.add(head.commit_id);
-					break;
-				}
-				const rev = commitMap.get(id);
-				if (rev) {
-					stack.push(...rev.parent_ids.filter((pid) => commitMap.has(pid)));
-				}
-			}
-		}
-	}
-
-	// Sort heads: working copy itself first, then heads containing it, then others
-	const sortedHeads = [...heads].sort((a, b) => {
-		if (a.is_working_copy) return -1;
-		if (b.is_working_copy) return 1;
-		const aHasWc = headsWithWorkingCopy.has(a.commit_id);
-		const bHasWc = headsWithWorkingCopy.has(b.commit_id);
-		if (aHasWc && !bHasWc) return -1;
-		if (!aHasWc && bHasWc) return 1;
-		return 0;
-	});
-
-	for (const head of sortedHeads) {
+	for (const head of heads) {
 		visit(head);
 	}
 

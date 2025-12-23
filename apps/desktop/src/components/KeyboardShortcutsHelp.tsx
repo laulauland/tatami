@@ -19,6 +19,13 @@ const shortcuts = [
 		],
 	},
 	{
+		category: "Actions",
+		items: [
+			{ keys: ["n"], description: "New revision on selected" },
+			{ keys: ["e"], description: "Edit selected revision" },
+		],
+	},
+	{
 		category: "Yank",
 		items: [
 			{ keys: ["y y"], description: "Copy revision ID" },

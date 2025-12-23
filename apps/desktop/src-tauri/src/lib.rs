@@ -166,6 +166,24 @@ fn unwatch_repository(app: tauri::AppHandle, repo_path: String) -> Result<(), St
     watcher_manager.unwatch(&PathBuf::from(repo_path))
 }
 
+#[tauri::command]
+async fn jj_new(repo_path: String, parent_change_ids: Vec<String>) -> Result<(), String> {
+    let path = Path::new(&repo_path);
+    let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .new_revision(parent_change_ids)
+        .map_err(|e| format!("Failed to create new revision: {}", e))
+}
+
+#[tauri::command]
+async fn jj_edit(repo_path: String, change_id: String) -> Result<(), String> {
+    let path = Path::new(&repo_path);
+    let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .edit_revision(change_id)
+        .map_err(|e| format!("Failed to edit revision: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -202,6 +220,8 @@ pub fn run() {
             update_layout,
             watch_repository,
             unwatch_repository,
+            jj_new,
+            jj_edit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

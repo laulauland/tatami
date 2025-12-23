@@ -6,12 +6,15 @@ use jj_lib::merged_tree::MergedTree;
 use jj_lib::object_id::{HexPrefix, PrefixResolution};
 use jj_lib::repo::{Repo, StoreFactories};
 use jj_lib::repo_path::RepoPath;
+use jj_lib::settings::UserSettings;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
 use std::path::Path;
 use tokio::io::AsyncReadExt;
 
 pub struct JjRepo {
     workspace: Workspace,
+    #[allow(dead_code)] // Used by jj-lib internals via workspace
+    user_settings: UserSettings,
 }
 
 impl JjRepo {
@@ -30,7 +33,10 @@ impl JjRepo {
         )
         .context("Failed to load jj workspace")?;
 
-        Ok(Self { workspace })
+        Ok(Self {
+            workspace,
+            user_settings,
+        })
     }
 
     fn load_config() -> Result<jj_lib::config::StackedConfig> {
@@ -75,6 +81,7 @@ impl JjRepo {
         Ok(repo.store().get_commit(&commit_id)?)
     }
 
+    #[allow(dead_code)] // May be used in future features
     pub fn get_parent_tree(&self, commit: &Commit) -> Result<MergedTree> {
         let repo = self.workspace.repo_loader().load_at_head()?;
         let parents = commit.parents();
@@ -159,5 +166,94 @@ impl JjRepo {
 
     pub fn repo_loader(&self) -> &jj_lib::repo::RepoLoader {
         self.workspace.repo_loader()
+    }
+
+    pub fn new_revision(&mut self, parent_change_ids: Vec<String>) -> Result<()> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let mut tx = repo.start_transaction();
+
+        // Resolve parent change IDs to commit IDs and get commits
+        let mut parent_commits = Vec::new();
+        for change_id in parent_change_ids {
+            let commit_id = self.resolve_change_id(repo.as_ref(), &change_id)?;
+            let commit = repo.store().get_commit(&commit_id)
+                .map_err(|e| anyhow::anyhow!("Failed to get commit: {}", e))?;
+            parent_commits.push(commit);
+        }
+
+        // Get the tree from the first parent (empty commit uses parent's tree)
+        let tree_id = parent_commits
+            .first()
+            .context("No parent commits provided")?
+            .tree_id()
+            .clone();
+
+        // Create new commit with parent commits and their tree (no changes)
+        let parent_commit_ids: Vec<_> = parent_commits.iter().map(|c| c.id().clone()).collect();
+        let new_commit = tx
+            .repo_mut()
+            .new_commit(parent_commit_ids, tree_id)
+            .write()
+            .map_err(|e| anyhow::anyhow!("Failed to write commit: {}", e))?;
+
+        // Set as working copy
+        let workspace_name = self.workspace.workspace_name().to_owned();
+        tx.repo_mut()
+            .set_wc_commit(workspace_name, new_commit.id().clone())
+            .context("Failed to set working copy commit")?;
+
+        // Get old tree for checkout
+        let old_commit = repo
+            .store()
+            .get_commit(repo.view().get_wc_commit_id(self.workspace.workspace_name())
+            .context("No working copy commit")?)
+            .map_err(|e| anyhow::anyhow!("Failed to get old commit: {}", e))?;
+        let old_tree_id = old_commit.tree_id().clone();
+
+        // Finalize transaction
+        let new_repo = tx.commit("new")?;
+        let operation_id = new_repo.operation().id().clone();
+
+        // Check out the new commit in the working copy
+        self.workspace
+            .check_out(operation_id, Some(&old_tree_id), &new_commit)
+            .context("Failed to check out new commit")?;
+
+        Ok(())
+    }
+
+    pub fn edit_revision(&mut self, change_id: String) -> Result<()> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let mut tx = repo.start_transaction();
+
+        // Resolve change ID to commit
+        let commit_id = self.resolve_change_id(repo.as_ref(), &change_id)?;
+        let commit = repo.store().get_commit(&commit_id)
+            .map_err(|e| anyhow::anyhow!("Failed to get commit: {}", e))?;
+
+        // Set as working copy
+        let workspace_name = self.workspace.workspace_name().to_owned();
+        tx.repo_mut()
+            .set_wc_commit(workspace_name, commit.id().clone())
+            .context("Failed to set working copy commit")?;
+
+        // Get old tree for checkout
+        let old_commit = repo
+            .store()
+            .get_commit(repo.view().get_wc_commit_id(self.workspace.workspace_name())
+            .context("No working copy commit")?)
+            .map_err(|e| anyhow::anyhow!("Failed to get old commit: {}", e))?;
+        let old_tree_id = old_commit.tree_id().clone();
+
+        // Finalize transaction
+        let new_repo = tx.commit("edit")?;
+        let operation_id = new_repo.operation().id().clone();
+
+        // Check out the commit in the working copy
+        self.workspace
+            .check_out(operation_id, Some(&old_tree_id), &commit)
+            .context("Failed to check out commit")?;
+
+        Ok(())
     }
 }

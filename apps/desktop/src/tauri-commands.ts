@@ -90,3 +90,11 @@ export async function watchRepository(repoPath: string): Promise<void> {
 export async function unwatchRepository(repoPath: string): Promise<void> {
 	return invoke("unwatch_repository", { repoPath });
 }
+
+export async function jjNew(repoPath: string, parentChangeIds: string[]): Promise<void> {
+	return invoke("jj_new", { repoPath, parentChangeIds });
+}
+
+export async function jjEdit(repoPath: string, changeId: string): Promise<void> {
+	return invoke("jj_edit", { repoPath, changeId });
+}

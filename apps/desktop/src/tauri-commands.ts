@@ -1,55 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 
-export interface Revision {
-	commit_id: string;
-	change_id: string;
-	change_id_short: string;
-	parent_ids: string[];
-	description: string;
-	author: string;
-	timestamp: string;
-	is_working_copy: boolean;
-	is_immutable: boolean;
-	bookmarks: string[];
-}
+export type {
+	Revision,
+	ChangedFile,
+	WorkingCopyStatus,
+	DiffLine,
+	DiffHunk,
+	FileDiff,
+	Project,
+} from "./schemas";
 
-export interface ChangedFile {
-	path: string;
-	status: "added" | "modified" | "deleted";
-}
-
-export interface WorkingCopyStatus {
-	repo_path: string;
-	change_id: string;
-	files: ChangedFile[];
-}
-
-export interface DiffLine {
-	line_type: "context" | "add" | "remove";
-	content: string;
-	old_line_number: number | null;
-	new_line_number: number | null;
-}
-
-export interface DiffHunk {
-	old_start: number;
-	old_count: number;
-	new_start: number;
-	new_count: number;
-	lines: DiffLine[];
-}
-
-export interface FileDiff {
-	path: string;
-	hunks: DiffHunk[];
-}
-
-export interface Project {
-	id: string;
-	path: string;
-	name: string;
-	last_opened_at: number;
-}
+import type { FileDiff, Project, Revision, WorkingCopyStatus } from "./schemas";
 
 export async function findRepository(startPath: string): Promise<string | null> {
 	return invoke<string | null>("find_repository", { startPath });

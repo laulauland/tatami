@@ -168,6 +168,10 @@ impl JjRepo {
         self.workspace.repo_loader()
     }
 
+    pub fn user_settings(&self) -> &UserSettings {
+        &self.user_settings
+    }
+
     pub fn new_revision(&mut self, parent_change_ids: Vec<String>) -> Result<()> {
         let repo = self.workspace.repo_loader().load_at_head()?;
         let mut tx = repo.start_transaction();

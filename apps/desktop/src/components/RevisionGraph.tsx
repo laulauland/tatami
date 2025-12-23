@@ -27,17 +27,41 @@ const LANE_COLORS = [
 	"hsl(340 85% 60%)", // pink
 ];
 
+type GraphEdgeType = "direct" | "indirect";
+
+interface ParentConnection {
+	parentRow: number;
+	parentLane: number;
+	edgeType: GraphEdgeType;
+}
+
+type GraphNodeType = "revision" | "elided";
+
+interface ElidedInfo {
+	id: string;
+	childCommitId: string;
+	parentCommitId: string | null;
+}
+
 interface GraphNode {
-	revision: Revision;
+	type: GraphNodeType;
+	revision: Revision | null;
+	elidedInfo: ElidedInfo | null;
 	row: number;
 	lane: number;
-	parentConnections: Array<{ parentRow: number; parentLane: number }>;
+	parentConnections: ParentConnection[];
+}
+
+interface GraphRow {
+	type: GraphNodeType;
+	revision: Revision | null;
+	elidedInfo: ElidedInfo | null;
 }
 
 interface GraphData {
 	nodes: GraphNode[];
 	laneCount: number;
-	orderedRevisions: Revision[];
+	rows: GraphRow[];
 }
 
 export function reorderForGraph(revisions: Revision[]): Revision[] {
@@ -94,79 +118,161 @@ export function reorderForGraph(revisions: Revision[]): Revision[] {
 }
 
 function buildGraph(revisions: Revision[]): GraphData {
-	if (revisions.length === 0) return { nodes: [], laneCount: 1, orderedRevisions: [] };
+	if (revisions.length === 0) return { nodes: [], laneCount: 1, rows: [] };
 
 	// Reorder: heads first (children before parents), working copy branch prioritized
 	const orderedRevisions = reorderForGraph(revisions);
 
+	// Build set of visible commit IDs for edge type detection
+	const visibleCommitIds = new Set(orderedRevisions.map((r) => r.commit_id));
+
+	// First pass: build rows array with elided placeholders inserted
+	const rows: GraphRow[] = [];
+	const elidedIds = new Set<string>();
+
+	for (let i = 0; i < orderedRevisions.length; i++) {
+		const rev = orderedRevisions[i];
+		rows.push({ type: "revision", revision: rev, elidedInfo: null });
+
+		// Check if any parent is not visible (indirect edge) - insert elided placeholder
+		for (const parentId of rev.parent_ids) {
+			if (!visibleCommitIds.has(parentId)) {
+				const elidedId = `elided-${rev.commit_id}-${parentId}`;
+				if (!elidedIds.has(elidedId)) {
+					elidedIds.add(elidedId);
+					rows.push({
+						type: "elided",
+						revision: null,
+						elidedInfo: {
+							id: elidedId,
+							childCommitId: rev.commit_id,
+							parentCommitId: parentId,
+						},
+					});
+				}
+			}
+		}
+	}
+
+	// Build row index maps
 	const commitToRow = new Map<string, number>();
+	const elidedToRow = new Map<string, number>();
+	rows.forEach((row, idx) => {
+		if (row.type === "revision" && row.revision) {
+			commitToRow.set(row.revision.commit_id, idx);
+		} else if (row.type === "elided" && row.elidedInfo) {
+			elidedToRow.set(row.elidedInfo.id, idx);
+		}
+	});
+
 	const commitToLane = new Map<string, number>();
+	const elidedToLane = new Map<string, number>();
 	const nodes: GraphNode[] = [];
-
-	orderedRevisions.forEach((rev, idx) => commitToRow.set(rev.commit_id, idx));
-
 	const activeLanes: (string | null)[] = [null];
 
-	function claimLane(commitId: string, preferredLane?: number): number {
+	function claimLane(id: string, preferredLane?: number): number {
 		if (
 			preferredLane !== undefined &&
 			preferredLane < activeLanes.length &&
 			activeLanes[preferredLane] === null
 		) {
-			activeLanes[preferredLane] = commitId;
+			activeLanes[preferredLane] = id;
 			return preferredLane;
 		}
 		for (let i = 0; i < activeLanes.length; i++) {
 			if (activeLanes[i] === null) {
-				activeLanes[i] = commitId;
+				activeLanes[i] = id;
 				return i;
 			}
 		}
 		if (activeLanes.length < MAX_LANES) {
-			activeLanes.push(commitId);
+			activeLanes.push(id);
 			return activeLanes.length - 1;
 		}
 		return MAX_LANES - 1;
 	}
 
-	for (let row = 0; row < orderedRevisions.length; row++) {
-		const revision = orderedRevisions[row];
+	for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+		const row = rows[rowIdx];
 
-		let lane = commitToLane.get(revision.commit_id);
-		if (lane === undefined) {
-			// First branch gets lane 0 (working copy's branch due to our ordering)
-			const preferLane = row === 0 ? 0 : undefined;
-			lane = claimLane(revision.commit_id, preferLane);
-			commitToLane.set(revision.commit_id, lane);
-		} else {
-			activeLanes[lane] = revision.commit_id;
-		}
+		if (row.type === "revision" && row.revision) {
+			const revision = row.revision;
 
-		const parentConnections: GraphNode["parentConnections"] = [];
-		const parentRows = revision.parent_ids
-			.map((pid) => ({ id: pid, row: commitToRow.get(pid) }))
-			.filter((p): p is { id: string; row: number } => p.row !== undefined);
-
-		for (let i = 0; i < parentRows.length; i++) {
-			const { id: parentId, row: parentRow } = parentRows[i];
-
-			let parentLane = commitToLane.get(parentId);
-			if (parentLane === undefined) {
-				parentLane = i === 0 ? lane : claimLane(parentId);
-				commitToLane.set(parentId, parentLane);
+			let lane = commitToLane.get(revision.commit_id);
+			if (lane === undefined) {
+				const preferLane = rowIdx === 0 ? 0 : undefined;
+				lane = claimLane(revision.commit_id, preferLane);
+				commitToLane.set(revision.commit_id, lane);
+			} else {
+				activeLanes[lane] = revision.commit_id;
 			}
 
-			parentConnections.push({ parentRow, parentLane });
-		}
+			const parentConnections: ParentConnection[] = [];
 
-		if (parentRows.length === 0 && lane < activeLanes.length) {
-			activeLanes[lane] = null;
-		}
+			for (let i = 0; i < revision.parent_ids.length; i++) {
+				const parentId = revision.parent_ids[i];
+				const isVisible = visibleCommitIds.has(parentId);
 
-		nodes.push({ revision, row, lane, parentConnections });
+				if (isVisible) {
+					// Direct edge to visible parent
+					const parentRow = commitToRow.get(parentId);
+					if (parentRow !== undefined) {
+						let parentLane = commitToLane.get(parentId);
+						if (parentLane === undefined) {
+							parentLane = i === 0 ? lane : claimLane(parentId);
+							commitToLane.set(parentId, parentLane);
+						}
+						parentConnections.push({ parentRow, parentLane, edgeType: "direct" });
+					}
+				} else {
+					// Indirect edge - connect to elided placeholder
+					const elidedId = `elided-${revision.commit_id}-${parentId}`;
+					const elidedRow = elidedToRow.get(elidedId);
+					if (elidedRow !== undefined) {
+						let elidedLane = elidedToLane.get(elidedId);
+						if (elidedLane === undefined) {
+							elidedLane = lane; // Elided node stays in same lane as child
+							elidedToLane.set(elidedId, elidedLane);
+						}
+						parentConnections.push({ parentRow: elidedRow, parentLane: elidedLane, edgeType: "indirect" });
+					}
+				}
+			}
+
+			if (revision.parent_ids.length === 0 && lane < activeLanes.length) {
+				activeLanes[lane] = null;
+			}
+
+			nodes.push({
+				type: "revision",
+				revision,
+				elidedInfo: null,
+				row: rowIdx,
+				lane,
+				parentConnections,
+			});
+		} else if (row.type === "elided" && row.elidedInfo) {
+			const elidedInfo = row.elidedInfo;
+			let lane = elidedToLane.get(elidedInfo.id);
+			if (lane === undefined) {
+				// Get lane from child
+				const childLane = commitToLane.get(elidedInfo.childCommitId);
+				lane = childLane ?? claimLane(elidedInfo.id);
+				elidedToLane.set(elidedInfo.id, lane);
+			}
+
+			nodes.push({
+				type: "elided",
+				revision: null,
+				elidedInfo,
+				row: rowIdx,
+				lane,
+				parentConnections: [], // Elided nodes don't have parent connections in the graph
+			});
+		}
 	}
 
-	return { nodes, laneCount: Math.min(activeLanes.length, MAX_LANES), orderedRevisions };
+	return { nodes, laneCount: Math.min(activeLanes.length, MAX_LANES), rows };
 }
 
 function laneToX(lane: number): number {
@@ -186,16 +292,20 @@ function GraphColumn({ nodes, laneCount }: { nodes: GraphNode[]; laneCount: numb
 			<title>Revision graph</title>
 			{/* Edges */}
 			{nodes.map((node) => {
+				if (node.type === "elided") return null;
+
 				const y = node.row * ROW_HEIGHT + ROW_HEIGHT / 2;
 				const x = laneToX(node.lane);
 				const color = laneColor(node.lane);
+				const nodeKey = node.revision?.change_id ?? node.elidedInfo?.id ?? `node-${node.row}`;
 
 				return (
-					<g key={`edges-${node.revision.change_id}`}>
+					<g key={`edges-${nodeKey}`}>
 						{node.parentConnections.map((conn, idx) => {
 							const parentY = conn.parentRow * ROW_HEIGHT + ROW_HEIGHT / 2;
 							const parentX = laneToX(conn.parentLane);
 							const edgeColor = laneColor(conn.parentLane);
+							const isDashed = conn.edgeType === "indirect";
 
 							if (node.lane === conn.parentLane) {
 								return (
@@ -207,6 +317,7 @@ function GraphColumn({ nodes, laneCount }: { nodes: GraphNode[]; laneCount: numb
 										y2={parentY - NODE_RADIUS}
 										stroke={color}
 										strokeWidth={2}
+										strokeDasharray={isDashed ? "4 4" : undefined}
 									/>
 								);
 							}
@@ -222,6 +333,7 @@ function GraphColumn({ nodes, laneCount }: { nodes: GraphNode[]; laneCount: numb
 									stroke={edgeColor}
 									strokeWidth={2}
 									strokeOpacity={0.8}
+									strokeDasharray={isDashed ? "4 4" : undefined}
 								/>
 							);
 						})}
@@ -233,12 +345,34 @@ function GraphColumn({ nodes, laneCount }: { nodes: GraphNode[]; laneCount: numb
 			{nodes.map((node) => {
 				const y = node.row * ROW_HEIGHT + ROW_HEIGHT / 2;
 				const x = laneToX(node.lane);
-				const isWorkingCopy = node.revision.is_working_copy;
 				const color = laneColor(node.lane);
+
+				// Elided placeholder node - render ~ symbol
+				if (node.type === "elided") {
+					return (
+						<g key={node.elidedInfo?.id ?? `elided-${node.row}`}>
+							<text
+								x={x}
+								y={y}
+								textAnchor="middle"
+								dominantBaseline="central"
+								fill={color}
+								fontWeight="bold"
+								fontSize="14"
+								opacity={0.7}
+							>
+								~
+							</text>
+						</g>
+					);
+				}
+
+				const isWorkingCopy = node.revision?.is_working_copy ?? false;
+				const isImmutable = node.revision?.is_immutable ?? false;
 
 				if (isWorkingCopy) {
 					return (
-						<g key={node.revision.change_id}>
+						<g key={node.revision?.change_id}>
 							<circle cx={x} cy={y} r={NODE_RADIUS + 3} fill={color} fillOpacity={0.2} />
 							<text
 								x={x}
@@ -255,7 +389,23 @@ function GraphColumn({ nodes, laneCount }: { nodes: GraphNode[]; laneCount: numb
 					);
 				}
 
-				return <circle key={node.revision.change_id} cx={x} cy={y} r={NODE_RADIUS} fill={color} />;
+				// Immutable commits get a diamond shape (◆)
+				if (isImmutable) {
+					return (
+						<g key={node.revision?.change_id}>
+							<rect
+								x={x - NODE_RADIUS}
+								y={y - NODE_RADIUS}
+								width={NODE_RADIUS * 2}
+								height={NODE_RADIUS * 2}
+								fill={color}
+								transform={`rotate(45 ${x} ${y})`}
+							/>
+						</g>
+					);
+				}
+
+				return <circle key={node.revision?.change_id} cx={x} cy={y} r={NODE_RADIUS} fill={color} />;
 			})}
 		</svg>
 	);
@@ -309,6 +459,17 @@ const RevisionRow = memo(function RevisionRow({
 	);
 });
 
+const ElidedRow = memo(function ElidedRow(_props: { elidedInfo: ElidedInfo }) {
+	return (
+		<div
+			style={{ height: ROW_HEIGHT }}
+			className="flex items-center px-2 text-muted-foreground text-xs opacity-60"
+		>
+			<span className="font-mono">▸ commits elided</span>
+		</div>
+	);
+});
+
 export function RevisionGraph({
 	revisions,
 	selectedRevision,
@@ -316,7 +477,7 @@ export function RevisionGraph({
 	isLoading,
 	flash,
 }: RevisionGraphProps) {
-	const { nodes, laneCount, orderedRevisions } = useMemo(() => buildGraph(revisions), [revisions]);
+	const { nodes, laneCount, rows } = useMemo(() => buildGraph(revisions), [revisions]);
 
 	const revisionMap = useMemo(() => new Map(revisions.map((r) => [r.change_id, r])), [revisions]);
 
@@ -341,17 +502,23 @@ export function RevisionGraph({
 			<div className="flex">
 				<GraphColumn nodes={nodes} laneCount={laneCount} />
 				<div className="flex-1 min-w-0">
-					{orderedRevisions.map((revision) => {
-						const isFlashing = flash?.changeId === revision.change_id;
-						return (
-							<RevisionRow
-							key={revision.change_id}
-							revision={revision}
-								isSelected={selectedRevision?.change_id === revision.change_id}
-								onSelect={handleSelect}
-								isFlashing={isFlashing}
-							/>
-						);
+					{rows.map((row) => {
+						if (row.type === "revision" && row.revision) {
+							const isFlashing = flash?.changeId === row.revision.change_id;
+							return (
+								<RevisionRow
+									key={row.revision.change_id}
+									revision={row.revision}
+									isSelected={selectedRevision?.change_id === row.revision.change_id}
+									onSelect={handleSelect}
+									isFlashing={isFlashing}
+								/>
+							);
+						}
+						if (row.type === "elided" && row.elidedInfo) {
+							return <ElidedRow key={row.elidedInfo.id} elidedInfo={row.elidedInfo} />;
+						}
+						return null;
 					})}
 				</div>
 			</div>

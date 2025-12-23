@@ -1,15 +1,26 @@
 import { Schema } from "effect";
 
+export const GraphEdgeType = Schema.Literal("direct", "indirect", "missing");
+export type GraphEdgeType = typeof GraphEdgeType.Type;
+
+export const ParentEdge = Schema.Struct({
+	parent_id: Schema.String,
+	edge_type: GraphEdgeType,
+});
+export type ParentEdge = typeof ParentEdge.Type;
+
 export const Revision = Schema.Struct({
 	commit_id: Schema.String,
 	change_id: Schema.String,
 	change_id_short: Schema.String,
 	parent_ids: Schema.Array(Schema.String),
+	parent_edges: Schema.Array(ParentEdge),
 	description: Schema.String,
 	author: Schema.String,
 	timestamp: Schema.String,
 	is_working_copy: Schema.Boolean,
 	is_immutable: Schema.Boolean,
+	is_mine: Schema.Boolean,
 	bookmarks: Schema.Array(Schema.String),
 });
 export type Revision = typeof Revision.Type;

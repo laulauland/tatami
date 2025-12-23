@@ -1,13 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type {
-	Revision,
 	ChangedFile,
-	WorkingCopyStatus,
-	DiffLine,
 	DiffHunk,
+	DiffLine,
 	FileDiff,
 	Project,
+	Revision,
+	WorkingCopyStatus,
 } from "./schemas";
 
 import type { FileDiff, Project, Revision, WorkingCopyStatus } from "./schemas";
@@ -16,8 +16,12 @@ export async function findRepository(startPath: string): Promise<string | null> 
 	return invoke<string | null>("find_repository", { startPath });
 }
 
-export async function getRevisions(repoPath: string, limit: number): Promise<Revision[]> {
-	return invoke<Revision[]>("get_revisions", { repoPath, limit });
+export async function getRevisions(
+	repoPath: string,
+	limit: number,
+	revset?: string,
+): Promise<Revision[]> {
+	return invoke<Revision[]>("get_revisions", { repoPath, limit, revset });
 }
 
 export async function getStatus(repoPath: string): Promise<WorkingCopyStatus> {

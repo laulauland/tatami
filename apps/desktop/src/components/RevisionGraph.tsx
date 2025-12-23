@@ -381,8 +381,8 @@ export function RevisionGraph({
 						const isFlashing = flash?.changeId === revision.change_id;
 						return (
 							<RevisionRow
-								key={isFlashing ? `${revision.change_id}-${flash.key}` : revision.change_id}
-								revision={revision}
+							key={revision.change_id}
+							revision={revision}
 								isSelected={selectedRevision?.change_id === revision.change_id}
 								onSelect={handleSelect}
 								isFlashing={isFlashing}

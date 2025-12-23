@@ -4,6 +4,7 @@ import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Effect } from "effect";
 import { useCallback, useMemo, useState } from "react";
+import { AceJump } from "@/components/AceJump";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
 import { reorderForGraph, RevisionGraph } from "@/components/RevisionGraph";
@@ -175,7 +176,11 @@ export function AppShell() {
 	}, [selectedRevision, projectId, triggerFlash]);
 
 	useKeySequence({ sequence: "yy", onTrigger: handleYankId, enabled: !!selectedRevision });
-	useKeySequence({ sequence: "yY", onTrigger: handleYankLink, enabled: !!selectedRevision && !!projectId });
+	useKeySequence({
+		sequence: "yY",
+		onTrigger: handleYankLink,
+		enabled: !!selectedRevision && !!projectId,
+	});
 
 	const closestBookmark = useMemo(() => {
 		const workingCopy = revisions.find((r) => r.is_working_copy);
@@ -220,6 +225,7 @@ export function AppShell() {
 				onOpenRepo={handleOpenRepo}
 			/>
 			<KeyboardShortcutsHelp />
+			<AceJump revisions={orderedRevisions} onJump={handleNavigateToChangeId} />
 			<div className="flex flex-col h-screen overflow-hidden">
 				<Toolbar repoPath={activeProject?.path ?? null} />
 				<section className="flex-1 min-h-0" aria-label="Revision list">

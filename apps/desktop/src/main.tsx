@@ -27,9 +27,7 @@ function handleDeepLinks(urls: string[]) {
 					search: revisionId ? { rev: revisionId } : {},
 				});
 			}
-		} catch (error) {
-			console.error("Failed to parse deep link URL:", url, error);
-		}
+		} catch (_error) {}
 	}
 }
 

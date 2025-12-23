@@ -1,5 +1,4 @@
 import { cva, type VariantProps } from "class-variance-authority";
-import { useMemo } from "react";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
@@ -67,13 +66,12 @@ function Field({
 	className,
 	orientation = "vertical",
 	...props
-}: React.ComponentProps<"div"> & VariantProps<typeof fieldVariants>) {
+}: React.ComponentProps<"fieldset"> & VariantProps<typeof fieldVariants>) {
 	return (
-		<div
-			role="group"
+		<fieldset
 			data-slot="field"
 			data-orientation={orientation}
-			className={cn(fieldVariants({ orientation }), className)}
+			className={cn(fieldVariants({ orientation }), "border-0 p-0 m-0", className)}
 			{...props}
 		/>
 	);
@@ -169,7 +167,7 @@ function FieldError({
 }: React.ComponentProps<"div"> & {
 	errors?: Array<{ message?: string } | undefined>;
 }) {
-	const content = useMemo(() => {
+	const content = (() => {
 		if (children) {
 			return children;
 		}
@@ -189,7 +187,7 @@ function FieldError({
 				{uniqueErrors.map((error, index) => error?.message && <li key={index}>{error.message}</li>)}
 			</ul>
 		);
-	}, [children, errors]);
+	})();
 
 	if (!content) {
 		return null;

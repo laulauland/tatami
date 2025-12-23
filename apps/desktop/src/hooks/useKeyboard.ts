@@ -34,30 +34,33 @@ export function useKeyboardNavigation({
 	selectedChangeId,
 	onNavigate,
 }: UseKeyboardNavigationOptions) {
-	const navigateToChangeId = (targetChangeId: string | null) => {
-		if (!targetChangeId) return;
-		onNavigate(targetChangeId);
-		requestAnimationFrame(() => {
-			const element = document.querySelector<HTMLElement>(`[data-change-id="${targetChangeId}"]`);
-			if (element) {
-				element.focus({ preventScroll: true });
-				element.scrollIntoView({ block: "nearest", behavior: "smooth" });
-			}
-		});
-	};
+	// Use refs to avoid stale closures in event handler
+	const orderedRevisionsRef = useRef(orderedRevisions);
+	const selectedChangeIdRef = useRef(selectedChangeId);
+	const onNavigateRef = useRef(onNavigate);
 
-	const getCurrentContext = () => {
-		let currentIndex = orderedRevisions.findIndex((r) => r.change_id === selectedChangeId);
-		if (currentIndex < 0) {
-			currentIndex = orderedRevisions.findIndex((r) => r.is_working_copy);
-			if (currentIndex < 0) currentIndex = 0;
-		}
-		return { currentIndex, currentRevision: orderedRevisions[currentIndex] ?? null };
-	};
+	orderedRevisionsRef.current = orderedRevisions;
+	selectedChangeIdRef.current = selectedChangeId;
+	onNavigateRef.current = onNavigate;
 
 	useKeySequence({
 		sequence: "gg",
-		onTrigger: () => navigateToChangeId(orderedRevisions[0]?.change_id || null),
+		onTrigger: () => {
+			const revisions = orderedRevisionsRef.current;
+			const targetChangeId = revisions[0]?.change_id || null;
+			if (targetChangeId) {
+				onNavigateRef.current(targetChangeId);
+				requestAnimationFrame(() => {
+					const element = document.querySelector<HTMLElement>(
+						`[data-change-id="${targetChangeId}"]`,
+					);
+					if (element) {
+						element.focus({ preventScroll: true });
+						element.scrollIntoView({ block: "nearest", behavior: "smooth" });
+					}
+				});
+			}
+		},
 		enabled: orderedRevisions.length > 0,
 	});
 
@@ -68,14 +71,23 @@ export function useKeyboardNavigation({
 				return;
 			}
 
-			const { currentIndex, currentRevision } = getCurrentContext();
+			const revisions = orderedRevisionsRef.current;
+			const changeId = selectedChangeIdRef.current;
+
+			let currentIndex = revisions.findIndex((r) => r.change_id === changeId);
+			if (currentIndex < 0) {
+				currentIndex = revisions.findIndex((r) => r.is_working_copy);
+				if (currentIndex < 0) currentIndex = 0;
+			}
+			const currentRevision = revisions[currentIndex] ?? null;
+
 			let targetChangeId: string | null = null;
 
 			switch (event.key) {
 				case "j":
 				case "ArrowDown":
-					if (currentIndex >= 0 && currentIndex < orderedRevisions.length - 1) {
-						targetChangeId = orderedRevisions[currentIndex + 1].change_id;
+					if (currentIndex >= 0 && currentIndex < revisions.length - 1) {
+						targetChangeId = revisions[currentIndex + 1].change_id;
 					}
 					event.preventDefault();
 					break;
@@ -83,7 +95,7 @@ export function useKeyboardNavigation({
 				case "k":
 				case "ArrowUp":
 					if (currentIndex > 0) {
-						targetChangeId = orderedRevisions[currentIndex - 1].change_id;
+						targetChangeId = revisions[currentIndex - 1].change_id;
 					}
 					event.preventDefault();
 					break;
@@ -91,7 +103,7 @@ export function useKeyboardNavigation({
 				case "J":
 					if (currentRevision && currentRevision.parent_ids.length > 0) {
 						const parentId = currentRevision.parent_ids[0];
-						const parentRevision = orderedRevisions.find((r) => r.commit_id === parentId);
+						const parentRevision = revisions.find((r) => r.commit_id === parentId);
 						targetChangeId = parentRevision?.change_id || null;
 					}
 					event.preventDefault();
@@ -99,7 +111,7 @@ export function useKeyboardNavigation({
 
 				case "K":
 					if (currentRevision) {
-						const childRevision = orderedRevisions.find((r) =>
+						const childRevision = revisions.find((r) =>
 							r.parent_ids.includes(currentRevision.commit_id),
 						);
 						targetChangeId = childRevision?.change_id || null;
@@ -108,27 +120,38 @@ export function useKeyboardNavigation({
 					break;
 
 				case "@":
-					targetChangeId = orderedRevisions.find((r) => r.is_working_copy)?.change_id || null;
+					targetChangeId = revisions.find((r) => r.is_working_copy)?.change_id || null;
 					event.preventDefault();
 					break;
 
 				case "G":
-					targetChangeId = orderedRevisions[orderedRevisions.length - 1]?.change_id || null;
+					targetChangeId = revisions[revisions.length - 1]?.change_id || null;
 					event.preventDefault();
 					break;
 
 				case "Escape":
-					onNavigate("");
+					onNavigateRef.current("");
 					event.preventDefault();
 					break;
 			}
 
-			navigateToChangeId(targetChangeId);
+			if (targetChangeId) {
+				onNavigateRef.current(targetChangeId);
+				requestAnimationFrame(() => {
+					const element = document.querySelector<HTMLElement>(
+						`[data-change-id="${targetChangeId}"]`,
+					);
+					if (element) {
+						element.focus({ preventScroll: true });
+						element.scrollIntoView({ block: "nearest", behavior: "smooth" });
+					}
+				});
+			}
 		}
 
 		window.addEventListener("keydown", handleKeyDown);
 		return () => window.removeEventListener("keydown", handleKeyDown);
-	}, [orderedRevisions, selectedChangeId, onNavigate]);
+	}, []);
 }
 
 export function useKeyboardShortcut({

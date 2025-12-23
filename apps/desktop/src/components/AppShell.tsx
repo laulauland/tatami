@@ -3,14 +3,20 @@ import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Effect } from "effect";
-import { useCallback, useMemo, useState } from "react";
+import { useState } from "react";
 import { AceJump } from "@/components/AceJump";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
-import { reorderForGraph, RevisionGraph } from "@/components/RevisionGraph";
+import { RevisionGraph, reorderForGraph } from "@/components/RevisionGraph";
 import { StatusBar } from "@/components/StatusBar";
 import { Toolbar } from "@/components/Toolbar";
-import { emptyRevisionsCollection, getRevisionsCollection, projectsCollection } from "@/db";
+import {
+	editRevision,
+	emptyRevisionsCollection,
+	getRevisionsCollection,
+	newRevision,
+	projectsCollection,
+} from "@/db";
 import { useKeyboardNavigation, useKeyboardShortcut, useKeySequence } from "@/hooks/useKeyboard";
 import {
 	findProjectByPath,
@@ -19,7 +25,6 @@ import {
 	type Revision,
 	upsertProject,
 } from "@/tauri-commands";
-import { editRevision, newRevision } from "@/db";
 
 const openDirectoryDialogEffect = Effect.gen(function* () {
 	const home = yield* Effect.tryPromise({
@@ -59,30 +64,26 @@ export function AppShell() {
 
 	const { data: projects = [] } = useLiveQuery(projectsCollection);
 
-	const activeProject = useMemo(
-		() => projects.find((p) => p.id === projectId) ?? null,
-		[projects, projectId],
-	);
+	const activeProject = projects.find((p) => p.id === projectId) ?? null;
 
-	const revisionsCollection = useMemo(
-		() => (activeProject ? getRevisionsCollection(activeProject.path) : emptyRevisionsCollection),
-		[activeProject],
-	);
+	const revisionsCollection = activeProject
+		? getRevisionsCollection(activeProject.path)
+		: emptyRevisionsCollection;
 
 	const { data: revisions = [], isLoading = false } = useLiveQuery(revisionsCollection);
 
-	const orderedRevisions = useMemo(() => reorderForGraph(revisions), [revisions]);
+	const orderedRevisions = reorderForGraph(revisions);
 
-	const selectedRevision = useMemo(() => {
+	const selectedRevision = (() => {
 		if (revisions.length === 0) return null;
 		if (rev) {
 			const found = revisions.find((r) => r.change_id === rev);
 			if (found) return found;
 		}
 		return revisions.find((r) => r.is_working_copy) || revisions[0];
-	}, [revisions, rev]);
+	})();
 
-	const handleOpenRepo = useCallback(() => {
+	function handleOpenRepo() {
 		const program = Effect.gen(function* () {
 			const selected = yield* openDirectoryDialogEffect;
 			if (!selected) return;
@@ -119,38 +120,29 @@ export function AppShell() {
 			Effect.catchAll(() => Effect.void),
 		);
 		Effect.runPromise(program);
-	}, [navigate]);
+	}
 
-	const handleSelectProject = useCallback(
-		(project: Project) => {
-			navigate({ to: "/project/$projectId", params: { projectId: project.id } });
-		},
-		[navigate],
-	);
+	function handleSelectProject(project: Project) {
+		navigate({ to: "/project/$projectId", params: { projectId: project.id } });
+	}
 
-	const handleSelectRevision = useCallback(
-		(revision: Revision) => {
-			if (!projectId) return;
-			navigate({
-				to: "/project/$projectId",
-				params: { projectId },
-				search: { rev: revision.change_id },
-			});
-		},
-		[navigate, projectId],
-	);
+	function handleSelectRevision(revision: Revision) {
+		if (!projectId) return;
+		navigate({
+			to: "/project/$projectId",
+			params: { projectId },
+			search: { rev: revision.change_id },
+		});
+	}
 
-	const handleNavigateToChangeId = useCallback(
-		(changeId: string) => {
-			if (!projectId) return;
-			navigate({
-				to: "/project/$projectId",
-				params: { projectId },
-				search: { rev: changeId || undefined },
-			});
-		},
-		[navigate, projectId],
-	);
+	function handleNavigateToChangeId(changeId: string) {
+		if (!projectId) return;
+		navigate({
+			to: "/project/$projectId",
+			params: { projectId },
+			search: { rev: changeId || undefined },
+		});
+	}
 
 	useKeyboardNavigation({
 		orderedRevisions,
@@ -158,23 +150,23 @@ export function AppShell() {
 		onNavigate: handleNavigateToChangeId,
 	});
 
-	const triggerFlash = useCallback((changeId: string) => {
+	function triggerFlash(changeId: string) {
 		setFlash({ changeId, key: Date.now() });
 		setTimeout(() => setFlash(null), 400);
-	}, []);
+	}
 
-	const handleYankId = useCallback(() => {
+	function handleYankId() {
 		if (!selectedRevision) return;
 		navigator.clipboard.writeText(selectedRevision.change_id);
 		triggerFlash(selectedRevision.change_id);
-	}, [selectedRevision, triggerFlash]);
+	}
 
-	const handleYankLink = useCallback(() => {
+	function handleYankLink() {
 		if (!selectedRevision || !projectId) return;
 		const link = `tatami://project/${projectId}/revision/${selectedRevision.change_id}`;
 		navigator.clipboard.writeText(link);
 		triggerFlash(selectedRevision.change_id);
-	}, [selectedRevision, projectId, triggerFlash]);
+	}
 
 	useKeySequence({ sequence: "yy", onTrigger: handleYankId, enabled: !!selectedRevision });
 	useKeySequence({
@@ -183,16 +175,16 @@ export function AppShell() {
 		enabled: !!selectedRevision && !!projectId,
 	});
 
-	const handleNew = useCallback(() => {
+	function handleNew() {
 		if (!activeProject || !selectedRevision) return;
 		newRevision(activeProject.path, [selectedRevision.change_id]);
-	}, [activeProject, selectedRevision]);
+	}
 
-	const handleEdit = useCallback(() => {
+	function handleEdit() {
 		if (!activeProject || !selectedRevision) return;
 		const currentWC = revisions.find((r) => r.is_working_copy);
 		editRevision(activeProject.path, selectedRevision.change_id, currentWC?.change_id ?? null);
-	}, [activeProject, selectedRevision, revisions]);
+	}
 
 	useKeyboardShortcut({
 		key: "n",
@@ -206,7 +198,7 @@ export function AppShell() {
 		enabled: !!activeProject && !!selectedRevision,
 	});
 
-	const closestBookmark = useMemo(() => {
+	const closestBookmark = (() => {
 		const workingCopy = revisions.find((r) => r.is_working_copy);
 		if (!workingCopy) return null;
 
@@ -224,8 +216,8 @@ export function AppShell() {
 		const queue = [...workingCopy.parent_ids];
 
 		while (queue.length > 0) {
-			const commitId = queue.shift()!;
-			if (visited.has(commitId)) continue;
+			const commitId = queue.shift();
+			if (!commitId || visited.has(commitId)) continue;
 			visited.add(commitId);
 
 			const rev = byCommitId.get(commitId);
@@ -239,7 +231,7 @@ export function AppShell() {
 		}
 
 		return null;
-	}, [revisions]);
+	})();
 
 	return (
 		<>

@@ -1,5 +1,5 @@
 import { useAtom } from "@effect-atom/atom-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { aceJumpOpenAtom } from "@/atoms";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import type { Revision } from "@/tauri-commands";
@@ -27,13 +27,13 @@ export function AceJump({ revisions, onJump }: AceJumpProps) {
 		}
 	}, [open]);
 
-	const matches = useMemo(() => {
+	const matches = (() => {
 		if (!query) return [];
 		const lowerQuery = query.toLowerCase();
 		return revisions.filter((r) => r.change_id.toLowerCase().startsWith(lowerQuery));
-	}, [revisions, query]);
+	})();
 
-	const handleSubmit = useCallback(() => {
+	function handleSubmit() {
 		if (matches.length === 1) {
 			onJump(matches[0].change_id);
 			setOpen(false);
@@ -41,7 +41,7 @@ export function AceJump({ revisions, onJump }: AceJumpProps) {
 			onJump(matches[0].change_id);
 			setOpen(false);
 		}
-	}, [matches, onJump, setOpen]);
+	}
 
 	useEffect(() => {
 		if (matches.length === 1 && query.length >= 2) {
@@ -50,18 +50,15 @@ export function AceJump({ revisions, onJump }: AceJumpProps) {
 		}
 	}, [matches, query, onJump, setOpen]);
 
-	const handleKeyDown = useCallback(
-		(e: React.KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.preventDefault();
-				setOpen(false);
-			} else if (e.key === "Enter") {
-				e.preventDefault();
-				handleSubmit();
-			}
-		},
-		[handleSubmit, setOpen],
-	);
+	function handleKeyDown(e: React.KeyboardEvent) {
+		if (e.key === "Escape") {
+			e.preventDefault();
+			setOpen(false);
+		} else if (e.key === "Enter") {
+			e.preventDefault();
+			handleSubmit();
+		}
+	}
 
 	if (!open) return null;
 

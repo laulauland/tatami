@@ -1,5 +1,10 @@
 {
 	"$schema": "node_modules/@biomejs/biome/configuration_schema.json",
+	"plugins": [
+		"./no-react-memoization.grit",
+		"./no-usestate.grit",
+		"./no-useeffect-data-fetching.grit"
+	],
 	"vcs": {
 		"enabled": false,
 		"clientKind": "git",

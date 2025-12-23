@@ -237,11 +237,9 @@ const handlers: Record<string, (args?: unknown) => unknown> = {
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
 	const handler = handlers[cmd];
 	if (!handler) {
-		console.warn(`[Mock] No handler for command: ${cmd}`);
 		throw new Error(`[Mock] No handler for command: ${cmd}`);
 	}
 	// Simulate network delay
 	await new Promise((r) => setTimeout(r, 50));
-	console.log(`[Mock] ${cmd}`, args ?? "");
 	return handler(args) as T;
 }

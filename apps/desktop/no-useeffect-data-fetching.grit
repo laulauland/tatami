@@ -1,0 +1,9 @@
+`$fn($args)` where {
+    $fn <: `useEffect`,
+    register_diagnostic(
+        span = $fn,
+        message = "useEffect for data fetching is discouraged. Use TanStack DB (useLiveQuery) instead.",
+        severity = "warn"
+    )
+}
+

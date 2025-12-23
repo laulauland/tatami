@@ -10,6 +10,7 @@ pub struct Project {
     pub path: String,
     pub name: String,
     pub last_opened_at: i64,
+    pub revset_preset: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,12 +52,18 @@ impl Storage {
                 id TEXT PRIMARY KEY,
                 path TEXT NOT NULL UNIQUE,
                 name TEXT NOT NULL,
-                last_opened_at INTEGER NOT NULL
+                last_opened_at INTEGER NOT NULL,
+                revset_preset TEXT
             )
             "#,
         )
         .execute(&pool)
         .await?;
+
+        // Migration: add revset_preset column if it doesn't exist
+        let _ = sqlx::query("ALTER TABLE projects ADD COLUMN revset_preset TEXT")
+            .execute(&pool)
+            .await;
 
         sqlx::query(
             r#"
@@ -87,19 +94,20 @@ impl Storage {
     }
 
     pub async fn get_projects(&self) -> anyhow::Result<Vec<Project>> {
-        let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
-            "SELECT id, path, name, last_opened_at FROM projects ORDER BY last_opened_at DESC",
+        let rows: Vec<(String, String, String, i64, Option<String>)> = sqlx::query_as(
+            "SELECT id, path, name, last_opened_at, revset_preset FROM projects ORDER BY last_opened_at DESC",
         )
         .fetch_all(&self.pool)
         .await?;
 
         Ok(rows
             .into_iter()
-            .map(|(id, path, name, last_opened_at)| Project {
+            .map(|(id, path, name, last_opened_at, revset_preset)| Project {
                 id,
                 path,
                 name,
                 last_opened_at,
+                revset_preset,
             })
             .collect())
     }
@@ -107,18 +115,20 @@ impl Storage {
     pub async fn upsert_project(&self, project: &Project) -> anyhow::Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO projects (id, path, name, last_opened_at)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO projects (id, path, name, last_opened_at, revset_preset)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 path = excluded.path,
                 name = excluded.name,
-                last_opened_at = excluded.last_opened_at
+                last_opened_at = excluded.last_opened_at,
+                revset_preset = excluded.revset_preset
             "#,
         )
         .bind(&project.id)
         .bind(&project.path)
         .bind(&project.name)
         .bind(project.last_opened_at)
+        .bind(&project.revset_preset)
         .execute(&self.pool)
         .await?;
 
@@ -126,17 +136,18 @@ impl Storage {
     }
 
     pub async fn find_project_by_path(&self, path: &str) -> anyhow::Result<Option<Project>> {
-        let row: Option<(String, String, String, i64)> =
-            sqlx::query_as("SELECT id, path, name, last_opened_at FROM projects WHERE path = ?")
+        let row: Option<(String, String, String, i64, Option<String>)> =
+            sqlx::query_as("SELECT id, path, name, last_opened_at, revset_preset FROM projects WHERE path = ?")
                 .bind(path)
                 .fetch_optional(&self.pool)
                 .await?;
 
-        Ok(row.map(|(id, path, name, last_opened_at)| Project {
+        Ok(row.map(|(id, path, name, last_opened_at, revset_preset)| Project {
             id,
             path,
             name,
             last_opened_at,
+            revset_preset,
         }))
     }
 

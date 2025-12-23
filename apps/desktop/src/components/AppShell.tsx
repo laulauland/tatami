@@ -1,9 +1,11 @@
+import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Effect } from "effect";
 import { useState } from "react";
+import { stackViewChangeIdAtom } from "@/atoms";
 import { AceJump } from "@/components/AceJump";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
@@ -55,6 +57,7 @@ export function AppShell() {
 	const { projectId } = useParams({ strict: false });
 	const { rev } = useSearch({ strict: false });
 	const [flash, setFlash] = useState<{ changeId: string; key: number } | null>(null);
+	const [stackViewChangeId, setStackViewChangeId] = useAtom(stackViewChangeIdAtom);
 
 	useKeyboardShortcut({
 		key: ",",
@@ -66,8 +69,20 @@ export function AppShell() {
 
 	const activeProject = projects.find((p) => p.id === projectId) ?? null;
 
+	// Build the stack revset: the branch from merge-base to the selected commit
+	// (::X ~ ::trunk()) gives ancestors of X that are NOT ancestors of trunk (the branch)
+	// roots(...)- gives the parent of the first branch commit (the merge base)
+	// (X & ::trunk()) handles the case where X is already an ancestor of trunk (just show X)
+	const stackRevset = stackViewChangeId
+		? `(::${stackViewChangeId} ~ ::trunk()) | roots(::${stackViewChangeId} ~ ::trunk())- | (${stackViewChangeId} & ::trunk())`
+		: undefined;
+
 	const revisionsCollection = activeProject
-		? getRevisionsCollection(activeProject.path)
+		? getRevisionsCollection(
+				activeProject.path,
+				activeProject.revset_preset ?? undefined,
+				stackRevset,
+			)
 		: emptyRevisionsCollection;
 
 	const { data: revisions = [], isLoading = false } = useLiveQuery(revisionsCollection);
@@ -104,6 +119,7 @@ export function AppShell() {
 				path: repoPath,
 				name,
 				last_opened_at: Date.now(),
+				revset_preset: null,
 			};
 
 			yield* Effect.tryPromise({
@@ -123,6 +139,7 @@ export function AppShell() {
 	}
 
 	function handleSelectProject(project: Project) {
+		setStackViewChangeId(null); // Clear stack view when switching projects
 		navigate({ to: "/project/$projectId", params: { projectId: project.id } });
 	}
 
@@ -186,6 +203,17 @@ export function AppShell() {
 		editRevision(activeProject.path, selectedRevision.change_id, currentWC?.change_id ?? null);
 	}
 
+	function handlePresetChange(preset: string | null) {
+		if (!activeProject || !preset) return;
+		const updatedProject: Project = {
+			...activeProject,
+			revset_preset: preset,
+			last_opened_at: Date.now(),
+		};
+		upsertProject(updatedProject);
+		projectsCollection.utils.writeUpsert([updatedProject]);
+	}
+
 	useKeyboardShortcut({
 		key: "n",
 		onPress: handleNew,
@@ -195,6 +223,24 @@ export function AppShell() {
 	useKeyboardShortcut({
 		key: "e",
 		onPress: handleEdit,
+		enabled: !!activeProject && !!selectedRevision,
+	});
+
+	// Toggle stack view: show only ancestors from selected revision to trunk
+	function handleToggleStackView() {
+		if (!selectedRevision) return;
+		if (stackViewChangeId) {
+			// Turn off stack view
+			setStackViewChangeId(null);
+		} else {
+			// Turn on stack view anchored to selected revision
+			setStackViewChangeId(selectedRevision.change_id);
+		}
+	}
+
+	useKeyboardShortcut({
+		key: "s",
+		onPress: handleToggleStackView,
 		enabled: !!activeProject && !!selectedRevision,
 	});
 
@@ -243,7 +289,11 @@ export function AppShell() {
 			<KeyboardShortcutsHelp />
 			<AceJump revisions={orderedRevisions} onJump={handleNavigateToChangeId} />
 			<div className="flex flex-col h-screen overflow-hidden">
-				<Toolbar repoPath={activeProject?.path ?? null} />
+				<Toolbar
+					repoPath={activeProject?.path ?? null}
+					currentPreset={activeProject?.revset_preset ?? "active"}
+					onPresetChange={handlePresetChange}
+				/>
 				<section className="flex-1 min-h-0" aria-label="Revision list">
 					<RevisionGraph
 						revisions={revisions}

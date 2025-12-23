@@ -49,9 +49,9 @@ fn find_repository(start_path: String) -> Option<String> {
 }
 
 #[tauri::command]
-async fn get_revisions(repo_path: String, limit: usize, revset: Option<String>) -> Result<Vec<Revision>, String> {
+async fn get_revisions(repo_path: String, limit: usize, revset: Option<String>, preset: Option<String>) -> Result<Vec<Revision>, String> {
     let path = Path::new(&repo_path);
-    repo::log::fetch_log(path, limit, revset.as_deref()).map_err(|e| format!("Failed to fetch log: {}", e))
+    repo::log::fetch_log(path, limit, revset.as_deref(), preset.as_deref()).map_err(|e| format!("Failed to fetch log: {}", e))
 }
 
 #[tauri::command]

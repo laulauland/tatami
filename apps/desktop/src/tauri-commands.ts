@@ -20,8 +20,9 @@ export async function getRevisions(
 	repoPath: string,
 	limit: number,
 	revset?: string,
+	preset?: string,
 ): Promise<Revision[]> {
-	return invoke<Revision[]>("get_revisions", { repoPath, limit, revset });
+	return invoke<Revision[]>("get_revisions", { repoPath, limit, revset, preset });
 }
 
 export async function getStatus(repoPath: string): Promise<WorkingCopyStatus> {

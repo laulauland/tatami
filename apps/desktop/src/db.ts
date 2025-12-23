@@ -28,12 +28,13 @@ export const emptyRevisionsCollection = createCollection({
 const revisionCollections = new Map<string, ReturnType<typeof createRevisionsCollection>>();
 const revisionWatchers = new Map<string, { unlisten: () => void; refCount: number }>();
 
-function createRevisionsCollection(repoPath: string) {
+function createRevisionsCollection(repoPath: string, preset?: string, customRevset?: string) {
+	const limit = preset === "full_history" ? 10000 : 100;
 	const collection = createCollection({
 		...queryCollectionOptions({
 			queryClient,
-			queryKey: ["revisions", repoPath],
-			queryFn: () => getRevisions(repoPath, 100),
+			queryKey: ["revisions", repoPath, preset, customRevset],
+			queryFn: () => getRevisions(repoPath, limit, customRevset, customRevset ? undefined : preset),
 			getKey: (revision: Revision) => revision.change_id,
 		}),
 	});
@@ -49,7 +50,12 @@ function createRevisionsCollection(repoPath: string) {
 		await watchRepository(repoPath);
 		const unlisten = await listen<string>("repo-changed", async (event) => {
 			if (event.payload === repoPath) {
-				const revisions = await getRevisions(repoPath, 100);
+				const revisions = await getRevisions(
+					repoPath,
+					limit,
+					customRevset,
+					customRevset ? undefined : preset,
+				);
 				const newIds = new Set(revisions.map((r) => r.change_id));
 				for (const key of collection.state.keys()) {
 					if (!newIds.has(key)) {
@@ -68,11 +74,12 @@ function createRevisionsCollection(repoPath: string) {
 	return collection;
 }
 
-export function getRevisionsCollection(repoPath: string) {
-	let collection = revisionCollections.get(repoPath);
+export function getRevisionsCollection(repoPath: string, preset?: string, customRevset?: string) {
+	const cacheKey = `${repoPath}:${preset ?? "active"}:${customRevset ?? ""}`;
+	let collection = revisionCollections.get(cacheKey);
 	if (!collection) {
-		collection = createRevisionsCollection(repoPath);
-		revisionCollections.set(repoPath, collection);
+		collection = createRevisionsCollection(repoPath, preset, customRevset);
+		revisionCollections.set(cacheKey, collection);
 	}
 	return collection;
 }

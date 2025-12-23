@@ -9,8 +9,8 @@ const shortcuts = [
 		items: [
 			{ keys: ["j", "↓"], description: "Move down" },
 			{ keys: ["k", "↑"], description: "Move up" },
-			{ keys: ["J"], description: "Jump to parent revision" },
-			{ keys: ["K"], description: "Jump to child revision" },
+			{ keys: ["J / -"], description: "Jump to parent revision" },
+			{ keys: ["K / + / ="], description: "Jump to child revision" },
 			{ keys: ["@"], description: "Jump to working copy" },
 			{ keys: ["f"], description: "Jump to revision by ID prefix" },
 			{ keys: ["g g"], description: "Jump to first revision" },

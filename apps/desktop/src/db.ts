@@ -75,7 +75,7 @@ function createRevisionsCollection(repoPath: string, preset?: string, customRevs
 }
 
 export function getRevisionsCollection(repoPath: string, preset?: string, customRevset?: string) {
-	const cacheKey = `${repoPath}:${preset ?? "active"}:${customRevset ?? ""}`;
+	const cacheKey = `${repoPath}:${preset ?? "full_history"}:${customRevset ?? ""}`;
 	let collection = revisionCollections.get(cacheKey);
 	if (!collection) {
 		collection = createRevisionsCollection(repoPath, preset, customRevset);

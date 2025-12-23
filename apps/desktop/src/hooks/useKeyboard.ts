@@ -1,10 +1,16 @@
 import { useEffect, useRef } from "react";
 import type { Revision } from "@/tauri-commands";
 
+interface ScrollOptions {
+	align?: "auto" | "center";
+	smooth?: boolean;
+}
+
 interface UseKeyboardNavigationOptions {
 	orderedRevisions: Revision[];
 	selectedChangeId: string | null;
 	onNavigate: (changeId: string) => void;
+	scrollToChangeId?: (changeId: string, options?: ScrollOptions) => void;
 }
 
 interface UseKeyboardShortcutOptions {
@@ -33,15 +39,18 @@ export function useKeyboardNavigation({
 	orderedRevisions,
 	selectedChangeId,
 	onNavigate,
+	scrollToChangeId,
 }: UseKeyboardNavigationOptions) {
 	// Use refs to avoid stale closures in event handler
 	const orderedRevisionsRef = useRef(orderedRevisions);
 	const selectedChangeIdRef = useRef(selectedChangeId);
 	const onNavigateRef = useRef(onNavigate);
+	const scrollToChangeIdRef = useRef(scrollToChangeId);
 
 	orderedRevisionsRef.current = orderedRevisions;
 	selectedChangeIdRef.current = selectedChangeId;
 	onNavigateRef.current = onNavigate;
+	scrollToChangeIdRef.current = scrollToChangeId;
 
 	useKeySequence({
 		sequence: "gg",
@@ -50,15 +59,7 @@ export function useKeyboardNavigation({
 			const targetChangeId = revisions[0]?.change_id || null;
 			if (targetChangeId) {
 				onNavigateRef.current(targetChangeId);
-				requestAnimationFrame(() => {
-					const element = document.querySelector<HTMLElement>(
-						`[data-change-id="${targetChangeId}"]`,
-					);
-					if (element) {
-						element.focus({ preventScroll: true });
-						element.scrollIntoView({ block: "nearest", behavior: "smooth" });
-					}
-				});
+				scrollToChangeIdRef.current?.(targetChangeId, { align: "center", smooth: true });
 			}
 		},
 		enabled: orderedRevisions.length > 0,
@@ -82,54 +83,80 @@ export function useKeyboardNavigation({
 			const currentRevision = revisions[currentIndex] ?? null;
 
 			let targetChangeId: string | null = null;
+			// "jump" = always scroll to center, "step" = scroll only if needed, "none" = no explicit scroll
+			let scrollMode: "jump" | "step" | "none" = "none";
 
-			switch (event.key) {
-				case "j":
-				case "ArrowDown":
+			// Check for - and + using code (more reliable across keyboard layouts)
+			const isMinusKey =
+				event.key === "-" || event.code === "Minus" || event.code === "NumpadSubtract";
+			const isPlusKey =
+				event.key === "+" ||
+				event.key === "=" ||
+				event.code === "Equal" ||
+				event.code === "NumpadAdd";
+
+			switch (true) {
+				case event.key === "j" || event.key === "ArrowDown":
 					if (currentIndex >= 0 && currentIndex < revisions.length - 1) {
 						targetChangeId = revisions[currentIndex + 1].change_id;
+						scrollMode = "step";
 					}
 					event.preventDefault();
 					break;
 
-				case "k":
-				case "ArrowUp":
+				case event.key === "k" || event.key === "ArrowUp":
 					if (currentIndex > 0) {
 						targetChangeId = revisions[currentIndex - 1].change_id;
+						scrollMode = "step";
 					}
 					event.preventDefault();
 					break;
 
-				case "J":
-					if (currentRevision && currentRevision.parent_ids.length > 0) {
-						const parentId = currentRevision.parent_ids[0];
-						const parentRevision = revisions.find((r) => r.commit_id === parentId);
-						targetChangeId = parentRevision?.change_id || null;
-					}
-					event.preventDefault();
-					break;
-
-				case "K":
+				case event.key === "J" || isMinusKey:
 					if (currentRevision) {
-						const childRevision = revisions.find((r) =>
-							r.parent_ids.includes(currentRevision.commit_id),
-						);
-						targetChangeId = childRevision?.change_id || null;
+						// Navigate to parent revision
+						const parentId =
+							currentRevision.parent_ids[0] || currentRevision.parent_edges[0]?.parent_id;
+						if (parentId) {
+							const parentRevision = revisions.find((r) => r.commit_id === parentId);
+							if (parentRevision) {
+								targetChangeId = parentRevision.change_id;
+								scrollMode = "step";
+							}
+						}
 					}
 					event.preventDefault();
 					break;
 
-				case "@":
+				case event.key === "K" || isPlusKey:
+					if (currentRevision) {
+						// Find child by checking if any revision has current as parent
+						const childRevision = revisions.find(
+							(r) =>
+								r.parent_ids.includes(currentRevision.commit_id) ||
+								r.parent_edges.some((e) => e.parent_id === currentRevision.commit_id),
+						);
+						if (childRevision) {
+							targetChangeId = childRevision.change_id;
+							scrollMode = "step";
+						}
+					}
+					event.preventDefault();
+					break;
+
+				case event.key === "@":
 					targetChangeId = revisions.find((r) => r.is_working_copy)?.change_id || null;
+					scrollMode = "jump";
 					event.preventDefault();
 					break;
 
-				case "G":
+				case event.key === "G":
 					targetChangeId = revisions[revisions.length - 1]?.change_id || null;
+					scrollMode = "jump";
 					event.preventDefault();
 					break;
 
-				case "Escape":
+				case event.key === "Escape":
 					onNavigateRef.current("");
 					event.preventDefault();
 					break;
@@ -137,15 +164,11 @@ export function useKeyboardNavigation({
 
 			if (targetChangeId) {
 				onNavigateRef.current(targetChangeId);
-				requestAnimationFrame(() => {
-					const element = document.querySelector<HTMLElement>(
-						`[data-change-id="${targetChangeId}"]`,
-					);
-					if (element) {
-						element.focus({ preventScroll: true });
-						element.scrollIntoView({ block: "nearest", behavior: "smooth" });
-					}
-				});
+				if (scrollMode === "jump") {
+					scrollToChangeIdRef.current?.(targetChangeId, { align: "center", smooth: true });
+				} else if (scrollMode === "step") {
+					scrollToChangeIdRef.current?.(targetChangeId, { align: "auto", smooth: false });
+				}
 			}
 		}
 

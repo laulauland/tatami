@@ -8,7 +8,11 @@ import { queryClient } from "./db";
 import { routeTree } from "./routeTree.gen";
 import "./styles/index.css";
 
-const router = createRouter({ routeTree });
+const router = createRouter({
+	routeTree,
+	defaultPreloadStaleTime: 0,
+	scrollRestoration: false,
+});
 
 function handleDeepLinks(urls: string[]) {
 	for (const url of urls) {

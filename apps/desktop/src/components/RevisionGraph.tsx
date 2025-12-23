@@ -1,8 +1,128 @@
 import { useSearch } from "@tanstack/react-router";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import type { Revision } from "@/tauri-commands";
+
+// Debug overlay - toggle with Ctrl+Shift+D
+const DEBUG_OVERLAY_DEFAULT = false;
+
+function DebugOverlay({
+	enabled,
+	scrollRef,
+	selectedIndex,
+	visibleStartRow,
+	visibleEndRow,
+	totalRows,
+}: {
+	enabled: boolean;
+	scrollRef: React.RefObject<HTMLDivElement | null>;
+	selectedIndex: number | undefined;
+	visibleStartRow: number;
+	visibleEndRow: number;
+	totalRows: number;
+}) {
+	// Force re-render on scroll/resize/focus
+	const [, forceUpdate] = useState(0);
+
+	useEffect(() => {
+		if (!enabled) return;
+		const el = scrollRef.current;
+		if (!el) return;
+
+		const update = () => forceUpdate((n) => n + 1);
+		el.addEventListener("scroll", update);
+		window.addEventListener("resize", update);
+		document.addEventListener("focusin", update);
+		return () => {
+			el.removeEventListener("scroll", update);
+			window.removeEventListener("resize", update);
+			document.removeEventListener("focusin", update);
+		};
+	}, [scrollRef, enabled]);
+
+	if (!enabled) return null;
+
+	const el = scrollRef.current;
+	const scrollTop = el?.scrollTop ?? 0;
+	const clientHeight = el?.clientHeight ?? 0;
+	const scrollHeight = el?.scrollHeight ?? 0;
+
+	const selectedItemTop = selectedIndex !== undefined ? selectedIndex * ROW_HEIGHT : 0;
+	const selectedItemBottom = selectedItemTop + ROW_HEIGHT;
+	const distanceFromTop = selectedItemTop - scrollTop;
+	const distanceFromBottom = scrollTop + clientHeight - selectedItemBottom;
+	const isInViewport = distanceFromTop >= 0 && distanceFromBottom >= 0;
+
+	const active = document.activeElement;
+	const activeElement = active
+		? `${active.tagName}${active.className ? `.${active.className.split(" ")[0]}` : ""}`
+		: "none";
+
+	const info = {
+		scrollTop,
+		clientHeight,
+		scrollHeight,
+		viewportEnd: scrollTop + clientHeight,
+		selectedIndex,
+		itemTop: selectedItemTop,
+		itemBottom: selectedItemBottom,
+		distFromTop: distanceFromTop,
+		distFromBottom: distanceFromBottom,
+		isInViewport,
+		virtualRange: `${visibleStartRow}-${visibleEndRow}`,
+		totalRows,
+		ROW_HEIGHT,
+		activeElement,
+	};
+
+	return (
+		<div
+			className="fixed bottom-12 right-4 z-50 bg-black/90 text-green-400 font-mono text-xs p-3 rounded-lg shadow-lg max-w-xs cursor-pointer hover:bg-black/95 active:scale-95 transition-transform"
+			onClick={() => navigator.clipboard.writeText(JSON.stringify(info, null, 2))}
+			title="Click to copy"
+		>
+			<div className="font-bold text-green-300 mb-2">
+				Debug Info <span className="text-green-600">(click to copy)</span>
+			</div>
+			<div className="space-y-1">
+				<div>scrollTop: {scrollTop.toFixed(0)}</div>
+				<div>clientHeight: {clientHeight.toFixed(0)}</div>
+				<div>scrollHeight: {scrollHeight}</div>
+				<div>viewportEnd: {(scrollTop + clientHeight).toFixed(0)}</div>
+				<div className="border-t border-green-800 my-2" />
+				<div>selectedIndex: {selectedIndex ?? "none"}</div>
+				<div>itemTop: {selectedItemTop}</div>
+				<div>itemBottom: {selectedItemBottom}</div>
+				<div className="border-t border-green-800 my-2" />
+				<div>distFromTop: {distanceFromTop.toFixed(0)}</div>
+				<div>distFromBottom: {distanceFromBottom.toFixed(0)}</div>
+				<div className={isInViewport ? "text-green-400" : "text-red-400"}>
+					inViewport: {isInViewport ? "YES" : "NO"}
+				</div>
+				<div className="border-t border-green-800 my-2" />
+				<div>
+					virtualRange: {visibleStartRow}-{visibleEndRow}
+				</div>
+				<div>totalRows: {totalRows}</div>
+				<div>ROW_HEIGHT: {ROW_HEIGHT}</div>
+				<div className="border-t border-green-800 my-2" />
+				<div className="truncate" title={activeElement}>
+					focus: {activeElement}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+export interface RevisionGraphHandle {
+	scrollToChangeId: (
+		changeId: string,
+		options?: { align?: "auto" | "center"; smooth?: boolean },
+	) => void;
+}
 
 interface RevisionGraphProps {
 	revisions: Revision[];
@@ -379,17 +499,56 @@ function laneColor(lane: number): string {
 	return LANE_COLORS[lane % LANE_COLORS.length];
 }
 
-function GraphColumn({ nodes, laneCount }: { nodes: GraphNode[]; laneCount: number }) {
+interface GraphColumnProps {
+	nodes: GraphNode[];
+	laneCount: number;
+	visibleStartRow: number;
+	visibleEndRow: number;
+	totalHeight: number;
+}
+
+function GraphColumn({
+	nodes,
+	laneCount,
+	visibleStartRow,
+	visibleEndRow,
+	totalHeight,
+}: GraphColumnProps) {
 	const { rev: selectedChangeId } = useSearch({ strict: false });
-	const height = nodes.length * ROW_HEIGHT;
 	// Minimal right padding - tight fit for the rightmost node
 	const width = LANE_PADDING + laneCount * LANE_WIDTH + NODE_RADIUS + 2;
 
+	// Add overscan for edges that might span across viewport boundary
+	const overscan = 5;
+	const startRow = Math.max(0, visibleStartRow - overscan);
+	const endRow = Math.min(nodes.length - 1, visibleEndRow + overscan);
+
+	// Filter nodes that are in the visible range
+	const visibleNodes = nodes.filter((node) => node.row >= startRow && node.row <= endRow);
+
+	// Also include nodes whose edges pass through the visible area
+	const nodesWithVisibleEdges = nodes.filter((node) => {
+		if (node.row >= startRow && node.row <= endRow) return false; // Already included
+		return node.parentConnections.some((conn) => {
+			const minRow = Math.min(node.row, conn.parentRow);
+			const maxRow = Math.max(node.row, conn.parentRow);
+			return maxRow >= startRow && minRow <= endRow;
+		});
+	});
+
+	const allVisibleNodes = [...visibleNodes, ...nodesWithVisibleEdges];
+
 	return (
-		<svg width={width} height={height} className="shrink-0" role="img" aria-label="Revision graph">
+		<svg
+			width={width}
+			height={totalHeight}
+			className="shrink-0 absolute top-0 left-0 pointer-events-none"
+			role="img"
+			aria-label="Revision graph"
+		>
 			<title>Revision graph</title>
 			{/* Edges */}
-			{nodes.map((node) => {
+			{allVisibleNodes.map((node) => {
 				const y = node.row * ROW_HEIGHT + ROW_HEIGHT / 2;
 				const x = laneToX(node.lane);
 				const color = laneColor(node.lane);
@@ -469,8 +628,8 @@ function GraphColumn({ nodes, laneCount }: { nodes: GraphNode[]; laneCount: numb
 				);
 			})}
 
-			{/* Nodes */}
-			{nodes.map((node) => {
+			{/* Nodes - only render visible ones */}
+			{visibleNodes.map((node) => {
 				const y = node.row * ROW_HEIGHT + ROW_HEIGHT / 2;
 				const x = laneToX(node.lane);
 				const color = laneColor(node.lane);
@@ -555,13 +714,13 @@ function RevisionRow({
 		<div style={{ height: ROW_HEIGHT }} className="flex items-center">
 			<div style={{ width: indent }} className="shrink-0" />
 			<div
-				className={`flex-1 mr-2 revision-row-3d transition-opacity duration-150 ${revision.is_immutable ? "opacity-60" : ""} ${isDimmed ? "opacity-40" : ""}`}
+				className={`flex-1 mr-2 bg-background rounded my-0.5 mx-1 shadow-sm hover:shadow dark:bg-[oklch(0.18_0.005_49)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.03)] dark:hover:shadow-[0_3px_6px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.05)] transition-opacity duration-150 ${revision.is_immutable ? "opacity-60" : ""} ${isDimmed ? "opacity-40" : ""}`}
 			>
 				<Button
 					variant="ghost"
 					onClick={() => onSelect(revision.change_id)}
 					data-change-id={revision.change_id}
-					className={`w-full h-full justify-start text-left px-3 py-2 animate-in fade-in slide-in-from-left-1 duration-150 rounded focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-0 hover:bg-transparent ${
+					className={`w-full h-full justify-start text-left px-3 py-2 rounded ring-0 outline-none focus:ring-0 focus:outline-none focus-visible:ring-0 focus-visible:outline-none hover:bg-transparent ${
 						isSelected ? "bg-accent/50 text-accent-foreground" : ""
 					}`}
 				>
@@ -653,56 +812,186 @@ function getRelatedRevisions(revisions: Revision[], selectedChangeId: string | n
 	return related;
 }
 
-export function RevisionGraph({
-	revisions,
-	selectedRevision,
-	onSelectRevision,
-	isLoading,
-	flash,
-}: RevisionGraphProps) {
-	const { nodes, laneCount, rows } = buildGraph(revisions);
+export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>(
+	function RevisionGraph({ revisions, selectedRevision, onSelectRevision, isLoading, flash }, ref) {
+		const parentRef = useRef<HTMLDivElement>(null);
+		const { nodes, laneCount, rows } = buildGraph(revisions);
 
-	const revisionMap = new Map(revisions.map((r) => [r.change_id, r]));
-	const relatedRevisions = getRelatedRevisions(revisions, selectedRevision?.change_id ?? null);
+		const revisionMap = new Map(revisions.map((r) => [r.change_id, r]));
+		const relatedRevisions = getRelatedRevisions(revisions, selectedRevision?.change_id ?? null);
 
-	function handleSelect(changeId: string) {
-		const revision = revisionMap.get(changeId);
-		if (revision) onSelectRevision(revision);
-	}
+		// Build change_id -> row index map for scrolling
+		const changeIdToIndex = new Map<string, number>();
+		for (let i = 0; i < rows.length; i++) {
+			changeIdToIndex.set(rows[i].revision.change_id, i);
+		}
 
-	if (revisions.length === 0) {
+		const [debugEnabled, setDebugEnabled] = useState(DEBUG_OVERLAY_DEFAULT);
+		const debugEnabledRef = useRef(debugEnabled);
+		debugEnabledRef.current = debugEnabled;
+
+		// Toggle debug overlay with Ctrl+Shift+D
+		useKeyboardShortcut({
+			key: "D",
+			modifiers: { ctrl: true, shift: true },
+			onPress: () => setDebugEnabled((prev) => !prev),
+		});
+
+		const rowVirtualizer = useVirtualizer({
+			count: rows.length,
+			getScrollElement: () => parentRef.current,
+			estimateSize: () => ROW_HEIGHT,
+			overscan: 10,
+			debug: debugEnabled,
+		});
+
+		// Expose scrollToChangeId method via ref
+		useImperativeHandle(ref, () => ({
+			scrollToChangeId: (
+				changeId: string,
+				options?: { align?: "auto" | "center"; smooth?: boolean },
+			) => {
+				const debug = debugEnabledRef.current;
+				const index = changeIdToIndex.get(changeId);
+				if (index === undefined) {
+					if (debug) console.log("[scroll] changeId not found:", changeId);
+					return;
+				}
+
+				const scrollElement = parentRef.current;
+				if (!scrollElement) {
+					if (debug) console.log("[scroll] scrollElement is null");
+					return;
+				}
+
+				const scrollTop = scrollElement.scrollTop;
+				const viewportHeight = scrollElement.clientHeight;
+				const scrollHeight = scrollElement.scrollHeight;
+				const itemTop = index * ROW_HEIGHT;
+				const itemBottom = itemTop + ROW_HEIGHT;
+
+				if (debug) {
+					console.log("[scroll] called:", {
+						index,
+						options,
+						scrollTop,
+						viewportHeight,
+						scrollHeight,
+						itemTop,
+						itemBottom,
+					});
+				}
+
+				// For jump commands (smooth/center), always scroll
+				if (options?.smooth || options?.align === "center") {
+					if (debug) console.log("[scroll] using scrollToIndex (jump)");
+					rowVirtualizer.scrollToIndex(index, {
+						align: "center",
+						behavior: "smooth",
+					});
+					return;
+				}
+
+				// For step navigation, manually scroll only if item is outside viewport
+				const isAboveViewport = itemTop < scrollTop;
+				const isBelowViewport = itemBottom > scrollTop + viewportHeight;
+
+				if (debug) {
+					console.log("[scroll] visibility:", { isAboveViewport, isBelowViewport });
+				}
+
+				if (isAboveViewport) {
+					const newScrollTop = itemTop;
+					if (debug) console.log("[scroll] scrolling UP to:", newScrollTop);
+					scrollElement.scrollTop = newScrollTop;
+				} else if (isBelowViewport) {
+					const newScrollTop = itemBottom - viewportHeight;
+					if (debug) console.log("[scroll] scrolling DOWN to:", newScrollTop);
+					scrollElement.scrollTop = newScrollTop;
+				} else {
+					if (debug) console.log("[scroll] item already visible, no scroll needed");
+				}
+			},
+		}));
+
+		function handleSelect(changeId: string) {
+			const revision = revisionMap.get(changeId);
+			if (revision) onSelectRevision(revision);
+		}
+
+		if (revisions.length === 0) {
+			return (
+				<div className="flex items-center justify-center h-full bg-background text-muted-foreground text-sm">
+					{isLoading ? "Loading revisions..." : "Select a project to view revisions"}
+				</div>
+			);
+		}
+
+		const virtualItems = rowVirtualizer.getVirtualItems();
+		const visibleStartRow = virtualItems[0]?.index ?? 0;
+		const visibleEndRow = virtualItems[virtualItems.length - 1]?.index ?? 0;
+		const totalHeight = rowVirtualizer.getTotalSize();
+
+		const selectedIndex = selectedRevision ? changeIdToIndex.get(selectedRevision.change_id) : undefined;
+
 		return (
-			<div className="flex items-center justify-center h-full bg-background text-muted-foreground text-sm">
-				{isLoading ? "Loading revisions..." : "Select a project to view revisions"}
+			<div ref={parentRef} className="h-full overflow-auto ascii-bg" style={{ overflowAnchor: "none" }}>
+				<div
+					className="relative"
+					style={{
+						height: `${totalHeight}px`,
+						width: "100%",
+					}}
+				>
+					{/* Graph column - positioned absolutely, scrolls with content */}
+					<GraphColumn
+						nodes={nodes}
+						laneCount={laneCount}
+						visibleStartRow={visibleStartRow}
+						visibleEndRow={visibleEndRow}
+						totalHeight={totalHeight}
+					/>
+
+					{/* Virtualized rows */}
+					<div className="relative z-10">
+						{virtualItems.map((virtualRow) => {
+							const row = rows[virtualRow.index];
+							const isFlashing = flash?.changeId === row.revision.change_id;
+							const isDimmed =
+								selectedRevision !== null && !relatedRevisions.has(row.revision.change_id);
+							return (
+								<div
+									key={row.revision.change_id}
+									className="absolute left-0 w-full"
+									style={{
+										height: `${virtualRow.size}px`,
+										transform: `translateY(${virtualRow.start}px)`,
+									}}
+								>
+									<RevisionRow
+										revision={row.revision}
+										maxLaneOnRow={row.maxLaneOnRow}
+										isSelected={selectedRevision?.change_id === row.revision.change_id}
+										onSelect={handleSelect}
+										isFlashing={isFlashing}
+										isDimmed={isDimmed}
+									/>
+								</div>
+							);
+						})}
+					</div>
+				</div>
+
+				{/* Debug overlay - toggle with Ctrl+Shift+D */}
+				<DebugOverlay
+					enabled={debugEnabled}
+					scrollRef={parentRef}
+					selectedIndex={selectedIndex}
+					visibleStartRow={visibleStartRow}
+					visibleEndRow={visibleEndRow}
+					totalRows={rows.length}
+				/>
 			</div>
 		);
-	}
-
-	return (
-		<ScrollArea className="h-full ascii-bg">
-			<div className="relative py-1">
-				<div className="absolute top-0 left-0 z-0 pointer-events-none">
-					<GraphColumn nodes={nodes} laneCount={laneCount} />
-				</div>
-				<div className="relative z-10">
-					{rows.map((row) => {
-						const isFlashing = flash?.changeId === row.revision.change_id;
-						const isDimmed =
-							selectedRevision !== null && !relatedRevisions.has(row.revision.change_id);
-						return (
-							<RevisionRow
-								key={row.revision.change_id}
-								revision={row.revision}
-								maxLaneOnRow={row.maxLaneOnRow}
-								isSelected={selectedRevision?.change_id === row.revision.change_id}
-								onSelect={handleSelect}
-								isFlashing={isFlashing}
-								isDimmed={isDimmed}
-							/>
-						);
-					})}
-				</div>
-			</div>
-		</ScrollArea>
-	);
-}
+	},
+);

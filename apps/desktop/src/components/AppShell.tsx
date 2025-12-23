@@ -4,14 +4,19 @@ import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { homeDir } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Effect } from "effect";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { stackViewChangeIdAtom } from "@/atoms";
 import { AceJump } from "@/components/AceJump";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
-import { RevisionGraph, reorderForGraph } from "@/components/RevisionGraph";
+import {
+	RevisionGraph,
+	type RevisionGraphHandle,
+	reorderForGraph,
+} from "@/components/RevisionGraph";
+import { StackIndicator } from "@/components/StackIndicator";
 import { StatusBar } from "@/components/StatusBar";
-import { Toolbar } from "@/components/Toolbar";
+
 import {
 	editRevision,
 	emptyRevisionsCollection,
@@ -58,6 +63,7 @@ export function AppShell() {
 	const { rev } = useSearch({ strict: false });
 	const [flash, setFlash] = useState<{ changeId: string; key: number } | null>(null);
 	const [stackViewChangeId, setStackViewChangeId] = useAtom(stackViewChangeIdAtom);
+	const revisionGraphRef = useRef<RevisionGraphHandle>(null);
 
 	useKeyboardShortcut({
 		key: ",",
@@ -69,18 +75,19 @@ export function AppShell() {
 
 	const activeProject = projects.find((p) => p.id === projectId) ?? null;
 
-	// Build the stack revset: the branch from merge-base to the selected commit
-	// (::X ~ ::trunk()) gives ancestors of X that are NOT ancestors of trunk (the branch)
+	// Build the stack revset: the full branch containing the selected commit
+	// (::X ~ ::trunk()) gives ancestors of X that are NOT ancestors of trunk (the branch below X)
+	// X:: gives descendants of X (the branch above X)
 	// roots(...)- gives the parent of the first branch commit (the merge base)
 	// (X & ::trunk()) handles the case where X is already an ancestor of trunk (just show X)
 	const stackRevset = stackViewChangeId
-		? `(::${stackViewChangeId} ~ ::trunk()) | roots(::${stackViewChangeId} ~ ::trunk())- | (${stackViewChangeId} & ::trunk())`
+		? `(::${stackViewChangeId} ~ ::trunk()) | (${stackViewChangeId}:: ~ ::trunk()) | roots(::${stackViewChangeId} ~ ::trunk())- | (${stackViewChangeId} & ::trunk())`
 		: undefined;
 
 	const revisionsCollection = activeProject
 		? getRevisionsCollection(
 				activeProject.path,
-				activeProject.revset_preset ?? undefined,
+				activeProject.revset_preset ?? "full_history",
 				stackRevset,
 			)
 		: emptyRevisionsCollection;
@@ -165,6 +172,7 @@ export function AppShell() {
 		orderedRevisions,
 		selectedChangeId: rev ?? null,
 		onNavigate: handleNavigateToChangeId,
+		scrollToChangeId: (changeId) => revisionGraphRef.current?.scrollToChangeId(changeId),
 	});
 
 	function triggerFlash(changeId: string) {
@@ -201,17 +209,6 @@ export function AppShell() {
 		if (!activeProject || !selectedRevision) return;
 		const currentWC = revisions.find((r) => r.is_working_copy);
 		editRevision(activeProject.path, selectedRevision.change_id, currentWC?.change_id ?? null);
-	}
-
-	function handlePresetChange(preset: string | null) {
-		if (!activeProject || !preset) return;
-		const updatedProject: Project = {
-			...activeProject,
-			revset_preset: preset,
-			last_opened_at: Date.now(),
-		};
-		upsertProject(updatedProject);
-		projectsCollection.utils.writeUpsert([updatedProject]);
 	}
 
 	useKeyboardShortcut({
@@ -287,15 +284,23 @@ export function AppShell() {
 				onOpenRepo={handleOpenRepo}
 			/>
 			<KeyboardShortcutsHelp />
-			<AceJump revisions={orderedRevisions} onJump={handleNavigateToChangeId} />
+			<AceJump
+				revisions={orderedRevisions}
+				onJump={(changeId) => {
+					handleNavigateToChangeId(changeId);
+					revisionGraphRef.current?.scrollToChangeId(changeId, { align: "center", smooth: true });
+				}}
+			/>
 			<div className="flex flex-col h-screen overflow-hidden">
-				<Toolbar
-					repoPath={activeProject?.path ?? null}
-					currentPreset={activeProject?.revset_preset ?? "active"}
-					onPresetChange={handlePresetChange}
-				/>
-				<section className="flex-1 min-h-0" aria-label="Revision list">
+				<section className="flex-1 min-h-0 relative" aria-label="Revision list">
+					<StackIndicator
+						onDismiss={() => {
+							// Clear selection - default logic will pick working copy
+							handleNavigateToChangeId("");
+						}}
+					/>
 					<RevisionGraph
+						ref={revisionGraphRef}
 						revisions={revisions}
 						selectedRevision={selectedRevision}
 						onSelectRevision={handleSelectRevision}

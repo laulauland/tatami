@@ -4,9 +4,10 @@ use jj_lib::git;
 use jj_lib::graph::{GraphEdge, GraphEdgeType};
 use jj_lib::object_id::ObjectId;
 use jj_lib::repo::Repo;
+use jj_lib::repo_path::RepoPathUiConverter;
 use jj_lib::revset::{
     parse, RevsetAliasesMap, RevsetDiagnostics, RevsetExpression, RevsetExtensions,
-    RevsetParseContext, SymbolResolver, SymbolResolverExtension,
+    RevsetParseContext, RevsetWorkspaceContext, SymbolResolver, SymbolResolverExtension,
 };
 use std::collections::HashMap;
 use std::path::Path;
@@ -32,10 +33,11 @@ pub struct Revision {
     pub is_working_copy: bool,
     pub is_immutable: bool,
     pub is_mine: bool,
+    pub is_trunk: bool,
     pub bookmarks: Vec<String>,
 }
 
-pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>) -> Result<Vec<Revision>> {
+pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: Option<&str>) -> Result<Vec<Revision>> {
     let jj_repo = JjRepo::open(repo_path)?;
     let repo = jj_repo.repo_loader().load_at_head()?;
     let user_email = jj_repo.user_settings().user_email();
@@ -47,36 +49,76 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>) -> Result
         .next()
         .context("No working copy")?;
 
-    let revset_expression = if let Some(revset_str) = revset {
-        // Parse and evaluate custom revset
-        let context = RevsetParseContext {
-            aliases_map: &RevsetAliasesMap::default(),
-            local_variables: HashMap::new(),
-            user_email: "",
-            date_pattern_context: chrono::Utc::now().fixed_offset().into(),
-            default_ignored_remote: Some(git::REMOTE_NAME_FOR_LOCAL_GIT_REPO),
-            extensions: &RevsetExtensions::default(),
-            workspace: None,
-        };
-
-        let mut diagnostics = RevsetDiagnostics::new();
-        let expression = parse(&mut diagnostics, revset_str, &context)
-            .context("Failed to parse revset")?;
-
-        let symbol_resolver = SymbolResolver::new(repo.as_ref(), &([] as [&Box<dyn SymbolResolverExtension>; 0]));
-        let resolved = expression.resolve_user_expression(repo.as_ref(), &symbol_resolver)
-            .context("Failed to resolve revset")?;
-
-        resolved.evaluate(repo.as_ref())
-            .context("Failed to evaluate revset")?
+    // Determine which revset to use
+    let revset_str = if let Some(custom_revset) = revset {
+        custom_revset
+    } else if let Some(preset_name) = preset {
+        match preset_name {
+            "my_work" => "mine() | present(@)",
+            "active" => "present(@) | ancestors(immutable_heads().., 2) | present(trunk())",
+            "full_history" => "ancestors(visible_heads())",
+            _ => "present(@) | ancestors(immutable_heads().., 2) | present(trunk())", // default to active
+        }
     } else {
-        // Default revset: all commits reachable from visible heads
-        // TODO: Use more sophisticated default: present(@) | ancestors(immutable_heads().., 2) | present(trunk())
-        RevsetExpression::visible_heads()
-            .ancestors()
-            .evaluate(repo.as_ref())
-            .context("Failed to evaluate default revset")?
+        // Default to "active" preset
+        "present(@) | ancestors(immutable_heads().., 2) | present(trunk())"
     };
+
+    // Set up aliases needed for presets
+    let mut aliases_map = RevsetAliasesMap::new();
+
+    // trunk() - jj-cli style using remote_bookmarks with fallback to root
+    aliases_map.insert(
+        "trunk()",
+        r#"latest(
+            remote_bookmarks(exact:"main", exact:"origin") |
+            remote_bookmarks(exact:"master", exact:"origin") |
+            remote_bookmarks(exact:"trunk", exact:"origin") |
+            root()
+        )"#,
+    ).ok();
+
+    // builtin_immutable_heads() - trunk + tags + untracked remote bookmarks
+    aliases_map.insert("builtin_immutable_heads()", "present(trunk()) | tags() | untracked_remote_bookmarks()").ok();
+
+    // immutable_heads() - defaults to builtin
+    aliases_map.insert("immutable_heads()", "builtin_immutable_heads()").ok();
+
+    // mine() - commits authored by current user
+    let mine_revset = format!(r#"author_email(exact-i:"{}")"#, user_email);
+    aliases_map.insert("mine()", &mine_revset).ok();
+
+    // Create workspace context for @ resolution
+    let path_converter = RepoPathUiConverter::Fs {
+        cwd: repo_path.to_path_buf(),
+        base: repo_path.to_path_buf(),
+    };
+    let workspace_name = jj_repo.workspace_name();
+    let workspace_ctx = RevsetWorkspaceContext {
+        path_converter: &path_converter,
+        workspace_name,
+    };
+
+    let context = RevsetParseContext {
+        aliases_map: &aliases_map,
+        local_variables: HashMap::new(),
+        user_email: jj_repo.user_settings().user_email(),
+        date_pattern_context: chrono::Utc::now().fixed_offset().into(),
+        default_ignored_remote: Some(git::REMOTE_NAME_FOR_LOCAL_GIT_REPO),
+        extensions: &RevsetExtensions::default(),
+        workspace: Some(workspace_ctx),
+    };
+
+    let mut diagnostics = RevsetDiagnostics::new();
+    let expression = parse(&mut diagnostics, revset_str, &context)
+        .context("Failed to parse revset")?;
+
+    let symbol_resolver = SymbolResolver::new(repo.as_ref(), &([] as [&Box<dyn SymbolResolverExtension>; 0]));
+    let resolved = expression.resolve_user_expression(repo.as_ref(), &symbol_resolver)
+        .context("Failed to resolve revset")?;
+
+    let revset_expression = resolved.evaluate(repo.as_ref())
+        .context("Failed to evaluate revset")?;
 
     // Use iter_graph() to get commits with edge information
     let graph_nodes: Vec<(CommitId, Vec<GraphEdge<CommitId>>)> = revset_expression
@@ -90,6 +132,25 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>) -> Result
     let immutable_expression = RevsetExpression::root();
     let immutable_revset = immutable_expression.evaluate(repo.as_ref())?;
     let immutable_ids: Vec<CommitId> = immutable_revset.iter().collect::<Result<Vec<_>, _>>()?;
+
+    // Evaluate ::trunk() to identify trunk ancestors
+    let trunk_ancestor_ids: std::collections::HashSet<CommitId> = {
+        let mut trunk_diagnostics = RevsetDiagnostics::new();
+        match parse(&mut trunk_diagnostics, "::trunk()", &context) {
+            Ok(trunk_expr) => {
+                match trunk_expr.resolve_user_expression(repo.as_ref(), &symbol_resolver) {
+                    Ok(resolved) => {
+                        match resolved.evaluate(repo.as_ref()) {
+                            Ok(revset) => revset.iter().filter_map(|r| r.ok()).collect(),
+                            Err(_) => std::collections::HashSet::new(),
+                        }
+                    }
+                    Err(_) => std::collections::HashSet::new(),
+                }
+            }
+            Err(_) => std::collections::HashSet::new(),
+        }
+    };
 
     let mut revisions = Vec::new();
 
@@ -144,6 +205,8 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>) -> Result
             .unwrap_or(full_change_id.len());
         let change_id_short = full_change_id[..prefix_len].to_string();
 
+        let is_trunk = trunk_ancestor_ids.contains(&commit_id);
+
         revisions.push(Revision {
             commit_id: hex::encode(&commit_id.to_bytes()[..6]),
             change_id: full_change_id,
@@ -156,6 +219,7 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>) -> Result
             is_working_copy,
             is_immutable,
             is_mine,
+            is_trunk,
             bookmarks,
         });
     }

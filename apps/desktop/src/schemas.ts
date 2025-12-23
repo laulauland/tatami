@@ -21,6 +21,7 @@ export const Revision = Schema.Struct({
 	is_working_copy: Schema.Boolean,
 	is_immutable: Schema.Boolean,
 	is_mine: Schema.Boolean,
+	is_trunk: Schema.Boolean,
 	bookmarks: Schema.Array(Schema.String),
 });
 export type Revision = typeof Revision.Type;
@@ -72,5 +73,6 @@ export const Project = Schema.Struct({
 	path: Schema.String,
 	name: Schema.String,
 	last_opened_at: Schema.Number,
+	revset_preset: Schema.NullOr(Schema.String),
 });
 export type Project = typeof Project.Type;

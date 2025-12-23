@@ -172,6 +172,14 @@ impl JjRepo {
         &self.user_settings
     }
 
+    pub fn workspace_name(&self) -> &jj_lib::ref_name::WorkspaceName {
+        self.workspace.workspace_name()
+    }
+
+    pub fn workspace_root(&self) -> &Path {
+        self.workspace.workspace_root()
+    }
+
     pub fn new_revision(&mut self, parent_change_ids: Vec<String>) -> Result<()> {
         let repo = self.workspace.repo_loader().load_at_head()?;
         let mut tx = repo.start_transaction();

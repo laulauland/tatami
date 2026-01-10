@@ -151,6 +151,28 @@ impl Storage {
         }))
     }
 
+    pub async fn delete_project(&self, id: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM projects WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        // If the deleted project was active, clear persisted layout selection.
+        let mut layout = self.layout.lock().await;
+        if layout.active_project_id.as_deref() == Some(id) {
+            layout.active_project_id = None;
+            layout.selected_change_id = None;
+
+            let value = serde_json::to_string(&*layout)?;
+            sqlx::query("INSERT OR REPLACE INTO layout (key, value) VALUES ('main', ?)")
+                .bind(&value)
+                .execute(&self.pool)
+                .await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn get_layout(&self) -> AppLayout {
         self.layout.lock().await.clone()
     }

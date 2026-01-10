@@ -140,6 +140,15 @@ async fn find_project_by_path(
 }
 
 #[tauri::command]
+async fn remove_project(app: tauri::AppHandle, project_id: String) -> Result<(), String> {
+    let storage = get_storage(&app);
+    storage
+        .delete_project(&project_id)
+        .await
+        .map_err(|e| format!("Failed to remove project: {}", e))
+}
+
+#[tauri::command]
 async fn get_layout(app: tauri::AppHandle) -> AppLayout {
     let storage = get_storage(&app);
     storage.get_layout().await
@@ -216,6 +225,7 @@ pub fn run() {
             get_projects,
             upsert_project,
             find_project_by_path,
+            remove_project,
             get_layout,
             update_layout,
             watch_repository,

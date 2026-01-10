@@ -152,14 +152,14 @@ jobs:
 
           ---
 
-          Built from \`${{ github.sha }}\`.
+          Built from \`${GITHUB_SHA}\`.
           EOF
           )
 
           {
-            echo "body<<'EOF'"
+            echo "body<<__RELEASE_BODY__"
             echo "$BODY"
-            echo "EOF"
+            echo "__RELEASE_BODY__"
           } >> "$GITHUB_OUTPUT"
 
   build:

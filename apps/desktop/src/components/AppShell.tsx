@@ -9,6 +9,7 @@ import { stackViewChangeIdAtom } from "@/atoms";
 import { AceJump } from "@/components/AceJump";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
+import { ProjectPicker } from "@/components/ProjectPicker";
 import {
 	RevisionGraph,
 	type RevisionGraphHandle,
@@ -22,15 +23,15 @@ import {
 	emptyRevisionsCollection,
 	getRevisionsCollection,
 	newRevision,
-	projectsCollection,
+	repositoriesCollection,
 } from "@/db";
 import { useKeyboardNavigation, useKeyboardShortcut, useKeySequence } from "@/hooks/useKeyboard";
 import {
-	findProjectByPath,
 	findRepository,
-	type Project,
+	findRepositoryByPath,
+	type Repository,
 	type Revision,
-	upsertProject,
+	upsertRepository,
 } from "@/tauri-commands";
 
 const openDirectoryDialogEffect = Effect.gen(function* () {
@@ -71,9 +72,9 @@ export function AppShell() {
 		onPress: () => navigate({ to: "/settings" }),
 	});
 
-	const { data: projects = [] } = useLiveQuery(projectsCollection);
+	const { data: repositories = [] } = useLiveQuery(repositoriesCollection);
 
-	const activeProject = projects.find((p) => p.id === projectId) ?? null;
+	const activeProject = repositories.find((p) => p.id === projectId) ?? null;
 
 	// Build the stack revset: the full branch containing the selected commit
 	// (::X ~ ::trunk()) gives ancestors of X that are NOT ancestors of trunk (the branch below X)
@@ -113,16 +114,16 @@ export function AppShell() {
 			const repoPath = yield* findRepositoryEffect(selected);
 			if (!repoPath) return;
 
-			const existingProject = yield* Effect.tryPromise({
-				try: () => findProjectByPath(repoPath),
+			const existingRepository = yield* Effect.tryPromise({
+				try: () => findRepositoryByPath(repoPath),
 				catch: () => null,
 			});
 
-			const projectId = existingProject?.id ?? crypto.randomUUID();
+			const repositoryId = existingRepository?.id ?? crypto.randomUUID();
 			const name = repoPath.split("/").pop() ?? repoPath;
 
-			const project: Project = {
-				id: projectId,
+			const repository: Repository = {
+				id: repositoryId,
 				path: repoPath,
 				name,
 				last_opened_at: Date.now(),
@@ -130,13 +131,13 @@ export function AppShell() {
 			};
 
 			yield* Effect.tryPromise({
-				try: () => upsertProject(project),
-				catch: (error) => new Error(`Failed to save project: ${error}`),
+				try: () => upsertRepository(repository),
+				catch: (error) => new Error(`Failed to save repository: ${error}`),
 			});
 
 			yield* Effect.sync(() => {
-				projectsCollection.utils.writeUpsert([project]);
-				navigate({ to: "/project/$projectId", params: { projectId } });
+				repositoriesCollection.utils.writeUpsert([repository]);
+				navigate({ to: "/project/$projectId", params: { projectId: repositoryId } });
 			});
 		}).pipe(
 			Effect.tapError((error) => Effect.logError("handleOpenRepo failed", error)),
@@ -145,9 +146,9 @@ export function AppShell() {
 		Effect.runPromise(program);
 	}
 
-	function handleSelectProject(project: Project) {
-		setStackViewChangeId(null); // Clear stack view when switching projects
-		navigate({ to: "/project/$projectId", params: { projectId: project.id } });
+	function handleSelectRepository(repository: Repository) {
+		setStackViewChangeId(null); // Clear stack view when switching repositories
+		navigate({ to: "/project/$projectId", params: { projectId: repository.id } });
 	}
 
 	function handleSelectRevision(revision: Revision) {
@@ -278,10 +279,13 @@ export function AppShell() {
 
 	return (
 		<>
+			<ProjectPicker
+				repositories={repositories}
+				onSelectRepository={handleSelectRepository}
+			/>
 			<CommandPalette
-				projects={projects}
-				onSelectProject={handleSelectProject}
 				onOpenRepo={handleOpenRepo}
+				onOpenProjects={() => navigate({ to: "/repositories" })}
 			/>
 			<KeyboardShortcutsHelp />
 			<AceJump

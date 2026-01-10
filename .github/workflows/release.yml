@@ -1,0 +1,198 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Prepare release metadata
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      name: ${{ steps.meta.outputs.name }}
+      body: ${{ steps.notes.outputs.body }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute tag/name
+        id: meta
+        run: |
+          echo "tag=nightly-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "name=Nightly ${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --tags --force
+
+          LAST_TAG="$(git tag --list 'nightly-*' --sort=-creatordate | head -n 1 || true)"
+          if [ -n "${LAST_TAG}" ] && git merge-base --is-ancestor "${LAST_TAG}" HEAD; then
+            RANGE="${LAST_TAG}..HEAD"
+            LOG_ARGS=("${RANGE}")
+          elif [ -n "${LAST_TAG}" ]; then
+            # If main was force-pushed / rewritten, the last tag might not be an ancestor.
+            # Fall back to commits since the tag's committer timestamp.
+            SINCE="$(git log -1 --format=%cI "${LAST_TAG}")"
+            LOG_ARGS=("--since=${SINCE}" "HEAD")
+          else
+            LOG_ARGS=("HEAD")
+          fi
+
+          # Collect markdown under a "## RN" / "## RN:" heading from commit bodies.
+          # Trailers (Key: value) at the end of commit messages are stripped.
+          NOTES="$(
+            git log "${LOG_ARGS[@]}" --format=%B%x00 \
+              | awk -v RS='\0' '
+                function rtrim(s){ sub(/[[:space:]]+$/, "", s); return s }
+                function ltrim(s){ sub(/^[[:space:]]+/, "", s); return s }
+                function trim(s){ return rtrim(ltrim(s)) }
+                function is_trailer(line){ return line ~ /^[A-Za-z0-9-]+: .+/ }
+
+                function strip_trailers(n,   i){
+                  i = n
+                  while (i >= 1) {
+                    if (lines[i] ~ /^[[:space:]]*$/) { i--; continue }
+                    if (is_trailer(lines[i])) { i--; continue }
+                    break
+                  }
+                  return i
+                }
+
+                function emit_entry(entry,   lines_n, j, line, id, cleaned, key){
+                  # Optional stable key for dedupe across rewritten commits:
+                  #   RN-ID: some-stable-id
+                  lines_n = split(entry, entry_lines, "\n")
+                  id = ""
+                  cleaned = ""
+                  for (j = 1; j <= lines_n; j++) {
+                    line = entry_lines[j]
+                    if (line ~ /^RN-ID:[[:space:]]*/) {
+                      id = line
+                      sub(/^RN-ID:[[:space:]]*/, "", id)
+                      continue
+                    }
+                    cleaned = cleaned line "\n"
+                  }
+                  cleaned = rtrim(cleaned)
+
+                  key = (id != "" ? "id:" id : cleaned)
+                  gsub(/[[:space:]]+$/, "", key)
+                  gsub(/\n{3,}/, "\n\n", key)
+
+                  if (!(key in seen) && length(trim(cleaned)) > 0) {
+                    seen[key] = 1
+                    if (out != "") out = out "\n\n"
+                    out = out cleaned
+                  }
+                }
+
+                {
+                  if ($0 == "") next
+
+                  n = split($0, lines, "\n")
+                  n = strip_trailers(n)
+
+                  in_rn = 0
+                  entry = ""
+                  for (i = 1; i <= n; i++) {
+                    line = lines[i]
+
+                    if (line ~ /^##[[:space:]]*RN:?[[:space:]]*$/) {
+                      in_rn = 1
+                      continue
+                    }
+
+                    if (in_rn && line ~ /^##[[:space:]]+[^#]/) {
+                      break
+                    }
+
+                    if (in_rn) {
+                      entry = entry line "\n"
+                    }
+                  }
+
+                  entry = rtrim(entry)
+                  # Trim leading blank lines
+                  while (entry ~ /^[[:space:]]*\n/) sub(/^[[:space:]]*\n/, "", entry)
+                  # Trim trailing blank lines
+                  while (entry ~ /\n[[:space:]]*$/) sub(/\n[[:space:]]*$/, "", entry)
+
+                  if (in_rn) emit_entry(entry)
+                }
+
+                END {
+                  print out
+                }
+              '
+          )"
+
+          if [ -z "$(echo "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES="_No release notes in this push. Add a ## RN: section to commit bodies._"
+          fi
+
+          BODY=$(cat <<EOF
+          ## RN
+
+          ${NOTES}
+
+          ---
+
+          Built from \`${{ github.sha }}\`.
+          EOF
+          )
+
+          {
+            echo "body<<'EOF'"
+            echo "$BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and publish (${{ matrix.platform }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest]
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: ${{ needs.prepare.outputs.name }}
+          releaseBody: ${{ needs.prepare.outputs.body }}
+          prerelease: true

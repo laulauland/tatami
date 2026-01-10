@@ -1,8 +1,8 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { createRoute, Navigate, useParams } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
-import { projectsCollection } from "@/db";
-import type { Project } from "@/tauri-commands";
+import { repositoriesCollection } from "@/db";
+import type { Repository } from "@/tauri-commands";
 import { Route as rootRoute } from "./__root";
 
 export type ProjectSearchParams = {
@@ -22,13 +22,13 @@ export const Route = createRoute({
 
 function ProjectComponent() {
 	const { projectId } = useParams({ from: Route.id });
-	const { data: projects = [] } = useLiveQuery(projectsCollection);
+	const { data: repositories = [] } = useLiveQuery(repositoriesCollection);
 
-	// Validate that the project exists
-	const projectExists = projects.some((p: Project) => p.id === projectId);
+	// Validate that the repository exists
+	const repositoryExists = repositories.some((p: Repository) => p.id === projectId);
 
-	if (!projectExists && projects.length > 0) {
-		// Project doesn't exist, redirect to index which will handle navigation
+	if (!repositoryExists && repositories.length > 0) {
+		// Repository doesn't exist, redirect to index which will handle navigation
 		return <Navigate to="/" />;
 	}
 

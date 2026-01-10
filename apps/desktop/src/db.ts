@@ -2,17 +2,17 @@ import { createCollection, createTransaction } from "@tanstack/db";
 import { QueryClient } from "@tanstack/query-core";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { listen } from "@tauri-apps/api/event";
-import type { Project, Revision } from "@/tauri-commands";
-import { getProjects, getRevisions, jjEdit, jjNew, watchRepository } from "@/tauri-commands";
+import type { Repository, Revision } from "@/tauri-commands";
+import { getRepositories, getRevisions, jjEdit, jjNew, watchRepository } from "@/tauri-commands";
 
 export const queryClient = new QueryClient();
 
-export const projectsCollection = createCollection({
+export const repositoriesCollection = createCollection({
 	...queryCollectionOptions({
 		queryClient,
-		queryKey: ["projects"],
-		queryFn: getProjects,
-		getKey: (project: Project) => project.id,
+		queryKey: ["repositories"],
+		queryFn: getRepositories,
+		getKey: (repository: Repository) => repository.id,
 	}),
 });
 

@@ -68,11 +68,11 @@ export const FileDiff = Schema.Struct({
 });
 export type FileDiff = typeof FileDiff.Type;
 
-export const Project = Schema.Struct({
+export const Repository = Schema.Struct({
 	id: Schema.String,
 	path: Schema.String,
 	name: Schema.String,
 	last_opened_at: Schema.Number,
 	revset_preset: Schema.NullOr(Schema.String),
 });
-export type Project = typeof Project.Type;
+export type Repository = typeof Repository.Type;

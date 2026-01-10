@@ -5,12 +5,12 @@ export type {
 	DiffHunk,
 	DiffLine,
 	FileDiff,
-	Project,
+	Repository,
 	Revision,
 	WorkingCopyStatus,
 } from "./schemas";
 
-import type { FileDiff, Project, Revision, WorkingCopyStatus } from "./schemas";
+import type { FileDiff, Repository, Revision, WorkingCopyStatus } from "./schemas";
 
 export async function findRepository(startPath: string): Promise<string | null> {
 	return invoke<string | null>("find_repository", { startPath });
@@ -37,16 +37,20 @@ export async function getFileDiff(
 	return invoke<FileDiff>("get_file_diff", { repoPath, changeId, filePath });
 }
 
-export async function getProjects(): Promise<Project[]> {
-	return invoke<Project[]>("get_projects");
+export async function getRepositories(): Promise<Repository[]> {
+	return invoke<Repository[]>("get_projects");
 }
 
-export async function upsertProject(project: Project): Promise<void> {
-	return invoke("upsert_project", { project });
+export async function upsertRepository(repository: Repository): Promise<void> {
+	return invoke("upsert_project", { project: repository });
 }
 
-export async function findProjectByPath(path: string): Promise<Project | null> {
-	return invoke<Project | null>("find_project_by_path", { path });
+export async function findRepositoryByPath(path: string): Promise<Repository | null> {
+	return invoke<Repository | null>("find_project_by_path", { path });
+}
+
+export async function removeRepository(repositoryId: string): Promise<void> {
+	return invoke("remove_project", { projectId: repositoryId });
 }
 
 export async function watchRepository(repoPath: string): Promise<void> {

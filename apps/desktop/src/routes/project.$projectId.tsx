@@ -7,6 +7,8 @@ import { Route as rootRoute } from "./__root";
 
 export type ProjectSearchParams = {
 	rev?: string;
+	file?: string;
+	expanded?: boolean;
 };
 
 export const Route = createRoute({
@@ -15,6 +17,8 @@ export const Route = createRoute({
 	validateSearch: (search: Record<string, unknown>): ProjectSearchParams => {
 		return {
 			rev: typeof search.rev === "string" ? search.rev : undefined,
+			file: typeof search.file === "string" ? search.file : undefined,
+			expanded: search.expanded === true || search.expanded === "true",
 		};
 	},
 	component: ProjectComponent,

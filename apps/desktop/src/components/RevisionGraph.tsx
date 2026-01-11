@@ -1,10 +1,12 @@
-import { useSearch } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { forwardRef, useImperativeHandle, useRef, useState, useEffect } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { ChangedFilesList } from "@/components/ChangedFilesList";
+import { reorderForGraph } from "@/components/revision-graph-utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
-import type { Revision } from "@/tauri-commands";
+import { getRevisionChanges, type Revision } from "@/tauri-commands";
 
 // Debug overlay - toggle with Ctrl+Shift+D
 const DEBUG_OVERLAY_DEFAULT = false;
@@ -130,21 +132,22 @@ interface RevisionGraphProps {
 	onSelectRevision: (revision: Revision) => void;
 	isLoading: boolean;
 	flash?: { changeId: string; key: number } | null;
+	repoPath: string | null;
 }
 
-const ROW_HEIGHT = 56;
+const ROW_HEIGHT = 64;
 const LANE_WIDTH = 20;
 const LANE_PADDING = 8;
 const NODE_RADIUS = 5;
 const MAX_LANES = 3;
 
 const LANE_COLORS = [
-	"hsl(45 100% 55%)", // yellow (main branch)
-	"hsl(210 100% 65%)", // bright blue
-	"hsl(140 70% 50%)", // green
-	"hsl(280 80% 65%)", // purple
-	"hsl(180 80% 50%)", // cyan
-	"hsl(340 85% 60%)", // pink
+	"var(--chart-1)",
+	"var(--chart-2)",
+	"var(--chart-3)",
+	"var(--chart-4)",
+	"var(--chart-5)",
+	"var(--primary)",
 ];
 
 type GraphEdgeType = "direct" | "indirect" | "missing";
@@ -174,108 +177,6 @@ interface GraphData {
 	nodes: GraphNode[];
 	laneCount: number;
 	rows: GraphRow[];
-}
-
-export function reorderForGraph(revisions: Revision[]): Revision[] {
-	if (revisions.length === 0) return [];
-
-	const commitMap = new Map(revisions.map((r) => [r.commit_id, r]));
-	const commitIds = new Set(revisions.map((r) => r.commit_id));
-
-	// Build parent/children maps (only for edges within our revset)
-	const childrenMap = new Map<string, string[]>();
-	const parentMap = new Map<string, string[]>();
-	for (const rev of revisions) {
-		const parents: string[] = [];
-		for (const edge of rev.parent_edges) {
-			if (edge.edge_type === "missing") continue;
-			if (!commitIds.has(edge.parent_id)) continue;
-			parents.push(edge.parent_id);
-			const children = childrenMap.get(edge.parent_id) ?? [];
-			children.push(rev.commit_id);
-			childrenMap.set(edge.parent_id, children);
-		}
-		parentMap.set(rev.commit_id, parents);
-	}
-
-	// Priority score for a revision (lower = higher priority)
-	function getPriority(rev: Revision): number {
-		if (rev.is_working_copy) return 0;
-		if (rev.is_mine && !rev.is_immutable) return 1;
-		if (rev.bookmarks.length > 0 && !rev.is_immutable) return 2;
-		if (!rev.is_immutable) return 3;
-		if (rev.bookmarks.length > 0) return 4;
-		return 5;
-	}
-
-	// Find heads and sort by priority
-	const heads = revisions
-		.filter((r) => {
-			const children = childrenMap.get(r.commit_id) ?? [];
-			return children.filter((c) => commitIds.has(c)).length === 0;
-		})
-		.sort((a, b) => getPriority(a) - getPriority(b));
-
-	// Track which commits have been output
-	const output = new Set<string>();
-	// Track remaining children count for each commit
-	const remainingChildren = new Map<string, number>();
-	for (const rev of revisions) {
-		const children = childrenMap.get(rev.commit_id) ?? [];
-		const childCount = children.filter((c) => commitIds.has(c)).length;
-		remainingChildren.set(rev.commit_id, childCount);
-	}
-
-	const result: Revision[] = [];
-
-	// Process each head's branch using DFS
-	// This ensures we exhaust a branch before moving to the next
-	function processBranch(startId: string) {
-		const stack = [startId];
-
-		while (stack.length > 0) {
-			const id = stack[stack.length - 1]; // Peek
-
-			if (output.has(id)) {
-				stack.pop();
-				continue;
-			}
-
-			const remaining = remainingChildren.get(id) ?? 0;
-			if (remaining > 0) {
-				// This commit still has unprocessed children
-				// They must be from other branches - we'll come back to this commit
-				stack.pop();
-				continue;
-			}
-
-			// All children processed, we can output this commit
-			output.add(id);
-			const rev = commitMap.get(id);
-			if (rev) result.push(rev);
-			stack.pop();
-
-			// Decrease remaining children count for parents and add to stack
-			const parents = parentMap.get(id) ?? [];
-			for (const parentId of parents) {
-				if (!output.has(parentId)) {
-					const newRemaining = (remainingChildren.get(parentId) ?? 1) - 1;
-					remainingChildren.set(parentId, newRemaining);
-					// Add parent to stack to continue DFS
-					stack.push(parentId);
-				}
-			}
-		}
-	}
-
-	// Process heads in priority order
-	for (const head of heads) {
-		if (!output.has(head.commit_id)) {
-			processBranch(head.commit_id);
-		}
-	}
-
-	return result;
 }
 
 // Get the set of commit IDs in the working copy's ancestor chain (for lane 0)
@@ -505,6 +406,7 @@ interface GraphColumnProps {
 	visibleStartRow: number;
 	visibleEndRow: number;
 	totalHeight: number;
+	rowOffsets: Map<number, number>;
 }
 
 function GraphColumn({
@@ -513,7 +415,11 @@ function GraphColumn({
 	visibleStartRow,
 	visibleEndRow,
 	totalHeight,
+	rowOffsets,
 }: GraphColumnProps) {
+	const getRowStart = (row: number) => rowOffsets.get(row) ?? row * ROW_HEIGHT;
+	const getRowCenter = (row: number) => getRowStart(row) + ROW_HEIGHT / 2;
+
 	const { rev: selectedChangeId } = useSearch({ strict: false });
 	// Minimal right padding - tight fit for the rightmost node
 	const width = LANE_PADDING + laneCount * LANE_WIDTH + NODE_RADIUS + 2;
@@ -549,7 +455,7 @@ function GraphColumn({
 			<title>Revision graph</title>
 			{/* Edges */}
 			{allVisibleNodes.map((node) => {
-				const y = node.row * ROW_HEIGHT + ROW_HEIGHT / 2;
+				const y = getRowCenter(node.row);
 				const x = laneToX(node.lane);
 				const color = laneColor(node.lane);
 				const nodeKey = node.revision.change_id;
@@ -566,7 +472,7 @@ function GraphColumn({
 							// Apply de-emphasis styling for "main merges into branch" edges
 							const strokeWidth = conn.isDeemphasized ? 1 : 2;
 							const strokeOpacity = conn.isDeemphasized ? 0.4 : isMissing ? 0.3 : 0.8;
-							const strokeColor = conn.isDeemphasized ? "#888" : edgeColor;
+							const strokeColor = conn.isDeemphasized ? "var(--muted-foreground)" : edgeColor;
 
 							// Missing stub: short dashed vertical line indicating parent outside view
 							if (conn.isMissingStub) {
@@ -586,7 +492,7 @@ function GraphColumn({
 								);
 							}
 
-							const parentY = conn.parentRow * ROW_HEIGHT + ROW_HEIGHT / 2;
+							const parentY = getRowCenter(conn.parentRow);
 							const parentX = laneToX(conn.parentLane);
 
 							if (node.lane === conn.parentLane) {
@@ -630,7 +536,7 @@ function GraphColumn({
 
 			{/* Nodes - only render visible ones */}
 			{visibleNodes.map((node) => {
-				const y = node.row * ROW_HEIGHT + ROW_HEIGHT / 2;
+				const y = getRowCenter(node.row);
 				const x = laneToX(node.lane);
 				const color = laneColor(node.lane);
 				const isSelected = node.revision.change_id === selectedChangeId;
@@ -698,6 +604,9 @@ function RevisionRow({
 	onSelect,
 	isFlashing,
 	isDimmed,
+	isExpanded,
+	isFocused,
+	repoPath,
 }: {
 	revision: Revision;
 	maxLaneOnRow: number;
@@ -705,30 +614,50 @@ function RevisionRow({
 	onSelect: (changeId: string) => void;
 	isFlashing: boolean;
 	isDimmed: boolean;
+	isExpanded: boolean;
+	isFocused: boolean;
+	repoPath: string | null;
 }) {
-	const description = revision.description.split("\n")[0] || "(no description)";
-	// Indent row to position text after the rightmost graph element on this row
+	const firstLine = revision.description.split("\n")[0] || "(no description)";
+	const fullDescription = revision.description || "(no description)";
 	const indent = LANE_PADDING + (maxLaneOnRow + 1) * LANE_WIDTH + NODE_RADIUS + 4;
 
+	const search = useSearch({ strict: false });
+	const navigate = useNavigate();
+	const selectedFile = search.file ?? null;
+
+	const changedFilesQuery = useQuery({
+		queryKey: ["revision-changes", repoPath, revision.change_id],
+		queryFn: () => {
+			if (!repoPath) throw new Error("No repository path");
+			return getRevisionChanges(repoPath, revision.change_id);
+		},
+		enabled: isExpanded && !!repoPath,
+	});
+
+	function handleSelectFile(filePath: string) {
+		navigate({
+			search: { ...search, file: filePath } as any,
+		});
+	}
+
 	return (
-		<div style={{ height: ROW_HEIGHT }} className="flex items-center">
-			<div style={{ width: indent }} className="shrink-0" />
-			<div
-				className={`flex-1 mr-2 bg-background rounded my-0.5 mx-1 shadow-sm hover:shadow dark:bg-[oklch(0.18_0.005_49)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.03)] dark:hover:shadow-[0_3px_6px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.05)] transition-opacity duration-150 ${revision.is_immutable ? "opacity-60" : ""} ${isDimmed ? "opacity-40" : ""}`}
-			>
-				<Button
-					variant="ghost"
-					onClick={() => onSelect(revision.change_id)}
-					data-change-id={revision.change_id}
-					className={`w-full h-full justify-start text-left px-3 py-2 rounded ring-0 outline-none focus:ring-0 focus:outline-none focus-visible:ring-0 focus-visible:outline-none hover:bg-transparent ${
-						isSelected ? "bg-accent/50 text-accent-foreground" : ""
+		<div style={{ height: isExpanded ? "auto" : ROW_HEIGHT }} className="flex flex-col">
+			<div className="flex items-start min-h-[56px]">
+				<div style={{ width: indent }} className="shrink-0" />
+				<div
+					className={`flex-1 mr-2 min-w-0 overflow-hidden rounded my-2 mx-1 border border-border bg-card text-card-foreground shadow-sm transition-colors duration-150 hover:shadow hover:bg-accent/20 hover:cursor-pointer ${
+						revision.is_immutable ? "opacity-60" : ""
+					} ${isDimmed ? "opacity-40" : ""} ${isSelected ? "bg-accent/30 border-ring/60" : ""} ${
+						isFocused ? "ring-2 ring-ring/80 ring-offset-2 ring-offset-background" : ""
 					}`}
+					onClick={() => onSelect(revision.change_id)}
 				>
-					<div className="flex-1 min-w-0">
-						<div className="flex items-center gap-2 flex-wrap">
+					<div className="px-3 py-2 min-w-0">
+						<div className="flex items-center gap-2 flex-nowrap min-w-0">
 							<code
 								className={`text-xs font-mono text-muted-foreground rounded px-0.5 ${
-									isFlashing ? "bg-green-500/50 animate-pulse" : ""
+									isFlashing ? "bg-primary/40 animate-pulse" : ""
 								}`}
 							>
 								{revision.change_id_short}
@@ -739,13 +668,28 @@ function RevisionRow({
 										{bookmark}
 									</Badge>
 								))}
-							<span className="text-xs text-muted-foreground">
+							<span className="text-xs text-muted-foreground truncate min-w-0">
 								{revision.author.split("@")[0]} · {revision.timestamp}
 							</span>
 						</div>
-						<div className="text-sm truncate">{description}</div>
+						<div className={`text-sm mt-1 ${isExpanded ? "" : "truncate"}`}>{firstLine}</div>
 					</div>
-				</Button>
+					{isExpanded && (
+						<div className="px-3 pb-3 pt-0 space-y-3">
+							<pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-mono bg-muted/40 border border-border/60 rounded p-2">
+								{fullDescription}
+							</pre>
+							<div className="border border-border rounded-lg overflow-hidden bg-background">
+								<ChangedFilesList
+									files={changedFilesQuery.data ?? []}
+									selectedFile={selectedFile}
+									onSelectFile={handleSelectFile}
+									isLoading={changedFilesQuery.isLoading}
+								/>
+							</div>
+						</div>
+					)}
+				</div>
 			</div>
 		</div>
 	);
@@ -813,9 +757,14 @@ function getRelatedRevisions(revisions: Revision[], selectedChangeId: string | n
 }
 
 export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>(
-	function RevisionGraph({ revisions, selectedRevision, onSelectRevision, isLoading, flash }, ref) {
+	function RevisionGraph(
+		{ revisions, selectedRevision, onSelectRevision, isLoading, flash, repoPath },
+		ref,
+	) {
 		const parentRef = useRef<HTMLDivElement>(null);
 		const { nodes, laneCount, rows } = buildGraph(revisions);
+		const search = useSearch({ strict: false });
+		const navigate = useNavigate();
 
 		const revisionMap = new Map(revisions.map((r) => [r.change_id, r]));
 		const relatedRevisions = getRelatedRevisions(revisions, selectedRevision?.change_id ?? null);
@@ -830,6 +779,9 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const debugEnabledRef = useRef(debugEnabled);
 		debugEnabledRef.current = debugEnabled;
 
+		// Determine if selected revision is expanded based on URL search params
+		const isSelectedExpanded = search.expanded === true && !!selectedRevision;
+
 		// Toggle debug overlay with Ctrl+Shift+D
 		useKeyboardShortcut({
 			key: "D",
@@ -837,10 +789,50 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			onPress: () => setDebugEnabled((prev) => !prev),
 		});
 
+		// Expand selected revision with 'l' key (only expands, doesn't collapse)
+		useKeyboardShortcut({
+			key: "l",
+			modifiers: {},
+			onPress: () => {
+				if (!selectedRevision) return;
+
+				// Check if already expanded
+				if (isSelectedExpanded) return; // Do nothing if already expanded
+
+				// Expand the revision by setting expanded=true in URL
+				navigate({
+					search: { ...search, expanded: true } as any,
+				});
+			},
+		});
+
+		// Collapse selected revision with 'h' key (only collapses, doesn't expand)
+		useKeyboardShortcut({
+			key: "h",
+			modifiers: {},
+			onPress: () => {
+				if (!selectedRevision) return;
+
+				// Check if already collapsed
+				if (!isSelectedExpanded) return; // Do nothing if already collapsed
+
+				// Collapse the revision by removing expanded from URL
+				const { expanded, ...restSearch } = search;
+				navigate({
+					search: restSearch as any,
+				});
+			},
+		});
+
 		const rowVirtualizer = useVirtualizer({
 			count: rows.length,
 			getScrollElement: () => parentRef.current,
-			estimateSize: () => ROW_HEIGHT,
+			estimateSize: (index: number) => {
+				const row = rows[index];
+				const isExpanded =
+					isSelectedExpanded && row.revision.change_id === selectedRevision?.change_id;
+				return isExpanded ? ROW_HEIGHT * 3 : ROW_HEIGHT;
+			},
 			overscan: 10,
 			debug: debugEnabled,
 		});
@@ -931,11 +923,21 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const visibleStartRow = virtualItems[0]?.index ?? 0;
 		const visibleEndRow = virtualItems[virtualItems.length - 1]?.index ?? 0;
 		const totalHeight = rowVirtualizer.getTotalSize();
+		const rowOffsets = new Map<number, number>();
+		for (const item of virtualItems) {
+			rowOffsets.set(item.index, item.start);
+		}
 
-		const selectedIndex = selectedRevision ? changeIdToIndex.get(selectedRevision.change_id) : undefined;
+		const selectedIndex = selectedRevision
+			? changeIdToIndex.get(selectedRevision.change_id)
+			: undefined;
 
 		return (
-			<div ref={parentRef} className="h-full overflow-auto ascii-bg" style={{ overflowAnchor: "none" }}>
+			<div
+				ref={parentRef}
+				className="h-full overflow-auto ascii-bg"
+				style={{ overflowAnchor: "none" }}
+			>
 				<div
 					className="relative"
 					style={{
@@ -950,6 +952,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 						visibleStartRow={visibleStartRow}
 						visibleEndRow={visibleEndRow}
 						totalHeight={totalHeight}
+						rowOffsets={rowOffsets}
 					/>
 
 					{/* Virtualized rows */}
@@ -959,22 +962,30 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 							const isFlashing = flash?.changeId === row.revision.change_id;
 							const isDimmed =
 								selectedRevision !== null && !relatedRevisions.has(row.revision.change_id);
+							const isFocused = selectedRevision?.change_id === row.revision.change_id;
+							const isSelected = isFocused;
+							const isExpanded = isSelectedExpanded && isFocused;
+
 							return (
 								<div
 									key={row.revision.change_id}
+									ref={rowVirtualizer.measureElement}
+									data-index={virtualRow.index}
 									className="absolute left-0 w-full"
 									style={{
-										height: `${virtualRow.size}px`,
 										transform: `translateY(${virtualRow.start}px)`,
 									}}
 								>
 									<RevisionRow
 										revision={row.revision}
 										maxLaneOnRow={row.maxLaneOnRow}
-										isSelected={selectedRevision?.change_id === row.revision.change_id}
+										isSelected={isSelected}
+										isFocused={isFocused}
 										onSelect={handleSelect}
 										isFlashing={isFlashing}
 										isDimmed={isDimmed}
+										isExpanded={isExpanded}
+										repoPath={repoPath}
 									/>
 								</div>
 							);

@@ -1,12 +1,15 @@
+// MUST be first import - sets up Tauri stub for browser mode
+import { IS_TAURI } from "./tauri-stub";
+
 import { RegistryProvider } from "@effect-atom/atom-react";
 import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
-import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { queryClient } from "./db";
 import { initializeTheme } from "./hooks/useTheme";
+import { setupMocks } from "./mocks/setup";
 import { routeTree } from "./routeTree.gen";
 import "./styles/index.css";
 
@@ -24,6 +27,7 @@ const router = createRouter({
 	routeTree,
 	defaultPreloadStaleTime: 0,
 	scrollRestoration: false,
+	defaultStructuralSharing: true,
 });
 
 function handleDeepLinks(urls: string[]) {
@@ -47,15 +51,20 @@ function handleDeepLinks(urls: string[]) {
 	}
 }
 
-// Handle deep links passed on cold start
-getCurrent().then((urls) => {
+async function setupDeepLinks(): Promise<void> {
+	if (!IS_TAURI) return;
+
+	const { getCurrent, onOpenUrl } = await import("@tauri-apps/plugin-deep-link");
+
+	// Handle deep links passed on cold start
+	const urls = await getCurrent();
 	if (urls) {
 		handleDeepLinks(urls);
 	}
-});
 
-// Handle deep links when app is already running
-onOpenUrl(handleDeepLinks);
+	// Handle deep links when app is already running
+	onOpenUrl(handleDeepLinks);
+}
 
 declare module "@tanstack/react-router" {
 	interface Register {
@@ -63,22 +72,29 @@ declare module "@tanstack/react-router" {
 	}
 }
 
-initializeTheme();
+async function bootstrap(): Promise<void> {
+	await setupMocks();
+	await setupDeepLinks();
 
-const root = document.getElementById("root");
-if (root) {
-	ReactDOM.createRoot(root).render(
-		<React.StrictMode>
-			<RegistryProvider>
-				<QueryClientProvider client={queryClient}>
-					<WorkerPoolContextProvider
-						poolOptions={workerPoolOptions}
-						highlighterOptions={highlighterOptions}
-					>
-						<RouterProvider router={router} />
-					</WorkerPoolContextProvider>
-				</QueryClientProvider>
-			</RegistryProvider>
-		</React.StrictMode>,
-	);
+	initializeTheme();
+
+	const root = document.getElementById("root");
+	if (root) {
+		ReactDOM.createRoot(root).render(
+			<React.StrictMode>
+				<RegistryProvider>
+					<QueryClientProvider client={queryClient}>
+						<WorkerPoolContextProvider
+							poolOptions={workerPoolOptions}
+							highlighterOptions={highlighterOptions}
+						>
+							<RouterProvider router={router} />
+						</WorkerPoolContextProvider>
+					</QueryClientProvider>
+				</RegistryProvider>
+			</React.StrictMode>,
+		);
+	}
 }
+
+bootstrap();

@@ -4,17 +4,6 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 const host = process.env.TAURI_DEV_HOST;
-const isTauri = !!process.env.TAURI_ENV_DEBUG;
-
-const tauriMocks = isTauri
-	? {}
-	: {
-			"@tauri-apps/api/core": path.resolve(__dirname, "./src/mocks/tauri-core.ts"),
-			"@tauri-apps/api/path": path.resolve(__dirname, "./src/mocks/tauri-path.ts"),
-			"@tauri-apps/api/event": path.resolve(__dirname, "./src/mocks/tauri-event.ts"),
-			"@tauri-apps/plugin-dialog": path.resolve(__dirname, "./src/mocks/tauri-dialog.ts"),
-			"@tauri-apps/plugin-deep-link": path.resolve(__dirname, "./src/mocks/tauri-deep-link.ts"),
-		};
 
 const reactCompilerConfig = {};
 
@@ -30,7 +19,6 @@ export default defineConfig({
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),
-			...tauriMocks,
 		},
 	},
 	clearScreen: false,

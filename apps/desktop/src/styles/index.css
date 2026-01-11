@@ -228,3 +228,9 @@
 	background-position: 2px 2px, 22px 22px;
 }
 
+
+/* Stack edge hover effect - make all edges in the same stack respond together */
+line.stack-edge.stack-edge-hovered {
+	stroke-width: 3;
+	stroke-opacity: 1;
+}

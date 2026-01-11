@@ -32,6 +32,8 @@ function CommandDialog({
 	children,
 	className,
 	showCloseButton = false,
+	filter,
+	shouldFilter = true,
 	...props
 }: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
 	title?: string;
@@ -39,6 +41,8 @@ function CommandDialog({
 	className?: string;
 	showCloseButton?: boolean;
 	children: React.ReactNode;
+	filter?: (value: string, search: string, keywords?: string[]) => number;
+	shouldFilter?: boolean;
 }) {
 	return (
 		<Dialog {...props}>
@@ -46,11 +50,11 @@ function CommandDialog({
 				<DialogTitle>{title}</DialogTitle>
 				<DialogDescription>{description}</DialogDescription>
 			</DialogHeader>
-			<DialogContent
-				className={cn("rounded-sm overflow-hidden p-0 top-[20%] translate-y-0", className)}
-				showCloseButton={showCloseButton}
-			>
-				<Command>{children}</Command>
+		<DialogContent
+			className={cn("rounded-lg overflow-hidden p-0 top-[20%] translate-y-0", className)}
+			showCloseButton={showCloseButton}
+		>
+				<Command filter={filter} shouldFilter={shouldFilter}>{children}</Command>
 			</DialogContent>
 		</Dialog>
 	);

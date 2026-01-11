@@ -3,11 +3,13 @@ use jj_lib::backend::CommitId;
 use jj_lib::commit::Commit;
 use jj_lib::config::ConfigSource;
 use jj_lib::merged_tree::MergedTree;
-use jj_lib::object_id::{HexPrefix, PrefixResolution};
+use jj_lib::object_id::{HexPrefix, ObjectId, PrefixResolution};
+use jj_lib::op_walk;
 use jj_lib::repo::{Repo, StoreFactories};
 use jj_lib::repo_path::RepoPath;
 use jj_lib::settings::UserSettings;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
+use std::collections::HashMap;
 use std::path::Path;
 use tokio::io::AsyncReadExt;
 
@@ -234,6 +236,57 @@ impl JjRepo {
         Ok(())
     }
 
+    pub fn abandon_revision(&mut self, change_id: &str) -> Result<()> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let mut tx = repo.start_transaction();
+
+        // Resolve change ID to commit
+        let commit_id = self.resolve_change_id(repo.as_ref(), change_id)?;
+        let commit = repo.store().get_commit(&commit_id)
+            .map_err(|e| anyhow::anyhow!("Failed to get commit: {}", e))?;
+
+        // Get the current working copy info before changes
+        let wc_commit_id = repo
+            .view()
+            .get_wc_commit_id(self.workspace.workspace_name())
+            .cloned();
+        let is_abandoning_wc = wc_commit_id.as_ref() == Some(commit.id());
+
+        // Record the commit as abandoned
+        tx.repo_mut().record_abandoned_commit(&commit);
+
+        // Rebase descendants (this handles moving children to the parent)
+        tx.repo_mut().rebase_descendants()?;
+
+        // If we abandoned the working copy, check out the parent
+        if is_abandoning_wc {
+            let parent_id = commit.parent_ids().first().cloned()
+                .context("Abandoned commit has no parent")?;
+            let parent_commit = repo.store().get_commit(&parent_id)?;
+
+            // Set the parent as the new working copy
+            let workspace_name = self.workspace.workspace_name().to_owned();
+            tx.repo_mut()
+                .set_wc_commit(workspace_name, parent_id.clone())
+                .context("Failed to set working copy commit")?;
+
+            // Finalize transaction before checkout
+            let new_repo = tx.commit("abandon")?;
+            let operation_id = new_repo.operation().id().clone();
+
+            // Check out the parent commit
+            let old_tree_id = commit.tree_id().clone();
+            self.workspace
+                .check_out(operation_id, Some(&old_tree_id), &parent_commit)
+                .context("Failed to check out parent commit")?;
+        } else {
+            // Finalize transaction
+            tx.commit("abandon")?;
+        }
+
+        Ok(())
+    }
+
     pub fn edit_revision(&mut self, change_id: String) -> Result<()> {
         let repo = self.workspace.repo_loader().load_at_head()?;
         let mut tx = repo.start_transaction();
@@ -267,5 +320,41 @@ impl JjRepo {
             .context("Failed to check out commit")?;
 
         Ok(())
+    }
+
+    /// Walk the operation log to find when each commit was last the working copy.
+    /// Returns a map of commit_id (hex) -> timestamp_millis.
+    /// This is used to determine "recency" for branch ordering.
+    pub fn get_commit_recency(&self, limit: usize) -> Result<HashMap<String, i64>> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let current_op = repo.operation();
+        let workspace_name = self.workspace.workspace_name();
+
+        let mut recency: HashMap<String, i64> = HashMap::new();
+
+        // Walk operations from newest to oldest
+        let op_iter = op_walk::walk_ancestors(std::slice::from_ref(current_op));
+
+        for (idx, op_result) in op_iter.enumerate() {
+            if idx >= limit {
+                break;
+            }
+
+            let op = op_result.context("Failed to load operation")?;
+            let metadata = op.metadata();
+            let timestamp_millis = metadata.time.start.timestamp.0;
+
+            // Get the view for this operation to see what was the WC
+            let view = op.view().context("Failed to load operation view")?;
+
+            // Check what commit was the working copy at this operation
+            if let Some(wc_commit_id) = view.wc_commit_ids().get(workspace_name) {
+                let commit_hex = wc_commit_id.hex();
+                // Only record the first (most recent) occurrence
+                recency.entry(commit_hex).or_insert(timestamp_millis);
+            }
+        }
+
+        Ok(recency)
     }
 }

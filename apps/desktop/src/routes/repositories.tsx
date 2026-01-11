@@ -73,7 +73,11 @@ function RepositoriesPage() {
 									<div className="font-medium truncate">{repository.name}</div>
 									<div className="text-muted-foreground text-xs truncate">{repository.path}</div>
 								</div>
-								<Button variant="destructive" size="sm" onClick={() => setPendingDelete(repository)}>
+								<Button
+									variant="destructive"
+									size="sm"
+									onClick={() => setPendingDelete(repository)}
+								>
 									Remove
 								</Button>
 							</div>

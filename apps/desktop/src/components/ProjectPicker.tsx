@@ -14,18 +14,24 @@ import type { Repository } from "@/tauri-commands";
 interface ProjectPickerProps {
 	repositories: Repository[];
 	onSelectRepository: (repository: Repository) => void;
+	open?: boolean;
+	onOpenChange?: (open: boolean) => void;
 }
 
 export function ProjectPicker({
 	repositories,
 	onSelectRepository,
+	open: openProp,
+	onOpenChange,
 }: ProjectPickerProps) {
-	const [open, setOpen] = useState(false);
+	const [internalOpen, setInternalOpen] = useState(false);
+	const open = openProp ?? internalOpen;
+	const setOpen = onOpenChange ?? setInternalOpen;
 
 	useKeyboardShortcut({
 		key: "o",
 		modifiers: { meta: true, ctrl: true },
-		onPress: () => setOpen((open) => !open),
+		onPress: () => setOpen(!open),
 	});
 
 	const handleSelectRepository = (repository: Repository) => {

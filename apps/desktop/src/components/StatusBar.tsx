@@ -1,5 +1,7 @@
-import { Circle } from "lucide-react";
+import { Circle, Laptop, Moon, Sun } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { useTheme } from "@/hooks/useTheme";
 
 interface StatusBarProps {
 	branch: string | null;
@@ -7,8 +9,20 @@ interface StatusBarProps {
 }
 
 export function StatusBar({ branch, isConnected }: StatusBarProps) {
+	const { theme, cycleTheme } = useTheme();
+	const ThemeIcon = theme === "system" ? Laptop : theme === "dark" ? Moon : Sun;
+
 	return (
 		<div className="flex items-center h-8 px-2 border-t border-border bg-card text-xs text-muted-foreground">
+			<Button
+				variant="ghost"
+				size="icon-xs"
+				onClick={cycleTheme}
+				className="h-6 w-6"
+				aria-label="Toggle theme"
+			>
+				<ThemeIcon className="h-3.5 w-3.5" />
+			</Button>
 			<div className="flex items-center gap-3 ml-auto">
 				{branch && (
 					<>

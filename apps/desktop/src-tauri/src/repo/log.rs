@@ -34,6 +34,8 @@ pub struct Revision {
     pub is_immutable: bool,
     pub is_mine: bool,
     pub is_trunk: bool,
+    pub is_divergent: bool,
+    pub divergent_index: Option<usize>,
     pub bookmarks: Vec<String>,
 }
 
@@ -152,6 +154,20 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: O
         }
     };
 
+    // First pass: count occurrences of each change_id to detect divergence
+    let mut change_id_counts: HashMap<String, usize> = HashMap::new();
+    let mut commit_change_ids: Vec<String> = Vec::new();
+
+    for (commit_id, _) in &graph_nodes {
+        let commit = repo.store().get_commit(commit_id)?;
+        let change_id_str = format_change_id(commit.change_id());
+        *change_id_counts.entry(change_id_str.clone()).or_insert(0) += 1;
+        commit_change_ids.push(change_id_str);
+    }
+
+    // Track which index we're at for each divergent change_id
+    let mut divergent_indices: HashMap<String, usize> = HashMap::new();
+
     let mut revisions = Vec::new();
 
     for (commit_id, edges) in graph_nodes {
@@ -198,7 +214,25 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: O
         let prefix_len = repo
             .shortest_unique_change_id_prefix_len(change_id)
             .unwrap_or(full_change_id.len());
-        let change_id_short = full_change_id[..prefix_len].to_string();
+
+        // Check if this change_id is divergent (appears multiple times)
+        let count = change_id_counts.get(&full_change_id).copied().unwrap_or(1);
+        let is_divergent = count > 1;
+        let divergent_index = if is_divergent {
+            let idx = divergent_indices.entry(full_change_id.clone()).or_insert(0);
+            let current_idx = *idx;
+            *idx += 1;
+            Some(current_idx)
+        } else {
+            None
+        };
+
+        // Add /N suffix for divergent changes
+        let change_id_short = if let Some(div_idx) = divergent_index {
+            format!("{}/{}", &full_change_id[..prefix_len], div_idx)
+        } else {
+            full_change_id[..prefix_len].to_string()
+        };
 
         let is_trunk = trunk_ancestor_ids.contains(&commit_id);
 
@@ -215,6 +249,8 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: O
             is_immutable,
             is_mine,
             is_trunk,
+            is_divergent,
+            divergent_index,
             bookmarks,
         });
     }
@@ -280,4 +316,115 @@ fn get_bookmarks_for_commit(repo: &dyn Repo, commit_id: &CommitId) -> Vec<String
     }
 
     bookmarks
+}
+
+/// Result of resolving a revset expression
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct RevsetResult {
+    pub change_ids: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// Resolve a revset expression and return matching change IDs
+pub fn resolve_revset(repo_path: &Path, revset_str: &str) -> Result<RevsetResult> {
+    let jj_repo = JjRepo::open(repo_path)?;
+    let repo = jj_repo.repo_loader().load_at_head()?;
+
+    // Set up aliases (same as fetch_log)
+    let mut aliases_map = RevsetAliasesMap::new();
+    let user_email = jj_repo.user_settings().user_email();
+
+    aliases_map.insert(
+        "trunk()",
+        r#"latest(
+            remote_bookmarks(exact:"main", exact:"origin") |
+            remote_bookmarks(exact:"master", exact:"origin") |
+            remote_bookmarks(exact:"trunk", exact:"origin") |
+            root()
+        )"#,
+    ).ok();
+
+    aliases_map.insert("builtin_immutable_heads()", "present(trunk()) | tags() | untracked_remote_bookmarks()").ok();
+    aliases_map.insert("immutable_heads()", "builtin_immutable_heads()").ok();
+
+    let mine_revset = format!(r#"author_email(exact-i:"{}")"#, user_email);
+    aliases_map.insert("mine()", &mine_revset).ok();
+
+    let path_converter = RepoPathUiConverter::Fs {
+        cwd: repo_path.to_path_buf(),
+        base: repo_path.to_path_buf(),
+    };
+    let workspace_name = jj_repo.workspace_name();
+    let workspace_ctx = RevsetWorkspaceContext {
+        path_converter: &path_converter,
+        workspace_name,
+    };
+
+    let context = RevsetParseContext {
+        aliases_map: &aliases_map,
+        local_variables: HashMap::new(),
+        user_email: jj_repo.user_settings().user_email(),
+        date_pattern_context: chrono::Utc::now().fixed_offset().into(),
+        default_ignored_remote: Some(git::REMOTE_NAME_FOR_LOCAL_GIT_REPO),
+        extensions: &RevsetExtensions::default(),
+        workspace: Some(workspace_ctx),
+    };
+
+    let mut diagnostics = RevsetDiagnostics::new();
+    
+    // Parse the revset expression
+    let expression = match parse(&mut diagnostics, revset_str, &context) {
+        Ok(expr) => expr,
+        Err(e) => {
+            return Ok(RevsetResult {
+                change_ids: vec![],
+                error: Some(format!("Parse error: {}", e)),
+            });
+        }
+    };
+
+    // Resolve symbols
+    let symbol_resolver = SymbolResolver::new(repo.as_ref(), &([] as [&Box<dyn SymbolResolverExtension>; 0]));
+    let resolved = match expression.resolve_user_expression(repo.as_ref(), &symbol_resolver) {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(RevsetResult {
+                change_ids: vec![],
+                error: Some(format!("Resolve error: {}", e)),
+            });
+        }
+    };
+
+    // Evaluate the revset
+    let revset = match resolved.evaluate(repo.as_ref()) {
+        Ok(r) => r,
+        Err(e) => {
+            return Ok(RevsetResult {
+                change_ids: vec![],
+                error: Some(format!("Evaluation error: {}", e)),
+            });
+        }
+    };
+
+    // Collect matching change IDs
+    let mut change_ids = Vec::new();
+    for commit_id_result in revset.iter() {
+        match commit_id_result {
+            Ok(commit_id) => {
+                let commit = repo.store().get_commit(&commit_id)?;
+                change_ids.push(format_change_id(commit.change_id()));
+            }
+            Err(e) => {
+                return Ok(RevsetResult {
+                    change_ids: vec![],
+                    error: Some(format!("Iteration error: {}", e)),
+                });
+            }
+        }
+    }
+
+    Ok(RevsetResult {
+        change_ids,
+        error: None,
+    })
 }

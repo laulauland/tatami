@@ -22,6 +22,8 @@ export const Revision = Schema.Struct({
 	is_immutable: Schema.Boolean,
 	is_mine: Schema.Boolean,
 	is_trunk: Schema.Boolean,
+	is_divergent: Schema.Boolean,
+	divergent_index: Schema.NullOr(Schema.Number),
 	bookmarks: Schema.Array(Schema.String),
 });
 export type Revision = typeof Revision.Type;

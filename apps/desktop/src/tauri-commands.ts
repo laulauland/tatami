@@ -76,3 +76,29 @@ export async function jjNew(repoPath: string, parentChangeIds: string[]): Promis
 export async function jjEdit(repoPath: string, changeId: string): Promise<void> {
 	return invoke("jj_edit", { repoPath, changeId });
 }
+
+export async function jjAbandon(repoPath: string, changeId: string): Promise<void> {
+	return invoke("jj_abandon", { repoPath, changeId });
+}
+
+/** Get recency data for commits - returns commit_id (hex) -> timestamp_millis when last WC */
+export async function getCommitRecency(
+	repoPath: string,
+	limit: number,
+): Promise<Record<string, number>> {
+	return invoke<Record<string, number>>("get_commit_recency", { repoPath, limit });
+}
+
+/** Result of resolving a revset expression */
+export interface RevsetResult {
+	change_ids: string[];
+	error: string | null;
+}
+
+/** Resolve a revset expression using jj-lib's full parser */
+export async function resolveRevset(
+	repoPath: string,
+	revset: string,
+): Promise<RevsetResult> {
+	return invoke<RevsetResult>("resolve_revset", { repoPath, revset });
+}

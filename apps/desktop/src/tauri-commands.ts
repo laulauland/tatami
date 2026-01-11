@@ -2,15 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 
 export type {
 	ChangedFile,
-	DiffHunk,
-	DiffLine,
-	FileDiff,
 	Repository,
 	Revision,
 	WorkingCopyStatus,
 } from "./schemas";
 
-import type { FileDiff, Repository, Revision, WorkingCopyStatus } from "./schemas";
+import type { ChangedFile, Repository, Revision, WorkingCopyStatus } from "./schemas";
 
 export async function findRepository(startPath: string): Promise<string | null> {
 	return invoke<string | null>("find_repository", { startPath });
@@ -33,8 +30,19 @@ export async function getFileDiff(
 	repoPath: string,
 	changeId: string,
 	filePath: string,
-): Promise<FileDiff> {
-	return invoke<FileDiff>("get_file_diff", { repoPath, changeId, filePath });
+): Promise<string> {
+	return invoke<string>("get_file_diff", { repoPath, changeId, filePath });
+}
+
+export async function getRevisionDiff(repoPath: string, changeId: string): Promise<string> {
+	return invoke<string>("get_revision_diff", { repoPath, changeId });
+}
+
+export async function getRevisionChanges(
+	repoPath: string,
+	changeId: string,
+): Promise<ChangedFile[]> {
+	return invoke<ChangedFile[]>("get_revision_changes", { repoPath, changeId });
 }
 
 export async function getRepositories(): Promise<Repository[]> {

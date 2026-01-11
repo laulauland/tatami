@@ -17,6 +17,7 @@
 		"@effect-atom/atom": "^0.4.11",
 		"@effect-atom/atom-react": "^0.4.4",
 		"@fontsource-variable/jetbrains-mono": "^5.2.8",
+		"@pierre/diffs": "^1.0.4",
 		"@tailwindcss/vite": "^4.1.18",
 		"@tanstack/db": "^0.5.15",
 		"@tanstack/query-core": "^5.90.12",

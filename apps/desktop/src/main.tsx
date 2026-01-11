@@ -1,12 +1,24 @@
 import { RegistryProvider } from "@effect-atom/atom-react";
+import { WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { getCurrent, onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { queryClient } from "./db";
+import { initializeTheme } from "./hooks/useTheme";
 import { routeTree } from "./routeTree.gen";
 import "./styles/index.css";
+
+const workerPoolOptions = {
+	workerFactory: () =>
+		new Worker(new URL("@pierre/diffs/worker/worker.js", import.meta.url), { type: "module" }),
+	poolSize: 4,
+};
+
+const highlighterOptions = {
+	theme: { dark: "pierre-dark", light: "pierre-light" } as const,
+};
 
 const router = createRouter({
 	routeTree,
@@ -51,13 +63,20 @@ declare module "@tanstack/react-router" {
 	}
 }
 
+initializeTheme();
+
 const root = document.getElementById("root");
 if (root) {
 	ReactDOM.createRoot(root).render(
 		<React.StrictMode>
 			<RegistryProvider>
 				<QueryClientProvider client={queryClient}>
-					<RouterProvider router={router} />
+					<WorkerPoolContextProvider
+						poolOptions={workerPoolOptions}
+						highlighterOptions={highlighterOptions}
+					>
+						<RouterProvider router={router} />
+					</WorkerPoolContextProvider>
 				</QueryClientProvider>
 			</RegistryProvider>
 		</React.StrictMode>,

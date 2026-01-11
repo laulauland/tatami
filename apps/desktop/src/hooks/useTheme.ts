@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -46,9 +46,9 @@ export function useTheme() {
 		return () => mediaQuery.removeEventListener("change", handleChange);
 	}, [theme]);
 
-	const resolvedTheme = useMemo(() => resolveTheme(theme), [theme]);
+	const resolvedTheme = resolveTheme(theme);
 
-	const cycleTheme = useCallback(() => {
+	function cycleTheme() {
 		setTheme((current) => {
 			switch (current) {
 				case "light":
@@ -59,7 +59,7 @@ export function useTheme() {
 					return "light";
 			}
 		});
-	}, []);
+	}
 
 	return { theme, resolvedTheme, setTheme, cycleTheme };
 }

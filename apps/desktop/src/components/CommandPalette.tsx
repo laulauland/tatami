@@ -1,4 +1,4 @@
-import { Folder, Settings } from "lucide-react";
+import { Folder, Settings, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import {
 	CommandDialog,
@@ -13,9 +13,10 @@ import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 interface CommandPaletteProps {
 	onOpenRepo: () => void;
 	onOpenProjects: () => void;
+	onOpenSettings: () => void;
 }
 
-export function CommandPalette({ onOpenRepo, onOpenProjects }: CommandPaletteProps) {
+export function CommandPalette({ onOpenRepo, onOpenProjects, onOpenSettings }: CommandPaletteProps) {
 	const [open, setOpen] = useState(false);
 
 	useKeyboardShortcut({
@@ -34,6 +35,11 @@ export function CommandPalette({ onOpenRepo, onOpenProjects }: CommandPalettePro
 		setOpen(false);
 	};
 
+	const handleOpenSettings = () => {
+		onOpenSettings();
+		setOpen(false);
+	};
+
 	return (
 		<CommandDialog open={open} onOpenChange={setOpen}>
 			<CommandInput placeholder="Search actions..." />
@@ -47,6 +53,10 @@ export function CommandPalette({ onOpenRepo, onOpenProjects }: CommandPalettePro
 					<CommandItem onSelect={handleOpenProjects}>
 						<Settings className="mr-2 h-4 w-4" />
 						<span>Manage repositories...</span>
+					</CommandItem>
+					<CommandItem onSelect={handleOpenSettings}>
+						<SlidersHorizontal className="mr-2 h-4 w-4" />
+						<span>Settings</span>
 					</CommandItem>
 				</CommandGroup>
 			</CommandList>

@@ -19,29 +19,6 @@ pub struct ChangedFile {
     pub status: String,
 }
 
-#[derive(Serialize)]
-pub struct DiffLine {
-    pub line_type: String,
-    pub content: String,
-    pub old_line_number: Option<u32>,
-    pub new_line_number: Option<u32>,
-}
-
-#[derive(Serialize)]
-pub struct DiffHunk {
-    pub old_start: u32,
-    pub old_count: u32,
-    pub new_start: u32,
-    pub new_count: u32,
-    pub lines: Vec<DiffLine>,
-}
-
-#[derive(Serialize)]
-pub struct FileDiff {
-    pub path: String,
-    pub hunks: Vec<DiffHunk>,
-}
-
 #[tauri::command]
 fn find_repository(start_path: String) -> Option<String> {
     let path = PathBuf::from(&start_path);
@@ -65,7 +42,7 @@ async fn get_file_diff(
     repo_path: String,
     change_id: String,
     file_path: String,
-) -> Result<FileDiff, String> {
+) -> Result<String, String> {
     let path = Path::new(&repo_path);
     let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
 
@@ -81,32 +58,124 @@ async fn get_file_diff(
         .get_file_content(&commit, &file_path)
         .unwrap_or_default();
 
-    let file_diff = diff::compute_file_diff(&old_content, &new_content, file_path)
-        .map_err(|e| format!("Failed to compute diff: {}", e))?;
+    diff::compute_file_diff(&old_content, &new_content, &file_path)
+        .map_err(|e| format!("Failed to compute diff: {}", e))
+}
 
-    Ok(FileDiff {
-        path: file_diff.path,
-        hunks: file_diff
-            .hunks
-            .into_iter()
-            .map(|h| DiffHunk {
-                old_start: h.old_start,
-                old_count: h.old_count,
-                new_start: h.new_start,
-                new_count: h.new_count,
-                lines: h
-                    .lines
-                    .into_iter()
-                    .map(|l| DiffLine {
-                        line_type: l.line_type,
-                        content: l.content,
-                        old_line_number: l.old_line_number,
-                        new_line_number: l.new_line_number,
-                    })
-                    .collect(),
-            })
-            .collect(),
-    })
+#[tauri::command]
+async fn get_revision_diff(repo_path: String, change_id: String) -> Result<String, String> {
+    use jj_lib::backend::TreeValue;
+    use jj_lib::matchers::EverythingMatcher;
+
+    let path = Path::new(&repo_path);
+    let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+
+    let commit = jj_repo
+        .get_commit(&change_id)
+        .map_err(|e| format!("Failed to get commit: {}", e))?;
+
+    let parent_tree = {
+        let parents = commit.parents();
+        let parent = parents.into_iter().next().ok_or_else(|| "Commit has no parent".to_string())?;
+        parent.map_err(|e| format!("Failed to get parent: {}", e))?.tree().map_err(|e| format!("Failed to get parent tree: {}", e))?
+    };
+
+    let commit_tree = commit.tree().map_err(|e| format!("Failed to get commit tree: {}", e))?;
+
+    let matcher = EverythingMatcher;
+    let mut diff_iter = parent_tree.diff_stream(&commit_tree, &matcher);
+
+    let mut unified_diffs = Vec::new();
+
+    pollster::block_on(async {
+        use futures::StreamExt;
+        while let Some(entry) = diff_iter.next().await {
+            let path = entry.path;
+            let path_str = path.as_internal_file_string();
+
+            let diff_values = entry.values.map_err(|e| format!("Failed to get diff values: {}", e))?;
+            let before = diff_values.before.removes().next().and_then(|v| v.as_ref());
+            let after = diff_values.after.adds().next().and_then(|v| v.as_ref());
+
+            match (before, after) {
+                (Some(TreeValue::File { .. }), Some(TreeValue::File { .. })) |
+                (None, Some(TreeValue::File { .. })) |
+                (Some(TreeValue::File { .. }), None) => {
+                    let old_content = jj_repo
+                        .get_parent_file_content(&commit, path_str)
+                        .unwrap_or_default();
+
+                    let new_content = jj_repo
+                        .get_file_content(&commit, path_str)
+                        .unwrap_or_default();
+
+                    let file_diff = diff::compute_file_diff(&old_content, &new_content, path_str)
+                        .map_err(|e| format!("Failed to compute diff: {}", e))?;
+
+                    if !file_diff.is_empty() {
+                        unified_diffs.push(file_diff);
+                    }
+                }
+                _ => continue,
+            };
+        }
+        Ok::<(), String>(())
+    })?;
+
+    Ok(unified_diffs.join("\n"))
+}
+
+#[tauri::command]
+async fn get_revision_changes(repo_path: String, change_id: String) -> Result<Vec<ChangedFile>, String> {
+    use jj_lib::backend::TreeValue;
+    use jj_lib::matchers::EverythingMatcher;
+
+    let path = Path::new(&repo_path);
+    let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+
+    let commit = jj_repo
+        .get_commit(&change_id)
+        .map_err(|e| format!("Failed to get commit: {}", e))?;
+
+    let parent_tree = {
+        let parents = commit.parents();
+        let parent = parents.into_iter().next().ok_or_else(|| "Commit has no parent".to_string())?;
+        parent.map_err(|e| format!("Failed to get parent: {}", e))?.tree().map_err(|e| format!("Failed to get parent tree: {}", e))?
+    };
+
+    let commit_tree = commit.tree().map_err(|e| format!("Failed to get commit tree: {}", e))?;
+
+    let matcher = EverythingMatcher;
+    let mut diff_iter = parent_tree.diff_stream(&commit_tree, &matcher);
+
+    let mut files = Vec::new();
+
+    pollster::block_on(async {
+        use futures::StreamExt;
+        while let Some(entry) = diff_iter.next().await {
+            let path = entry.path;
+            let path_str = path.as_internal_file_string();
+
+            let diff_values = entry.values.map_err(|e| format!("Failed to get diff values: {}", e))?;
+            let before = diff_values.before.removes().next().and_then(|v| v.as_ref());
+            let after = diff_values.after.adds().next().and_then(|v| v.as_ref());
+
+            let status = match (before, after) {
+                (Some(TreeValue::File { .. }), Some(TreeValue::File { .. })) => "modified",
+                (None, Some(_)) => "added",
+                (Some(_), None) => "deleted",
+                _ => continue,
+            };
+
+            files.push(ChangedFile {
+                path: path_str.to_string(),
+                status: status.to_string(),
+            });
+        }
+        Ok::<(), String>(())
+    })?;
+
+    Ok(files)
 }
 
 #[tauri::command]
@@ -222,6 +291,8 @@ pub fn run() {
             get_revisions,
             get_status,
             get_file_diff,
+            get_revision_diff,
+            get_revision_changes,
             get_projects,
             upsert_project,
             find_project_by_path,

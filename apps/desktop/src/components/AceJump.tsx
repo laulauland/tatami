@@ -36,25 +36,35 @@ export function AceJump({ revisions, onJump }: AceJumpProps) {
 	})();
 
 	function close() {
-		inputRef.current?.blur();
+		if (document.activeElement instanceof HTMLElement) {
+			document.activeElement.blur();
+		}
 		setOpen(false);
-		// Ensure focus is removed from the dialog area
+	}
+
+	// Stable refs for callbacks to avoid effect re-running
+	const onJumpRef = useRef(onJump);
+	onJumpRef.current = onJump;
+
+	function jumpTo(changeId: string) {
+		// Blur active element synchronously before closing
+		if (document.activeElement instanceof HTMLElement) {
+			document.activeElement.blur();
+		}
+		setOpen(false);
+		// Defer the actual jump to next frame to ensure focus is fully released
 		requestAnimationFrame(() => {
-			(document.activeElement as HTMLElement)?.blur?.();
+			onJumpRef.current(changeId);
 		});
 	}
 
-	function jumpTo(changeId: string) {
-		onJump(changeId);
-		close();
-	}
-
 	// Auto-jump when single match and query is at least 2 characters
+	const singleMatchChangeId = matches.length === 1 ? matches[0].change_id : null;
 	useEffect(() => {
-		if (matches.length === 1 && query.length >= 2) {
-			jumpTo(matches[0].change_id);
+		if (singleMatchChangeId && query.length >= 2) {
+			jumpTo(singleMatchChangeId);
 		}
-	}, [matches.length, query]);
+	}, [singleMatchChangeId, query.length]);
 
 	function handleKeyDown(e: React.KeyboardEvent) {
 		if (e.key === "Escape") {
@@ -74,21 +84,15 @@ export function AceJump({ revisions, onJump }: AceJumpProps) {
 		}
 	}
 
-	// Reset selected index when matches change
-	useEffect(() => {
-		setSelectedIndex(0);
-	}, [query]);
-
 	if (!open) return null;
 
 	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: Backdrop for modal dialog
+		// biome-ignore lint/a11y/useKeyWithClickEvents: Keyboard handled by input, backdrop is click-only
 		<div
 			className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
 			onClick={(e) => {
 				if (e.target === e.currentTarget) close();
-			}}
-			onKeyDown={(e) => {
-				if (e.key === "Escape") close();
 			}}
 		>
 			<div className="bg-background border border-border rounded-lg shadow-xl w-[400px] overflow-hidden">
@@ -101,7 +105,10 @@ export function AceJump({ revisions, onJump }: AceJumpProps) {
 						ref={inputRef}
 						type="text"
 						value={query}
-						onChange={(e) => setQuery(e.target.value)}
+						onChange={(e) => {
+							setQuery(e.target.value);
+							setSelectedIndex(0);
+						}}
 						onKeyDown={handleKeyDown}
 						placeholder="e.g. kzm, abc..."
 						className="w-full px-3 py-2 text-sm bg-muted border border-border rounded-md font-mono focus:outline-none focus:ring-2 focus:ring-ring"

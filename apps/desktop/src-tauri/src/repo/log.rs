@@ -161,11 +161,6 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: O
         let is_immutable = immutable_ids.contains(&commit_id);
 
         let description = commit.description().to_string();
-        let first_line = description
-            .lines()
-            .next()
-            .unwrap_or("(no description)")
-            .to_string();
 
         let author = commit.author();
         let author_name = author.name.clone();
@@ -213,7 +208,7 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: O
             change_id_short,
             parent_ids,
             parent_edges,
-            description: first_line,
+            description,
             author: author_name,
             timestamp,
             is_working_copy,

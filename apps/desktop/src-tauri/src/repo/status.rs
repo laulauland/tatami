@@ -36,11 +36,6 @@ pub fn fetch_status(repo_path: &Path) -> Result<WorkingCopyStatus> {
     let wc_commit = repo.store().get_commit(wc_commit_id)?;
     let change_id = wc_commit.change_id();
     let description = wc_commit.description().to_string();
-    let first_line = description
-        .lines()
-        .next()
-        .unwrap_or("(no description)")
-        .to_string();
 
     let parent_tree = {
         let parents = wc_commit.parents();
@@ -83,7 +78,7 @@ pub fn fetch_status(repo_path: &Path) -> Result<WorkingCopyStatus> {
     Ok(WorkingCopyStatus {
         change_id: format_change_id(change_id),
         commit_id: hex::encode(&wc_commit_id.to_bytes()[..6]),
-        description: first_line,
+        description,
         files,
     })
 }

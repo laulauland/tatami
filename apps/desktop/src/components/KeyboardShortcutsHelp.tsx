@@ -7,8 +7,8 @@ const shortcuts = [
 	{
 		category: "Navigation",
 		items: [
-			{ keys: ["j", "↓"], description: "Move down" },
-			{ keys: ["k", "↑"], description: "Move up" },
+			{ keys: ["j", "↓"], description: "Move down (revisions / files in split view)" },
+			{ keys: ["k", "↑"], description: "Move up (revisions / files in split view)" },
 			{ keys: ["J / -"], description: "Jump to parent revision" },
 			{ keys: ["K / + / ="], description: "Jump to child revision" },
 			{ keys: ["@"], description: "Jump to working copy" },
@@ -24,6 +24,15 @@ const shortcuts = [
 			{ keys: ["n"], description: "New revision on selected" },
 			{ keys: ["e"], description: "Edit selected revision" },
 			{ keys: ["s"], description: "Toggle stack view" },
+		],
+	},
+	{
+		category: "View",
+		items: [
+			{ keys: ["1"], description: "Overview mode (revisions only)" },
+			{ keys: ["2"], description: "Split mode (revisions + diff)" },
+			{ keys: ["l"], description: "Expand revision details" },
+			{ keys: ["h"], description: "Collapse revision details" },
 		],
 	},
 	{

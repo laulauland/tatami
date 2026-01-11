@@ -61,15 +61,11 @@ function FileDiffSection({
 	isSelected?: boolean;
 	fileRef?: React.RefObject<HTMLDivElement | null>;
 }) {
-	const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
+	const [isCollapsedByUser, setIsCollapsedByUser] = useState(defaultCollapsed);
 	const filePath = extractFilePath(patch);
 
-	// Auto-expand when selected
-	useEffect(() => {
-		if (isSelected && isCollapsed) {
-			setIsCollapsed(false);
-		}
-	}, [isSelected, isCollapsed]);
+	// Derived state: auto-expand when selected
+	const isCollapsed = isSelected ? false : isCollapsedByUser;
 
 	return (
 		<div
@@ -80,7 +76,7 @@ function FileDiffSection({
 		>
 			<button
 				type="button"
-				onClick={() => setIsCollapsed(!isCollapsed)}
+				onClick={() => setIsCollapsedByUser(!isCollapsed)}
 				className={`w-full px-4 py-2 border-b hover:bg-accent/50 transition-colors flex items-center justify-between ${
 					isSelected ? "bg-accent border-accent-foreground" : "bg-muted border-border"
 				}`}

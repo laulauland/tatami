@@ -4,13 +4,14 @@ mod watcher;
 
 use repo::diff;
 use repo::jj::JjRepo;
-use repo::log::Revision;
+use repo::log::{Revision, RevsetResult};
 use repo::status::WorkingCopyStatus;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use storage::{AppLayout, Project, Storage, get_storage};
 use tauri::Manager;
+use tauri::menu::{MenuBuilder, SubmenuBuilder};
 use watcher::{WatcherManager, get_watcher_manager};
 
 #[derive(Serialize)]
@@ -26,9 +27,15 @@ fn find_repository(start_path: String) -> Option<String> {
 }
 
 #[tauri::command]
-async fn get_revisions(repo_path: String, limit: usize, revset: Option<String>, preset: Option<String>) -> Result<Vec<Revision>, String> {
+async fn get_revisions(
+    repo_path: String,
+    limit: usize,
+    revset: Option<String>,
+    preset: Option<String>,
+) -> Result<Vec<Revision>, String> {
     let path = Path::new(&repo_path);
-    repo::log::fetch_log(path, limit, revset.as_deref(), preset.as_deref()).map_err(|e| format!("Failed to fetch log: {}", e))
+    repo::log::fetch_log(path, limit, revset.as_deref(), preset.as_deref())
+        .map_err(|e| format!("Failed to fetch log: {}", e))
 }
 
 #[tauri::command]
@@ -76,11 +83,19 @@ async fn get_revision_diff(repo_path: String, change_id: String) -> Result<Strin
 
     let parent_tree = {
         let parents = commit.parents();
-        let parent = parents.into_iter().next().ok_or_else(|| "Commit has no parent".to_string())?;
-        parent.map_err(|e| format!("Failed to get parent: {}", e))?.tree().map_err(|e| format!("Failed to get parent tree: {}", e))?
+        let parent = parents
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Commit has no parent".to_string())?;
+        parent
+            .map_err(|e| format!("Failed to get parent: {}", e))?
+            .tree()
+            .map_err(|e| format!("Failed to get parent tree: {}", e))?
     };
 
-    let commit_tree = commit.tree().map_err(|e| format!("Failed to get commit tree: {}", e))?;
+    let commit_tree = commit
+        .tree()
+        .map_err(|e| format!("Failed to get commit tree: {}", e))?;
 
     let matcher = EverythingMatcher;
     let mut diff_iter = parent_tree.diff_stream(&commit_tree, &matcher);
@@ -93,14 +108,16 @@ async fn get_revision_diff(repo_path: String, change_id: String) -> Result<Strin
             let path = entry.path;
             let path_str = path.as_internal_file_string();
 
-            let diff_values = entry.values.map_err(|e| format!("Failed to get diff values: {}", e))?;
+            let diff_values = entry
+                .values
+                .map_err(|e| format!("Failed to get diff values: {}", e))?;
             let before = diff_values.before.removes().next().and_then(|v| v.as_ref());
             let after = diff_values.after.adds().next().and_then(|v| v.as_ref());
 
             match (before, after) {
-                (Some(TreeValue::File { .. }), Some(TreeValue::File { .. })) |
-                (None, Some(TreeValue::File { .. })) |
-                (Some(TreeValue::File { .. }), None) => {
+                (Some(TreeValue::File { .. }), Some(TreeValue::File { .. }))
+                | (None, Some(TreeValue::File { .. }))
+                | (Some(TreeValue::File { .. }), None) => {
                     let old_content = jj_repo
                         .get_parent_file_content(&commit, path_str)
                         .unwrap_or_default();
@@ -126,7 +143,10 @@ async fn get_revision_diff(repo_path: String, change_id: String) -> Result<Strin
 }
 
 #[tauri::command]
-async fn get_revision_changes(repo_path: String, change_id: String) -> Result<Vec<ChangedFile>, String> {
+async fn get_revision_changes(
+    repo_path: String,
+    change_id: String,
+) -> Result<Vec<ChangedFile>, String> {
     use jj_lib::backend::TreeValue;
     use jj_lib::matchers::EverythingMatcher;
 
@@ -139,11 +159,19 @@ async fn get_revision_changes(repo_path: String, change_id: String) -> Result<Ve
 
     let parent_tree = {
         let parents = commit.parents();
-        let parent = parents.into_iter().next().ok_or_else(|| "Commit has no parent".to_string())?;
-        parent.map_err(|e| format!("Failed to get parent: {}", e))?.tree().map_err(|e| format!("Failed to get parent tree: {}", e))?
+        let parent = parents
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Commit has no parent".to_string())?;
+        parent
+            .map_err(|e| format!("Failed to get parent: {}", e))?
+            .tree()
+            .map_err(|e| format!("Failed to get parent tree: {}", e))?
     };
 
-    let commit_tree = commit.tree().map_err(|e| format!("Failed to get commit tree: {}", e))?;
+    let commit_tree = commit
+        .tree()
+        .map_err(|e| format!("Failed to get commit tree: {}", e))?;
 
     let matcher = EverythingMatcher;
     let mut diff_iter = parent_tree.diff_stream(&commit_tree, &matcher);
@@ -156,7 +184,9 @@ async fn get_revision_changes(repo_path: String, change_id: String) -> Result<Ve
             let path = entry.path;
             let path_str = path.as_internal_file_string();
 
-            let diff_values = entry.values.map_err(|e| format!("Failed to get diff values: {}", e))?;
+            let diff_values = entry
+                .values
+                .map_err(|e| format!("Failed to get diff values: {}", e))?;
             let before = diff_values.before.removes().next().and_then(|v| v.as_ref());
             let after = diff_values.after.adds().next().and_then(|v| v.as_ref());
 
@@ -262,6 +292,37 @@ async fn jj_edit(repo_path: String, change_id: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to edit revision: {}", e))
 }
 
+#[tauri::command]
+async fn jj_abandon(repo_path: String, change_id: String) -> Result<(), String> {
+    let path = Path::new(&repo_path);
+    let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .abandon_revision(&change_id)
+        .map_err(|e| format!("Failed to abandon revision: {}", e))
+}
+
+/// Get recency data for commits by walking the operation log.
+/// Returns a map of commit_id (hex) -> timestamp_millis (when it was last the working copy).
+#[tauri::command]
+async fn get_commit_recency(
+    repo_path: String,
+    limit: usize,
+) -> Result<std::collections::HashMap<String, i64>, String> {
+    let path = Path::new(&repo_path);
+    let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .get_commit_recency(limit)
+        .map_err(|e| format!("Failed to get commit recency: {}", e))
+}
+
+/// Resolve a revset expression and return matching change IDs.
+/// Uses jj-lib's full revset parser.
+#[tauri::command]
+async fn resolve_revset(repo_path: String, revset: String) -> Result<RevsetResult, String> {
+    let path = Path::new(&repo_path);
+    repo::log::resolve_revset(path, &revset).map_err(|e| format!("Failed to resolve revset: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -284,6 +345,33 @@ pub fn run() {
 
             app.handle().manage(WatcherManager::new());
 
+            // Add Debug menu for development
+            #[cfg(debug_assertions)]
+            {
+                let debug_menu = SubmenuBuilder::new(app, "Debug")
+                    .text("reload", "Reload")
+                    .build()?;
+
+                let menu = MenuBuilder::new(app)
+                    .copy()
+                    .paste()
+                    .undo()
+                    .redo()
+                    .separator()
+                    .item(&debug_menu)
+                    .build()?;
+
+                app.set_menu(menu)?;
+
+                app.on_menu_event(|app_handle, event| {
+                    if event.id().0.as_str() == "reload" {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.eval("window.location.reload()");
+                        }
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -293,6 +381,8 @@ pub fn run() {
             get_file_diff,
             get_revision_diff,
             get_revision_changes,
+            get_commit_recency,
+            resolve_revset,
             get_projects,
             upsert_project,
             find_project_by_path,
@@ -303,6 +393,7 @@ pub fn run() {
             unwatch_repository,
             jj_new,
             jj_edit,
+            jj_abandon,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

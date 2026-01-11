@@ -35,22 +35,6 @@ interface WorkingCopyStatus {
 	files: { path: string; status: "added" | "modified" | "deleted" }[];
 }
 
-interface FileDiff {
-	path: string;
-	hunks: {
-		old_start: number;
-		old_count: number;
-		new_start: number;
-		new_count: number;
-		lines: {
-			line_type: "context" | "add" | "remove";
-			content: string;
-			old_line_number: number | null;
-			new_line_number: number | null;
-		}[];
-	}[];
-}
-
 let mockProjects: Project[] = [
 	{
 		id: "mock-1",
@@ -255,39 +239,28 @@ const handlers: Record<string, (args?: unknown) => unknown> = {
 			{ path: "README.md", status: "added" },
 		],
 	}),
-	get_file_diff: (): FileDiff => ({
-		path: "src/main.rs",
-		hunks: [
-			{
-				old_start: 1,
-				old_count: 3,
-				new_start: 1,
-				new_count: 4,
-				lines: [
-					{ line_type: "context", content: "fn main() {", old_line_number: 1, new_line_number: 1 },
-					{
-						line_type: "remove",
-						content: '    println!("old");',
-						old_line_number: 2,
-						new_line_number: null,
-					},
-					{
-						line_type: "add",
-						content: '    println!("new");',
-						old_line_number: null,
-						new_line_number: 2,
-					},
-					{
-						line_type: "add",
-						content: '    println!("extra");',
-						old_line_number: null,
-						new_line_number: 3,
-					},
-					{ line_type: "context", content: "}", old_line_number: 3, new_line_number: 4 },
-				],
-			},
-		],
-	}),
+	get_file_diff: (): string => `--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,3 +1,4 @@
+ fn main() {
+-    println!("old");
++    println!("new");
++    println!("extra");
+ }`,
+	get_revision_diff: (): string => `--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,3 +1,4 @@
+ fn main() {
+-    println!("old");
++    println!("new");
++    println!("extra");
+ }
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,3 @@
+ # Example Project
++This is a new line
+ Welcome to the project`,
 	watch_repository: () => undefined,
 	unwatch_repository: () => undefined,
 };

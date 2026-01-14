@@ -16,7 +16,11 @@ interface CommandPaletteProps {
 	onOpenSettings: () => void;
 }
 
-export function CommandPalette({ onOpenRepo, onOpenProjects, onOpenSettings }: CommandPaletteProps) {
+export function CommandPalette({
+	onOpenRepo,
+	onOpenProjects,
+	onOpenSettings,
+}: CommandPaletteProps) {
 	const [open, setOpen] = useState(false);
 
 	useKeyboardShortcut({

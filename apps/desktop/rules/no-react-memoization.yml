@@ -1,0 +1,10 @@
+# Rule: Discourage manual memoization with React Compiler
+id: no-react-memoization
+language: typescript
+severity: warning
+message: "Manual memoization is unnecessary with React Compiler. Use regular functions/components instead."
+rule:
+  any:
+    - pattern: useCallback($$$ARGS)
+    - pattern: useMemo($$$ARGS)
+    - pattern: memo($$$ARGS)

@@ -4,6 +4,7 @@ import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { listen } from "@tauri-apps/api/event";
 import type { ChangedFile, Repository, Revision } from "@/tauri-commands";
 import {
+	getCommitRecency,
 	getRepositories,
 	getRevisionChanges,
 	getRevisionDiff,
@@ -11,6 +12,8 @@ import {
 	jjAbandon,
 	jjEdit,
 	jjNew,
+	removeRepository,
+	upsertRepository,
 	watchRepository,
 } from "@/tauri-commands";
 
@@ -18,7 +21,63 @@ import {
 // Query Client (shared by all collections)
 // ============================================================================
 
-export const queryClient = new QueryClient();
+export const queryClient = new QueryClient({
+	defaultOptions: {
+		queries: {
+			staleTime: Number.POSITIVE_INFINITY, // Data fresh until watcher invalidates
+			gcTime: 5 * 60 * 1000, // 5 minutes
+			refetchOnWindowFocus: false, // Watcher handles this
+			refetchOnMount: false, // Already have data from watcher
+		},
+	},
+});
+
+// ============================================================================
+// In-flight Mutation Tracking
+// ============================================================================
+
+const inFlightMutations = new Set<string>();
+
+function trackMutation<T>(mutationId: string, promise: Promise<T>): Promise<T> {
+	inFlightMutations.add(mutationId);
+	return promise.finally(() => {
+		inFlightMutations.delete(mutationId);
+	});
+}
+
+// ============================================================================
+// Shared Repository Watcher (one per repo, invalidates all queries)
+// ============================================================================
+
+const repoWatchers = new Map<string, { unlisten: () => void; refCount: number }>();
+
+async function setupRepoWatcher(repoPath: string): Promise<void> {
+	const existing = repoWatchers.get(repoPath);
+	if (existing) {
+		existing.refCount++;
+		return;
+	}
+
+	await watchRepository(repoPath);
+	const unlisten = await listen<string>("repo-changed", async (event) => {
+		if (event.payload === repoPath) {
+			// Skip if there are in-flight mutations - let the mutation handle state
+			if (inFlightMutations.size > 0) {
+				console.log("[watcher] skipping - in-flight mutations:", [...inFlightMutations]);
+				return;
+			}
+
+			console.log("[watcher] invalidating queries for:", repoPath);
+			// Invalidate ALL queries for this repo - TanStack Query will refetch
+			await queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+			await queryClient.invalidateQueries({ queryKey: ["revision-changes", repoPath] });
+			await queryClient.invalidateQueries({ queryKey: ["revision-diff", repoPath] });
+			await queryClient.invalidateQueries({ queryKey: ["commit-recency", repoPath] });
+		}
+	});
+
+	repoWatchers.set(repoPath, { unlisten, refCount: 1 });
+}
 
 // ============================================================================
 // Repositories Collection
@@ -32,6 +91,65 @@ export const repositoriesCollection = createCollection({
 		getKey: (repository: Repository) => repository.id,
 	}),
 });
+
+export type RepositoriesCollection = typeof repositoriesCollection;
+
+export async function addRepository(collection: RepositoriesCollection, repository: Repository) {
+	// Optimistic update first
+	collection.utils.writeUpsert([repository]);
+
+	try {
+		await upsertRepository(repository);
+		console.log("[addRepository] upsertRepository completed");
+	} catch (err) {
+		// Revert on failure
+		collection.utils.writeDelete(repository.id);
+		console.error("[addRepository] failed, reverting:", err);
+		throw err;
+	}
+}
+
+export async function updateRepository(collection: RepositoriesCollection, repository: Repository) {
+	// Get current state for potential revert
+	const current = collection.state.get(repository.id);
+
+	// Optimistic update
+	collection.utils.writeUpsert([repository]);
+
+	try {
+		await upsertRepository(repository);
+		console.log("[updateRepository] upsertRepository completed");
+	} catch (err) {
+		// Revert on failure
+		if (current) {
+			collection.utils.writeUpsert([current]);
+		} else {
+			collection.utils.writeDelete(repository.id);
+		}
+		console.error("[updateRepository] failed, reverting:", err);
+		throw err;
+	}
+}
+
+export async function deleteRepository(collection: RepositoriesCollection, repositoryId: string) {
+	// Get current state for potential revert
+	const current = collection.state.get(repositoryId);
+
+	// Optimistic delete
+	collection.utils.writeDelete(repositoryId);
+
+	try {
+		await removeRepository(repositoryId);
+		console.log("[deleteRepository] removeRepository completed");
+	} catch (err) {
+		// Revert on failure
+		if (current) {
+			collection.utils.writeUpsert([current]);
+		}
+		console.error("[deleteRepository] failed, reverting:", err);
+		throw err;
+	}
+}
 
 // ============================================================================
 // Revisions Collection
@@ -55,14 +173,14 @@ export const emptyRevisionsCollection = createCollection({
 });
 
 const revisionCollections = new Map<string, ReturnType<typeof createRevisionsCollection>>();
-const revisionWatchers = new Map<string, { unlisten: () => void; refCount: number }>();
-
-// Track in-flight edit mutations to prevent watcher from overwriting optimistic state
-const inFlightEdits = new Set<string>();
 
 function createRevisionsCollection(repoPath: string, preset?: string, customRevset?: string) {
 	const limit = preset === "full_history" ? 10000 : 100;
-	const collection = createCollection({
+
+	// Set up the shared watcher (idempotent - increments refCount if already exists)
+	setupRepoWatcher(repoPath);
+
+	return createCollection({
 		...queryCollectionOptions({
 			queryClient,
 			queryKey: ["revisions", repoPath, preset, customRevset],
@@ -70,58 +188,6 @@ function createRevisionsCollection(repoPath: string, preset?: string, customRevs
 			getKey: getRevisionKey,
 		}),
 	});
-
-	// Set up file watcher with refcounting
-	const setupWatcher = async () => {
-		const existing = revisionWatchers.get(repoPath);
-		if (existing) {
-			existing.refCount++;
-			return;
-		}
-
-		await watchRepository(repoPath);
-		const unlisten = await listen<string>("repo-changed", async (event) => {
-			if (event.payload === repoPath) {
-				// Skip if there are in-flight edits - let the mutation handle state
-				if (inFlightEdits.size > 0) {
-					console.log("[watcher] skipping - in-flight edits:", [...inFlightEdits]);
-					return;
-				}
-
-				console.log("[watcher] fetching revisions...");
-				const revisions = await getRevisions(
-					repoPath,
-					limit,
-					customRevset,
-					customRevset ? undefined : preset,
-				);
-
-				// Debug: log divergent changes
-				const divergentCount = revisions.filter((r) => r.is_divergent).length;
-				if (divergentCount > 0) {
-					console.log("[watcher] found", divergentCount, "divergent revisions");
-				}
-
-				console.log("[watcher] got", revisions.length, "revisions, wc:", revisions.find(r => r.is_working_copy)?.change_id_short);
-
-				// Delete revisions that are no longer in the result set
-				const newKeys = new Set(revisions.map(getRevisionKey));
-				for (const key of collection.state.keys()) {
-					if (!newKeys.has(key)) {
-						collection.utils.writeDelete(key);
-					}
-				}
-
-				collection.utils.writeUpsert(revisions);
-			}
-		});
-
-		revisionWatchers.set(repoPath, { unlisten, refCount: 1 });
-	};
-
-	setupWatcher();
-
-	return collection;
 }
 
 export type RevisionsCollection = ReturnType<typeof createRevisionsCollection>;
@@ -142,28 +208,32 @@ export function editRevision(
 	targetRevision: Revision,
 	currentWcRevision: Revision | null,
 ) {
-	console.log("[editRevision] start, updating synced layer directly");
+	const mutationId = `edit-${Date.now()}-${Math.random()}`;
+	console.log("[editRevision] start, mutationId:", mutationId);
 
-	// Update synced layer directly (not optimistic) - this is instant
+	// Optimistic update
 	const updates: Revision[] = [];
-
 	if (currentWcRevision && getRevisionKey(currentWcRevision) !== getRevisionKey(targetRevision)) {
 		updates.push({ ...currentWcRevision, is_working_copy: false });
 	}
 	updates.push({ ...targetRevision, is_working_copy: true });
-
 	collection.utils.writeUpsert(updates);
-	console.log("[editRevision] synced layer updated, firing backend...");
 
-	// Fire backend in background - watcher will confirm/correct if needed
-	// For divergent changes, use change_id_short which includes /N suffix
-	jjEdit(repoPath, targetRevision.change_id_short)
-		.then(() => console.log("[editRevision] jjEdit completed"))
+	// Track the mutation and fire backend
+	trackMutation(mutationId, jjEdit(repoPath, targetRevision.change_id_short))
+		.then(() => {
+			console.log("[editRevision] completed");
+			// Invalidate to get fresh data from backend
+			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+		})
 		.catch((err) => {
-			console.error("[editRevision] jjEdit failed:", err);
-			// Revert on failure
+			console.error("[editRevision] failed:", err);
+			// Revert optimistic update
 			const revertUpdates: Revision[] = [];
-			if (currentWcRevision && getRevisionKey(currentWcRevision) !== getRevisionKey(targetRevision)) {
+			if (
+				currentWcRevision &&
+				getRevisionKey(currentWcRevision) !== getRevisionKey(targetRevision)
+			) {
 				revertUpdates.push({ ...currentWcRevision, is_working_copy: true });
 			}
 			revertUpdates.push({ ...targetRevision, is_working_copy: false });
@@ -172,15 +242,20 @@ export function editRevision(
 }
 
 export function newRevision(repoPath: string, parentChangeIds: string[]) {
+	const mutationId = `new-${Date.now()}-${Math.random()}`;
+	console.log("[newRevision] start, mutationId:", mutationId);
+
 	const tx = createTransaction({
 		mutationFn: async () => {
-			await jjNew(repoPath, parentChangeIds);
+			await trackMutation(mutationId, jjNew(repoPath, parentChangeIds));
+			// Invalidate to get fresh data including the new revision
+			await queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
 		},
 	});
 
 	tx.mutate(() => {
 		// No optimistic update - we don't know the new revision's ID
-		// File watcher will add it to the collection
+		// TanStack Query invalidation will add it to the collection
 	});
 
 	return tx;
@@ -190,11 +265,12 @@ export function abandonRevision(
 	collection: RevisionsCollection,
 	repoPath: string,
 	revision: Revision,
-	limit: number,
-	customRevset?: string,
-	preset?: string,
+	_limit: number,
+	_customRevset?: string,
+	_preset?: string,
 ) {
-	console.log("[abandonRevision] abandoning:", revision.change_id_short);
+	const mutationId = `abandon-${Date.now()}-${Math.random()}`;
+	console.log("[abandonRevision] abandoning:", revision.change_id_short, "mutationId:", mutationId);
 
 	// For working copy, jj creates a new WC - can't do optimistic delete
 	// For other revisions, we can optimistically remove
@@ -202,19 +278,12 @@ export function abandonRevision(
 		collection.utils.writeDelete(getRevisionKey(revision));
 	}
 
-	// Fire backend and then refetch to get new state (especially for WC abandon which creates new WC)
-	jjAbandon(repoPath, revision.change_id_short)
-		.then(async () => {
-			console.log("[abandonRevision] completed, refetching...");
-			// Refetch to get the new working copy if we abandoned WC
-			const revisions = await getRevisions(repoPath, limit, customRevset, customRevset ? undefined : preset);
-			const newKeys = new Set(revisions.map(getRevisionKey));
-			for (const key of collection.state.keys()) {
-				if (!newKeys.has(key)) {
-					collection.utils.writeDelete(key);
-				}
-			}
-			collection.utils.writeUpsert(revisions);
+	// Track the mutation and fire backend
+	trackMutation(mutationId, jjAbandon(repoPath, revision.change_id_short))
+		.then(() => {
+			console.log("[abandonRevision] completed");
+			// Invalidate to get fresh data (especially for WC abandon which creates new WC)
+			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
 		})
 		.catch((err) => {
 			console.error("[abandonRevision] failed:", err);
@@ -229,7 +298,10 @@ export function abandonRevision(
 // Revision Changes Collections (ChangedFile[] per revision)
 // ============================================================================
 
-const revisionChangesCollections = new Map<string, ReturnType<typeof createRevisionChangesCollection>>();
+const revisionChangesCollections = new Map<
+	string,
+	ReturnType<typeof createRevisionChangesCollection>
+>();
 
 function createRevisionChangesCollection(repoPath: string, changeId: string) {
 	return createCollection({
@@ -244,7 +316,10 @@ function createRevisionChangesCollection(repoPath: string, changeId: string) {
 
 export type RevisionChangesCollection = ReturnType<typeof createRevisionChangesCollection>;
 
-export function getRevisionChangesCollection(repoPath: string, changeId: string): RevisionChangesCollection {
+export function getRevisionChangesCollection(
+	repoPath: string,
+	changeId: string,
+): RevisionChangesCollection {
 	const cacheKey = `${repoPath}:${changeId}`;
 	let collection = revisionChangesCollections.get(cacheKey);
 	if (!collection) {
@@ -291,7 +366,10 @@ function createRevisionDiffCollection(repoPath: string, changeId: string) {
 
 export type RevisionDiffCollection = ReturnType<typeof createRevisionDiffCollection>;
 
-export function getRevisionDiffCollection(repoPath: string, changeId: string): RevisionDiffCollection {
+export function getRevisionDiffCollection(
+	repoPath: string,
+	changeId: string,
+): RevisionDiffCollection {
 	const cacheKey = `${repoPath}:${changeId}`;
 	let collection = revisionDiffCollections.get(cacheKey);
 	if (!collection) {
@@ -334,3 +412,54 @@ export function prefetchRevisionChanges(repoPath: string, changeIds: string[]): 
 		getRevisionChangesCollection(repoPath, changeId);
 	}
 }
+
+// ============================================================================
+// Commit Recency Collection (for branch ordering)
+// ============================================================================
+
+// Wrapper type for commit recency data to work with collection pattern
+interface CommitRecencyEntry {
+	id: "recency";
+	data: Record<string, number>;
+}
+
+const commitRecencyCollections = new Map<
+	string,
+	ReturnType<typeof createCommitRecencyCollection>
+>();
+
+function createCommitRecencyCollection(repoPath: string) {
+	return createCollection({
+		...queryCollectionOptions({
+			queryClient,
+			queryKey: ["commit-recency", repoPath],
+			queryFn: async () => {
+				const recency = await getCommitRecency(repoPath, 500);
+				return [{ id: "recency" as const, data: recency }];
+			},
+			getKey: (entry: CommitRecencyEntry) => entry.id,
+			staleTime: 30_000, // 30 seconds - this one uses time-based staleness
+		}),
+	});
+}
+
+export type CommitRecencyCollection = ReturnType<typeof createCommitRecencyCollection>;
+
+export function getCommitRecencyCollection(repoPath: string): CommitRecencyCollection {
+	const cacheKey = repoPath;
+	let collection = commitRecencyCollections.get(cacheKey);
+	if (!collection) {
+		collection = createCommitRecencyCollection(repoPath);
+		commitRecencyCollections.set(cacheKey, collection);
+	}
+	return collection;
+}
+
+export const emptyCommitRecencyCollection = createCollection({
+	...queryCollectionOptions({
+		queryClient,
+		queryKey: ["commit-recency", "empty"],
+		queryFn: () => Promise.resolve([]),
+		getKey: (entry: CommitRecencyEntry) => entry.id,
+	}),
+});

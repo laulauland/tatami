@@ -11,6 +11,8 @@ interface UseKeyboardNavigationOptions {
 	selectedChangeId: string | null;
 	onNavigate: (changeId: string) => void;
 	scrollToChangeId?: (changeId: string, options?: ScrollOptions) => void;
+	/** If true, j/k/arrow navigation is handled elsewhere (e.g., for display rows with collapsed stacks) */
+	disableBasicNavigation?: boolean;
 }
 
 interface UseKeyboardShortcutOptions {
@@ -40,17 +42,20 @@ export function useKeyboardNavigation({
 	selectedChangeId,
 	onNavigate,
 	scrollToChangeId,
+	disableBasicNavigation = false,
 }: UseKeyboardNavigationOptions) {
 	// Use refs to avoid stale closures in event handler
 	const orderedRevisionsRef = useRef(orderedRevisions);
 	const selectedChangeIdRef = useRef(selectedChangeId);
 	const onNavigateRef = useRef(onNavigate);
 	const scrollToChangeIdRef = useRef(scrollToChangeId);
+	const disableBasicNavigationRef = useRef(disableBasicNavigation);
 
 	orderedRevisionsRef.current = orderedRevisions;
 	selectedChangeIdRef.current = selectedChangeId;
 	onNavigateRef.current = onNavigate;
 	scrollToChangeIdRef.current = scrollToChangeId;
+	disableBasicNavigationRef.current = disableBasicNavigation;
 
 	useKeySequence({
 		sequence: "gg",
@@ -96,7 +101,7 @@ export function useKeyboardNavigation({
 				event.code === "NumpadAdd";
 
 			switch (true) {
-				case event.key === "j" || event.key === "ArrowDown":
+				case (event.key === "j" || event.key === "ArrowDown") && !disableBasicNavigationRef.current:
 					if (currentIndex >= 0 && currentIndex < revisions.length - 1) {
 						targetChangeId = revisions[currentIndex + 1].change_id;
 						scrollMode = "step";
@@ -104,7 +109,7 @@ export function useKeyboardNavigation({
 					event.preventDefault();
 					break;
 
-				case event.key === "k" || event.key === "ArrowUp":
+				case (event.key === "k" || event.key === "ArrowUp") && !disableBasicNavigationRef.current:
 					if (currentIndex > 0) {
 						targetChangeId = revisions[currentIndex - 1].change_id;
 						scrollMode = "step";
@@ -112,7 +117,7 @@ export function useKeyboardNavigation({
 					event.preventDefault();
 					break;
 
-				case event.key === "J" || isMinusKey:
+				case isMinusKey:
 					if (currentRevision) {
 						// Navigate to parent revision
 						const parentId =
@@ -128,7 +133,7 @@ export function useKeyboardNavigation({
 					event.preventDefault();
 					break;
 
-				case event.key === "K" || isPlusKey:
+				case isPlusKey:
 					if (currentRevision) {
 						// Find child by checking if any revision has current as parent
 						const childRevision = revisions.find(

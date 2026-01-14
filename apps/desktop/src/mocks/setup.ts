@@ -18,24 +18,24 @@ function generateChangeId(): string {
 function calculateShortIds(revisionsRaw: Omit<Revision, "change_id_short">[]): Revision[] {
 	const changeIds = revisionsRaw.map((r) => r.change_id);
 	const result: Revision[] = [];
-	
+
 	for (let i = 0; i < changeIds.length; i++) {
 		const changeId = changeIds[i];
 		let prefixLen = 1;
-		
+
 		// Find minimum prefix length that's unique
 		while (prefixLen <= changeId.length) {
 			const prefix = changeId.slice(0, prefixLen);
 			const matches = changeIds.filter((id) => id.startsWith(prefix));
-			
+
 			// Check if this prefix is unique (only matches this change ID)
 			if (matches.length === 1) {
 				break;
 			}
-			
+
 			prefixLen++;
 		}
-		
+
 		// Handle divergent commits
 		const revision = revisionsRaw[i];
 		let changeIdShort: string;
@@ -44,13 +44,13 @@ function calculateShortIds(revisionsRaw: Omit<Revision, "change_id_short">[]): R
 		} else {
 			changeIdShort = changeId.slice(0, prefixLen);
 		}
-		
+
 		result.push({
 			...revision,
 			change_id_short: changeIdShort,
 		});
 	}
-	
+
 	return result;
 }
 
@@ -849,7 +849,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 ];
 
 // Calculate shortest unique prefixes for all change IDs
-const mockRevisions: Revision[] = calculateShortIds(mockRevisionsRaw);
+// Made mutable so mutation handlers can update it
+let mockRevisions: Revision[] = calculateShortIds(mockRevisionsRaw);
 
 const mockChangedFiles: ChangedFile[] = [
 	{ path: "src/main.rs", status: "modified" },
@@ -880,7 +881,10 @@ const handlers: Record<string, MockHandler> = {
 		return mockProjects.find((p) => p.path === path) ?? null;
 	},
 	find_repository: () => "/Users/demo/projects/tatami",
-	get_revisions: () => mockRevisions,
+	get_revisions: () => {
+		console.log("[Mock] get_revisions called, returning", mockRevisions.length, "revisions");
+		return mockRevisions;
+	},
 	get_status: (): WorkingCopyStatus => {
 		const wc = mockRevisions.find((r) => r.is_working_copy);
 		return {
@@ -914,9 +918,138 @@ const handlers: Record<string, MockHandler> = {
 	get_revision_changes: (): ChangedFile[] => mockChangedFiles,
 	watch_repository: () => undefined,
 	unwatch_repository: () => undefined,
-	jj_new: () => undefined,
-	jj_edit: () => undefined,
-	jj_abandon: () => undefined,
+	jj_new: (args) => {
+		const parentChangeIds = args.parentChangeIds as string[];
+		// Find parent revisions by change_id (handling short IDs)
+		const parentRevisions = parentChangeIds
+			.map((id) =>
+				mockRevisions.find((r) => r.change_id.startsWith(id) || r.change_id_short === id),
+			)
+			.filter((r): r is Revision => r !== undefined);
+
+		// Get parent commit IDs for the new revision
+		const parentCommitIds = parentRevisions.map((r) => r.commit_id);
+
+		// Find current working copy and clear its flag
+		const currentWcIndex = mockRevisions.findIndex((r) => r.is_working_copy);
+		if (currentWcIndex >= 0) {
+			mockRevisions[currentWcIndex] = { ...mockRevisions[currentWcIndex], is_working_copy: false };
+		}
+
+		// Create new revision
+		const newChangeId = generateChangeId();
+		const newCommitId = `new${Date.now().toString(16).slice(-10)}`;
+		const newRevision: Omit<Revision, "change_id_short"> = {
+			commit_id: newCommitId,
+			change_id: newChangeId,
+			parent_ids: parentCommitIds,
+			parent_edges: parentCommitIds.map((id) => ({ parent_id: id, edge_type: "direct" as const })),
+			description: "",
+			author: "alice@example.com",
+			timestamp: new Date().toISOString(),
+			is_working_copy: true,
+			is_immutable: false,
+			is_mine: true,
+			is_trunk: false,
+			is_divergent: false,
+			divergent_index: null,
+			bookmarks: [],
+		};
+
+		// Recalculate short IDs with new revision included
+		const allRevisionsRaw = [
+			...mockRevisions.map(({ change_id_short: _, ...r }) => r),
+			newRevision,
+		];
+		mockRevisions = calculateShortIds(allRevisionsRaw);
+
+		return undefined;
+	},
+	jj_edit: (args) => {
+		const changeId = args.changeId as string;
+		console.log("[Mock] jj_edit called with changeId:", changeId);
+		// Find target revision by change_id (handling short IDs)
+		const targetIndex = mockRevisions.findIndex(
+			(r) => r.change_id.startsWith(changeId) || r.change_id_short === changeId,
+		);
+		if (targetIndex < 0) {
+			console.warn(`[Mock] jj_edit: revision not found: ${changeId}`);
+			return undefined;
+		}
+
+		console.log("[Mock] jj_edit: found revision at index", targetIndex);
+
+		// Clear working copy from all revisions, set on target
+		mockRevisions = mockRevisions.map((r, i) => ({
+			...r,
+			is_working_copy: i === targetIndex,
+		}));
+
+		console.log(
+			"[Mock] jj_edit: updated mockRevisions, new WC:",
+			mockRevisions.find((r) => r.is_working_copy)?.change_id_short,
+		);
+
+		return undefined;
+	},
+	jj_abandon: (args) => {
+		const changeId = args.changeId as string;
+		// Find revision by change_id (handling short IDs)
+		const revisionIndex = mockRevisions.findIndex(
+			(r) => r.change_id.startsWith(changeId) || r.change_id_short === changeId,
+		);
+		if (revisionIndex < 0) {
+			console.warn(`[Mock] jj_abandon: revision not found: ${changeId}`);
+			return undefined;
+		}
+
+		const revision = mockRevisions[revisionIndex];
+
+		if (revision.is_working_copy) {
+			// Abandoning WC creates a new WC on the parent
+			// Clear WC flag and create a new working copy
+			const parentCommitId = revision.parent_ids[0];
+			// Remove the abandoned revision
+			mockRevisions = mockRevisions.filter((_, i) => i !== revisionIndex);
+
+			// Create new working copy on parent
+			const newChangeId = generateChangeId();
+			const newCommitId = `wc${Date.now().toString(16).slice(-10)}`;
+			const newRevision: Omit<Revision, "change_id_short"> = {
+				commit_id: newCommitId,
+				change_id: newChangeId,
+				parent_ids: parentCommitId ? [parentCommitId] : [],
+				parent_edges: parentCommitId
+					? [{ parent_id: parentCommitId, edge_type: "direct" as const }]
+					: [],
+				description: "",
+				author: "alice@example.com",
+				timestamp: new Date().toISOString(),
+				is_working_copy: true,
+				is_immutable: false,
+				is_mine: true,
+				is_trunk: false,
+				is_divergent: false,
+				divergent_index: null,
+				bookmarks: [],
+			};
+
+			// Recalculate short IDs
+			const allRevisionsRaw = [
+				...mockRevisions.map(({ change_id_short: _, ...r }) => r),
+				newRevision,
+			];
+			mockRevisions = calculateShortIds(allRevisionsRaw);
+		} else {
+			// Just remove the revision
+			mockRevisions = mockRevisions.filter((_, i) => i !== revisionIndex);
+			// Recalculate short IDs after removal
+			const allRevisionsRaw = mockRevisions.map(({ change_id_short: _, ...r }) => r);
+			mockRevisions = calculateShortIds(allRevisionsRaw);
+		}
+
+		return undefined;
+	},
 	get_commit_recency: () => ({}),
 	resolve_revset: (args) => {
 		const revset = args.revset as string;
@@ -958,12 +1091,20 @@ export async function setupMocks(): Promise<void> {
 	const { mockIPC } = await import("@tauri-apps/api/mocks");
 
 	mockIPC((cmd, args) => {
+		console.log(`[Mock] IPC call: ${cmd}`, args);
 		const handler = handlers[cmd];
 		if (!handler) {
 			console.warn(`[Mock] No handler for command: ${cmd}`, args);
 			return undefined;
 		}
-		return handler((args ?? {}) as Record<string, unknown>);
+		try {
+			const result = handler((args ?? {}) as Record<string, unknown>);
+			console.log(`[Mock] IPC result for ${cmd}:`, result);
+			return result;
+		} catch (error) {
+			console.error(`[Mock] IPC error for ${cmd}:`, error);
+			throw error;
+		}
 	});
 
 	console.log("[Mocks] IPC mocks ready");

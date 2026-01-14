@@ -13,9 +13,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { repositoriesCollection } from "@/db";
+import { deleteRepository, repositoriesCollection } from "@/db";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
-import { type Repository, removeRepository } from "@/tauri-commands";
+import type { Repository } from "@/tauri-commands";
 import { Route as rootRoute } from "./__root";
 
 export const Route = createRoute({
@@ -39,8 +39,7 @@ function RepositoriesPage() {
 		if (!pendingDelete || isDeleting) return;
 		setIsDeleting(true);
 		try {
-			await removeRepository(pendingDelete.id);
-			repositoriesCollection.utils.writeDelete(pendingDelete.id);
+			await deleteRepository(repositoriesCollection, pendingDelete.id);
 		} finally {
 			setIsDeleting(false);
 			setPendingDelete(null);

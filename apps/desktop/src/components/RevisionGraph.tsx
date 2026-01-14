@@ -1,15 +1,19 @@
 import { useAtom } from "@effect-atom/atom-react";
-import { useQuery } from "@tanstack/react-query";
+import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { expandedStacksAtom, inlineJumpQueryAtom } from "@/atoms";
 import { ChangedFilesList } from "@/components/ChangedFilesList";
-import { reorderForGraph, detectStacks, computeRevisionAncestry, type RevisionStack } from "@/components/revision-graph-utils";
-import { prefetchRevisionDiffs } from "@/db";
+import {
+	reorderForGraph,
+	detectStacks,
+	computeRevisionAncestry,
+	type RevisionStack,
+} from "@/components/revision-graph-utils";
+import { emptyChangesCollection, getRevisionChangesCollection, prefetchRevisionDiffs } from "@/db";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
-import { getRevisionChanges, type Revision } from "@/tauri-commands";
-
+import type { Revision } from "@/tauri-commands";
 
 // Debug overlay - toggle with Ctrl+Shift+D
 const DEBUG_OVERLAY_DEFAULT = false;
@@ -165,7 +169,6 @@ interface RevisionGraphProps {
 }
 
 const ROW_HEIGHT = 64;
-const COLLAPSED_INDICATOR_HEIGHT = 32;
 const LANE_WIDTH = 20;
 const LANE_PADDING = 8;
 const NODE_RADIUS = 5;
@@ -216,7 +219,7 @@ interface GraphNodeProps {
 function GraphNode({ revision, lane, isSelected, color }: GraphNodeProps) {
 	const isWorkingCopy = revision.is_working_copy;
 	const isImmutable = revision.is_immutable;
-	
+
 	const size = isWorkingCopy ? NODE_RADIUS * 2 + 6 : NODE_RADIUS * 2;
 	const selectedRingSize = isWorkingCopy ? NODE_RADIUS + 6 : NODE_RADIUS + 4;
 
@@ -319,12 +322,7 @@ function GraphNode({ revision, lane, isSelected, color }: GraphNodeProps) {
 					fillOpacity={0.3}
 				/>
 			)}
-			<circle
-				cx={(size + 8) / 2}
-				cy={(size + 8) / 2}
-				r={NODE_RADIUS}
-				fill={color}
-			/>
+			<circle cx={(size + 8) / 2} cy={(size + 8) / 2} r={NODE_RADIUS} fill={color} />
 		</svg>
 	);
 }
@@ -341,9 +339,27 @@ interface GraphEdgeProps {
 }
 
 // GraphEdge - Semantic edge component with source/target revision bindings
-function GraphEdge({ binding, sourceY, targetY, sourceRevision, targetRevision, stackTopY, stackBottomY, onToggleStack }: GraphEdgeProps) {
-	const { sourceLane, targetLane, edgeType, isDeemphasized, isMissingStub, collapsedStackId, collapsedCount, expandedStackId } = binding;
-	
+function GraphEdge({
+	binding,
+	sourceY,
+	targetY,
+	sourceRevision,
+	targetRevision,
+	stackTopY,
+	stackBottomY,
+	onToggleStack,
+}: GraphEdgeProps) {
+	const {
+		sourceLane,
+		targetLane,
+		edgeType,
+		isDeemphasized,
+		isMissingStub,
+		collapsedStackId,
+		collapsedCount,
+		expandedStackId,
+	} = binding;
+
 	const sourceX = laneToX(sourceLane);
 	const targetX = laneToX(targetLane);
 	const sourceColor = laneColor(sourceLane);
@@ -390,13 +406,13 @@ function GraphEdge({ binding, sourceY, targetY, sourceRevision, targetRevision, 
 		const isCollapsedStack = !!collapsedStackId;
 		const y1 = sourceY + NODE_RADIUS;
 		const y2 = targetY - NODE_RADIUS;
-		
+
 		// For collapsed stacks, draw a dotted line with clickable area
 		if (isCollapsedStack) {
 			const collapsedLabel = `${collapsedCount ?? 0} hidden revision${(collapsedCount ?? 0) !== 1 ? "s" : ""} - click to expand`;
-			
+
 			return (
-				<g 
+				<g
 					aria-label={collapsedLabel}
 					className="cursor-pointer group"
 					style={{ pointerEvents: "auto" }}
@@ -404,14 +420,7 @@ function GraphEdge({ binding, sourceY, targetY, sourceRevision, targetRevision, 
 				>
 					<title>{collapsedLabel}</title>
 					{/* Invisible wider hitbox for easier clicking */}
-					<line
-						x1={sourceX}
-						y1={y1}
-						x2={sourceX}
-						y2={y2}
-						stroke="transparent"
-						strokeWidth={16}
-					/>
+					<line x1={sourceX} y1={y1} x2={sourceX} y2={y2} stroke="transparent" strokeWidth={16} />
 					{/* Visible dotted line */}
 					<line
 						x1={sourceX}
@@ -432,7 +441,7 @@ function GraphEdge({ binding, sourceY, targetY, sourceRevision, targetRevision, 
 				</g>
 			);
 		}
-		
+
 		// For expanded stacks, make the edge clickable to collapse
 		if (expandedStackId) {
 			const expandedLabel = `Click to collapse stack`;
@@ -440,7 +449,7 @@ function GraphEdge({ binding, sourceY, targetY, sourceRevision, targetRevision, 
 			const hitboxY1 = stackTopY !== undefined ? stackTopY : y1;
 			const hitboxY2 = stackBottomY !== undefined ? stackBottomY : y2;
 			return (
-				<g 
+				<g
 					aria-label={expandedLabel}
 					className="cursor-pointer stack-group"
 					data-stack-id={expandedStackId}
@@ -475,7 +484,7 @@ function GraphEdge({ binding, sourceY, targetY, sourceRevision, targetRevision, 
 				</g>
 			);
 		}
-		
+
 		return (
 			<g aria-label={ariaLabel} style={{ pointerEvents: "none" }}>
 				<title>{ariaLabel}</title>
@@ -550,7 +559,7 @@ function EdgeLayer({
 	onToggleStack,
 }: EdgeLayerProps) {
 	const svgRef = useRef<SVGSVGElement>(null);
-	
+
 	// Add overscan for edges that might span across viewport boundary
 	// Use larger overscan to handle collapsed stack edges that span many rows
 	const overscan = 15;
@@ -562,14 +571,14 @@ function EdgeLayer({
 		const sourceRow = commitToRow.get(binding.sourceRevisionId);
 		const targetRow = commitToRow.get(binding.targetRevisionId);
 		if (sourceRow === undefined) return false;
-		
+
 		// For missing stubs, just check if source is near visible range
 		if (binding.isMissingStub) {
 			return sourceRow >= startRow && sourceRow <= endRow;
 		}
-		
+
 		if (targetRow === undefined) return false;
-		
+
 		// Check if edge passes through visible area
 		const minRow = Math.min(sourceRow, targetRow);
 		const maxRow = Math.max(sourceRow, targetRow);
@@ -587,50 +596,50 @@ function EdgeLayer({
 		const handleMouseOver = (e: Event) => {
 			const target = e.target as HTMLElement;
 			// Check if the event originated from a stack group
-			const group = target.closest('g.stack-group[data-stack-id]') as HTMLElement;
+			const group = target.closest("g.stack-group[data-stack-id]") as HTMLElement;
 			if (!group) return;
-			
-			const stackId = group.getAttribute('data-stack-id');
+
+			const stackId = group.getAttribute("data-stack-id");
 			if (!stackId || stackId === hoveredStackId) return;
 
 			hoveredStackId = stackId;
 			// Find all edges with the same stack-id and add hover class
 			const edges = svg.querySelectorAll(`line.stack-edge[data-stack-id="${stackId}"]`);
 			edges.forEach((edge) => {
-				edge.classList.add('stack-edge-hovered');
+				edge.classList.add("stack-edge-hovered");
 			});
 		};
 
 		const handleMouseOut = (e: Event) => {
 			const target = e.target as HTMLElement;
 			const relatedTarget = (e as MouseEvent).relatedTarget as HTMLElement;
-			
+
 			// Check if we're leaving a stack group
-			const group = target.closest('g.stack-group[data-stack-id]') as HTMLElement;
+			const group = target.closest("g.stack-group[data-stack-id]") as HTMLElement;
 			if (!group) return;
-			
+
 			// Check if we're moving to another element within the same stack group
 			if (relatedTarget && group.contains(relatedTarget)) return;
-			
-			const stackId = group.getAttribute('data-stack-id');
+
+			const stackId = group.getAttribute("data-stack-id");
 			if (!stackId || stackId !== hoveredStackId) return;
 
 			hoveredStackId = null;
 			// Remove hover class from all edges with the same stack-id
 			const edges = svg.querySelectorAll(`line.stack-edge[data-stack-id="${stackId}"]`);
 			edges.forEach((edge) => {
-				edge.classList.remove('stack-edge-hovered');
+				edge.classList.remove("stack-edge-hovered");
 			});
 		};
 
 		// Use event delegation - attach listeners to the SVG element
 		// mouseover/mouseout bubble, unlike mouseenter/mouseleave
-		svg.addEventListener('mouseover', handleMouseOver, true);
-		svg.addEventListener('mouseout', handleMouseOut, true);
+		svg.addEventListener("mouseover", handleMouseOver, true);
+		svg.addEventListener("mouseout", handleMouseOut, true);
 
 		return () => {
-			svg.removeEventListener('mouseover', handleMouseOver, true);
-			svg.removeEventListener('mouseout', handleMouseOut, true);
+			svg.removeEventListener("mouseover", handleMouseOver, true);
+			svg.removeEventListener("mouseout", handleMouseOut, true);
 		};
 	}, []);
 
@@ -646,17 +655,19 @@ function EdgeLayer({
 			<title>Revision graph edges</title>
 			{visibleBindings.map((binding) => {
 				const sourceRow = commitToRow.get(binding.sourceRevisionId);
-				const targetRow = binding.isMissingStub 
-					? (sourceRow !== undefined ? sourceRow + 1 : undefined)
+				const targetRow = binding.isMissingStub
+					? sourceRow !== undefined
+						? sourceRow + 1
+						: undefined
 					: commitToRow.get(binding.targetRevisionId);
-				
+
 				if (sourceRow === undefined) return null;
-				
+
 				const sourceRevision = revisionMap.get(binding.sourceRevisionId);
-				const targetRevision = binding.targetRevisionId 
-					? revisionMap.get(binding.targetRevisionId) ?? null 
+				const targetRevision = binding.targetRevisionId
+					? (revisionMap.get(binding.targetRevisionId) ?? null)
 					: null;
-				
+
 				if (!sourceRevision) return null;
 
 				// For expanded stacks, calculate full stack bounds
@@ -681,7 +692,11 @@ function EdgeLayer({
 						key={binding.id}
 						binding={binding}
 						sourceY={getRowCenter(sourceRow)}
-						targetY={targetRow !== undefined ? getRowCenter(targetRow) : getRowCenter(sourceRow) + ROW_HEIGHT}
+						targetY={
+							targetRow !== undefined
+								? getRowCenter(targetRow)
+								: getRowCenter(sourceRow) + ROW_HEIGHT
+						}
 						sourceRevision={sourceRevision}
 						targetRevision={targetRevision}
 						stackTopY={stackTopY}
@@ -948,14 +963,14 @@ function buildGraph(revisions: Revision[]): GraphData {
 	// Generate semantic edge bindings from nodes' parent connections
 	const edgeBindings: EdgeBinding[] = [];
 	let edgeCounter = 0;
-	
+
 	for (const node of nodes) {
 		for (const conn of node.parentConnections) {
 			// For missing stubs, use commit_id of source and empty target
-			const targetCommitId = conn.isMissingStub 
-				? "" 
-				: rows[conn.parentRow]?.revision.commit_id ?? "";
-			
+			const targetCommitId = conn.isMissingStub
+				? ""
+				: (rows[conn.parentRow]?.revision.commit_id ?? "");
+
 			edgeBindings.push({
 				id: `edge-${node.revision.commit_id}-${edgeCounter++}`,
 				sourceRevisionId: node.revision.commit_id,
@@ -985,6 +1000,7 @@ function RevisionRow({
 	lane,
 	maxLaneOnRow,
 	isSelected,
+	isChecked,
 	onSelect,
 	isFlashing,
 	isDimmed,
@@ -1000,7 +1016,8 @@ function RevisionRow({
 	lane: number;
 	maxLaneOnRow: number;
 	isSelected: boolean;
-	onSelect: (changeId: string) => void;
+	isChecked: boolean;
+	onSelect: (changeId: string, modifiers: { shift: boolean; meta: boolean }) => void;
 	isFlashing: boolean;
 	isDimmed: boolean;
 	isExpanded: boolean;
@@ -1013,7 +1030,7 @@ function RevisionRow({
 }) {
 	const firstLine = revision.description.split("\n")[0] || "(no description)";
 	const fullDescription = revision.description || "(no description)";
-	
+
 	// Calculate the node position area - leaves space for graph edges on the left
 	const nodeAreaWidth = LANE_PADDING + (maxLaneOnRow + 1) * LANE_WIDTH;
 	const nodeOffset = laneToX(lane);
@@ -1023,14 +1040,11 @@ function RevisionRow({
 	const search = useSearch({ strict: false });
 	const navigate = useNavigate();
 
-	const changedFilesQuery = useQuery({
-		queryKey: ["revision-changes", repoPath, revision.change_id],
-		queryFn: () => {
-			if (!repoPath) throw new Error("No repository path");
-			return getRevisionChanges(repoPath, revision.change_id);
-		},
-		enabled: isExpanded && !!repoPath,
-	});
+	const changedFilesCollection =
+		isExpanded && repoPath
+			? getRevisionChangesCollection(repoPath, revision.change_id)
+			: emptyChangesCollection;
+	const changedFilesQuery = useLiveQuery(changedFilesCollection);
 
 	function handleSelectFile(filePath: string) {
 		navigate({
@@ -1042,36 +1056,38 @@ function RevisionRow({
 	const TOP_PADDING = 16;
 	const CONTENT_MIN_HEIGHT = 56;
 	const nodeSize = revision.is_working_copy ? NODE_RADIUS * 2 + 14 : NODE_RADIUS * 2 + 8;
-	
+
 	return (
 		<div style={{ height: isExpanded ? "auto" : ROW_HEIGHT }} className="flex flex-col relative">
 			{/* Graph node - absolutely positioned to align with edge layer */}
 			<div
 				className="absolute z-20 flex items-center justify-center"
-				style={{ 
+				style={{
 					left: nodeOffset - nodeSize / 2,
 					top: TOP_PADDING + CONTENT_MIN_HEIGHT / 2 - nodeSize / 2,
 				}}
 			>
-				<GraphNode
-					revision={revision}
-					lane={lane}
-					isSelected={isSelected}
-					color={color}
-				/>
+				<GraphNode revision={revision} lane={lane} isSelected={isSelected} color={color} />
 			</div>
 			<div className="flex items-start min-h-[56px] pt-4">
 				{/* Spacer for graph area */}
 				<div className="shrink-0" style={{ width: nodeAreaWidth }} />
 				<div
-					className={`relative flex-1 mr-2 min-w-0 overflow-hidden rounded my-2 mx-1 ${
-						isFocused ? "" : "border border-border"
-					} bg-card text-card-foreground shadow-sm transition-colors duration-150 hover:shadow hover:bg-accent/20 hover:cursor-pointer ${
+					className={`relative flex-1 mr-2 min-w-0 overflow-hidden rounded my-2 mx-1 select-none border ${
+						isFocused || isChecked
+							? "bg-accent/40 border-accent/60 hover:bg-accent/50"
+							: "bg-card hover:bg-muted border-border"
+					} text-card-foreground shadow-sm hover:shadow hover:cursor-pointer ${
 						revision.is_immutable ? "opacity-60" : ""
-					} ${isDimmed ? "opacity-40" : ""} ${isSelected ? "bg-accent/30" : ""} ${
-						isFocused ? "ring-2 ring-ring/80 ring-offset-2 ring-offset-background" : ""
-					}`}
-					onClick={() => onSelect(revision.change_id)}
+					} ${isDimmed ? "opacity-40" : ""}`}
+					onClick={(e) => {
+						// Prevent text selection on shift+click
+						if (e.shiftKey) {
+							e.preventDefault();
+							window.getSelection()?.removeAllRanges();
+						}
+						onSelect(revision.change_id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
+					}}
 				>
 					<div className={`px-3 py-2 min-w-0 ${isPendingAbandon ? "blur-sm" : ""}`}>
 						<div className="flex items-center gap-2 flex-nowrap min-w-0">
@@ -1093,16 +1109,14 @@ function RevisionRow({
 											{revision.change_id_short[jumpQuery.length]}
 										</span>
 										{/* Rest of the ID */}
-										<span>
-											{revision.change_id_short.slice(jumpQuery.length + 1)}
-										</span>
+										<span>{revision.change_id_short.slice(jumpQuery.length + 1)}</span>
 									</>
 								) : (
 									revision.change_id_short
 								)}
 							</code>
 							{revision.bookmarks.length > 0 && (
-								<span 
+								<span
 									className="text-xs text-primary font-medium truncate min-w-0 whitespace-nowrap"
 									title={revision.bookmarks.join(", ")}
 								>
@@ -1133,7 +1147,8 @@ function RevisionRow({
 					{isPendingAbandon && (
 						<div className="absolute inset-0 flex items-center justify-center bg-destructive/10 rounded">
 							<div className="text-sm font-medium text-destructive-foreground bg-destructive/90 px-3 py-1.5 rounded">
-								Abandon this revision? <kbd className="ml-1 px-1 bg-background/20 rounded">Y</kbd> / <kbd className="px-1 bg-background/20 rounded">N</kbd>
+								Abandon this revision? <kbd className="ml-1 px-1 bg-background/20 rounded">Y</kbd> /{" "}
+								<kbd className="px-1 bg-background/20 rounded">N</kbd>
 							</div>
 						</div>
 					)}
@@ -1210,10 +1225,12 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		ref,
 	) {
 		const parentRef = useRef<HTMLDivElement>(null);
-		const { nodes, laneCount, rows: allRows, edgeBindings } = useMemo(
-			() => buildGraph(revisions),
-			[revisions],
-		);
+		const {
+			nodes,
+			laneCount,
+			rows: allRows,
+			edgeBindings,
+		} = useMemo(() => buildGraph(revisions), [revisions]);
 		const expanded = useSearch({ strict: false, select: (s) => s.expanded });
 		const search = useSearch({ strict: false });
 		const navigate = useNavigate();
@@ -1234,6 +1251,67 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 		// Track which stacks are expanded (empty = all collapsed by default)
 		const [expandedStacks, setExpandedStacks] = useAtom(expandedStacksAtom);
+
+		// Read focused stack and selection from URL params
+		const focusedStackId = useSearch({ strict: false, select: (s) => s.stack ?? null });
+		const selectedParam = useSearch({ strict: false, select: (s) => s.selected ?? "" });
+		const selectionAnchor = useSearch({ strict: false, select: (s) => s.selectionAnchor ?? null });
+		const selectedRevisions = useMemo(() => {
+			if (!selectedParam) return new Set<string>();
+			return new Set(selectedParam.split(",").filter(Boolean));
+		}, [selectedParam]);
+		const hasSelection = selectedRevisions.size > 0;
+
+		// Update URL with new selection
+		function setSelectedRevisions(updater: Set<string> | ((prev: Set<string>) => Set<string>)) {
+			const newSelection = typeof updater === "function" ? updater(selectedRevisions) : updater;
+			const selected = newSelection.size > 0 ? [...newSelection].join(",") : undefined;
+			navigate({
+				search: { ...search, selected } as any,
+				replace: true,
+			});
+		}
+
+		// Update URL with focused stack
+		function setFocusedStackId(stackId: string | null) {
+			navigate({
+				search: {
+					...search,
+					stack: stackId ?? undefined,
+					rev: stackId ? undefined : search.rev,
+				} as any,
+				replace: true,
+			});
+		}
+
+		// Toggle a revision's checked state
+		function toggleRevisionCheck(changeId: string) {
+			const next = new Set(selectedRevisions);
+			if (next.has(changeId)) {
+				next.delete(changeId);
+			} else {
+				next.add(changeId);
+			}
+			setSelectedRevisions(next);
+		}
+
+		// Clear selection when Escape is pressed (when not in jump mode)
+		useKeyboardShortcut({
+			key: "Escape",
+			modifiers: {},
+			onPress: () => {
+				navigate({
+					search: {
+						...search,
+						selected: undefined,
+						selectionAnchor: undefined,
+						stack: undefined,
+					} as any,
+					replace: true,
+				});
+			},
+			enabled: (hasSelection || !!focusedStackId) && !inlineJumpMode,
+		});
 
 		// Build lookup maps for stacks
 		const { stackByChangeId, stackById, intermediateChangeIds } = useMemo(() => {
@@ -1262,12 +1340,12 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			return map;
 		}, [nodes]);
 
-		// Display row can be either a revision row or a collapsed stack spacer
+		// Display row can be either a revision row or a collapsed stack row
 		type DisplayRow =
 			| { type: "revision"; row: GraphRow }
-			| { type: "collapsed-spacer"; stack: RevisionStack; lane: number };
+			| { type: "collapsed-stack"; stack: RevisionStack; lane: number };
 
-		// Filter rows to hide collapsed intermediate revisions and add spacers
+		// Filter rows to hide collapsed intermediate revisions and replace with a single collapsed stack row
 		const displayRows = useMemo(() => {
 			const result: DisplayRow[] = [];
 
@@ -1281,15 +1359,15 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 						// Stack is expanded - show the revision
 						result.push({ type: "revision", row });
 					}
-					// If collapsed, skip this row (don't add it)
+					// If collapsed, skip this row
 				} else {
 					// Not an intermediate or not in a stack - always show
 					result.push({ type: "revision", row });
 
-					// If this is the top of a collapsed stack, insert a spacer after it
+					// If this is the top of a collapsed stack, insert a collapsed stack row after it
 					if (stack && changeId === stack.topChangeId && !expandedStacks.has(stack.id)) {
 						const lane = changeIdToLane.get(changeId) ?? 0;
-						result.push({ type: "collapsed-spacer", stack, lane });
+						result.push({ type: "collapsed-stack", stack, lane });
 					}
 				}
 			}
@@ -1305,7 +1383,6 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 					.map((d) => d.row),
 			[displayRows],
 		);
-
 
 		// Toggle stack expansion
 		function toggleStackExpansion(stackId: string) {
@@ -1336,7 +1413,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				commitToRowIndex.set(displayRow.row.revision.commit_id, i);
 			}
 		}
-		
+
 		// Create a mapping of change_id -> commit_id for edge remapping
 		const changeIdToCommitId = new Map<string, string>();
 		for (const rev of revisions) {
@@ -1353,20 +1430,23 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			const topCommitToStack = new Map<string, RevisionStack>();
 			// Build mapping: commit_id -> stack (for edges within expanded stacks)
 			const commitToExpandedStack = new Map<string, RevisionStack>();
-			
+
 			for (const stack of stacks) {
 				if (!expandedStacks.has(stack.id)) {
 					// Stack is collapsed - map all intermediates to bottom revision
 					const bottomCommitId = changeIdToCommitId.get(stack.bottomChangeId);
 					const topCommitId = changeIdToCommitId.get(stack.topChangeId);
-					
+
 					if (bottomCommitId && topCommitId) {
 						topCommitToStack.set(topCommitId, stack);
-						
+
 						for (const intermediateChangeId of stack.intermediateChangeIds) {
 							const intermediateCommitId = changeIdToCommitId.get(intermediateChangeId);
 							if (intermediateCommitId) {
-								hiddenToVisible.set(intermediateCommitId, { targetCommitId: bottomCommitId, stack });
+								hiddenToVisible.set(intermediateCommitId, {
+									targetCommitId: bottomCommitId,
+									stack,
+								});
 							}
 						}
 					}
@@ -1390,7 +1470,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				let collapsedStackId: string | undefined;
 				let collapsedCount: number | undefined;
 				let expandedStackId: string | undefined;
-				
+
 				// Check if this edge originates from a collapsed stack top
 				const stackFromTop = topCommitToStack.get(binding.sourceRevisionId);
 				if (stackFromTop && hiddenToVisible.has(targetId)) {
@@ -1437,6 +1517,9 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const debugEnabledRef = useRef(debugEnabled);
 		debugEnabledRef.current = debugEnabled;
 
+		// Ref to hold scroll function - only scrolls if item is outside visible range
+		const scrollToIndexIfNeededRef = useRef<((index: number) => void) | null>(null);
+
 		// Determine if selected revision is expanded based on URL search params
 		const isSelectedExpanded = expanded === true && !!selectedRevision;
 
@@ -1482,6 +1565,228 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			},
 		});
 
+		// Helper to extend selection in a direction (macOS-style anchor-based selection)
+		const extendSelection = (direction: "down" | "up") => {
+			if (!selectedRevision) return;
+			const currentIndex = changeIdToIndex.get(selectedRevision.change_id);
+			if (currentIndex === undefined) return;
+
+			const step = direction === "down" ? 1 : -1;
+			const limit = direction === "down" ? displayRows.length : -1;
+
+			// Find the next revision in the given direction
+			let targetChangeId: string | null = null;
+			let targetIndex: number | null = null;
+			for (let i = currentIndex + step; direction === "down" ? i < limit : i > limit; i += step) {
+				const row = displayRows[i];
+				if (row.type === "revision") {
+					targetChangeId = row.row.revision.change_id;
+					targetIndex = i;
+					break;
+				}
+			}
+
+			if (!targetChangeId || targetIndex === null) return;
+
+			// Determine anchor: use existing anchor or set it to current position
+			const anchorChangeId = selectionAnchor ?? selectedRevision.change_id;
+			const anchorIndex = changeIdToIndex.get(anchorChangeId);
+			if (anchorIndex === undefined) return;
+
+			// Select all revisions between anchor and target (inclusive)
+			const startIndex = Math.min(anchorIndex, targetIndex);
+			const endIndex = Math.max(anchorIndex, targetIndex);
+			const newSelection = new Set<string>();
+			for (let i = startIndex; i <= endIndex; i++) {
+				const row = displayRows[i];
+				if (row.type === "revision") {
+					newSelection.add(row.row.revision.change_id);
+				}
+			}
+
+			const selected = [...newSelection].join(",");
+			// Update URL with new selection, anchor, and move focus
+			navigate({
+				search: {
+					...search,
+					selected,
+					selectionAnchor: anchorChangeId,
+					rev: targetChangeId,
+					stack: undefined,
+				} as any,
+				replace: true,
+			});
+
+			// Scroll to keep item visible
+			scrollToIndexIfNeededRef.current?.(targetIndex);
+		};
+
+		// Shift+j: extend selection downward
+		useKeyboardShortcut({
+			key: "j",
+			modifiers: { shift: true },
+			onPress: () => extendSelection("down"),
+			enabled: !!selectedRevision && !inlineJumpMode,
+		});
+
+		// Shift+k: extend selection upward
+		useKeyboardShortcut({
+			key: "k",
+			modifiers: { shift: true },
+			onPress: () => extendSelection("up"),
+			enabled: !!selectedRevision && !inlineJumpMode,
+		});
+
+		// Shift+ArrowDown: extend selection downward
+		useKeyboardShortcut({
+			key: "ArrowDown",
+			modifiers: { shift: true },
+			onPress: () => extendSelection("down"),
+			enabled: !!selectedRevision && !inlineJumpMode,
+		});
+
+		// Shift+ArrowUp: extend selection upward
+		useKeyboardShortcut({
+			key: "ArrowUp",
+			modifiers: { shift: true },
+			onPress: () => extendSelection("up"),
+			enabled: !!selectedRevision && !inlineJumpMode,
+		});
+
+		// Get current focused index in displayRows (either revision or collapsed stack)
+		const getCurrentDisplayIndex = (): number => {
+			if (focusedStackId) {
+				return displayRows.findIndex(
+					(row) => row.type === "collapsed-stack" && row.stack.id === focusedStackId,
+				);
+			}
+			if (selectedRevision) {
+				return displayRows.findIndex(
+					(row) =>
+						row.type === "revision" && row.row.revision.change_id === selectedRevision.change_id,
+				);
+			}
+			return -1;
+		};
+
+		// Navigate to a display row (revision or collapsed stack)
+		// Clears selection and anchor (regular navigation without shift)
+		const navigateToDisplayRow = (index: number) => {
+			const row = displayRows[index];
+			if (!row) return;
+
+			if (row.type === "revision") {
+				// Clear stack focus, selection, anchor and set revision
+				navigate({
+					search: {
+						...search,
+						stack: undefined,
+						rev: row.row.revision.change_id,
+						selected: undefined,
+						selectionAnchor: undefined,
+					} as any,
+					replace: true,
+				});
+			} else if (row.type === "collapsed-stack") {
+				// Set stack focus and clear rev, selection, anchor
+				navigate({
+					search: {
+						...search,
+						stack: row.stack.id,
+						rev: undefined,
+						selected: undefined,
+						selectionAnchor: undefined,
+					} as any,
+					replace: true,
+				});
+			}
+
+			// Scroll to keep item visible (only if outside viewport)
+			scrollToIndexIfNeededRef.current?.(index);
+		};
+
+		// j / ArrowDown: navigate to next display row
+		useKeyboardShortcut({
+			key: "j",
+			modifiers: {},
+			onPress: () => {
+				const currentIndex = getCurrentDisplayIndex();
+				if (currentIndex < 0) {
+					// No current focus, start from first
+					if (displayRows.length > 0) navigateToDisplayRow(0);
+				} else if (currentIndex < displayRows.length - 1) {
+					navigateToDisplayRow(currentIndex + 1);
+				}
+			},
+			enabled: !inlineJumpMode,
+		});
+
+		useKeyboardShortcut({
+			key: "ArrowDown",
+			modifiers: {},
+			onPress: () => {
+				const currentIndex = getCurrentDisplayIndex();
+				if (currentIndex < 0) {
+					if (displayRows.length > 0) navigateToDisplayRow(0);
+				} else if (currentIndex < displayRows.length - 1) {
+					navigateToDisplayRow(currentIndex + 1);
+				}
+			},
+			enabled: !inlineJumpMode,
+		});
+
+		// k / ArrowUp: navigate to previous display row
+		useKeyboardShortcut({
+			key: "k",
+			modifiers: {},
+			onPress: () => {
+				const currentIndex = getCurrentDisplayIndex();
+				if (currentIndex > 0) {
+					navigateToDisplayRow(currentIndex - 1);
+				}
+			},
+			enabled: !inlineJumpMode,
+		});
+
+		useKeyboardShortcut({
+			key: "ArrowUp",
+			modifiers: {},
+			onPress: () => {
+				const currentIndex = getCurrentDisplayIndex();
+				if (currentIndex > 0) {
+					navigateToDisplayRow(currentIndex - 1);
+				}
+			},
+			enabled: !inlineJumpMode,
+		});
+
+		// Space/Enter on collapsed stack: expand it
+		useKeyboardShortcut({
+			key: " ",
+			modifiers: {},
+			onPress: () => {
+				if (focusedStackId) {
+					toggleStackExpansion(focusedStackId);
+					setFocusedStackId(null);
+				} else if (selectedRevision) {
+					toggleRevisionCheck(selectedRevision.change_id);
+				}
+			},
+			enabled: !inlineJumpMode,
+		});
+
+		useKeyboardShortcut({
+			key: "Enter",
+			modifiers: {},
+			onPress: () => {
+				if (focusedStackId) {
+					toggleStackExpansion(focusedStackId);
+					setFocusedStackId(null);
+				}
+			},
+			enabled: !!focusedStackId && !inlineJumpMode,
+		});
+
 		// Track if we just activated jump mode to ignore the same 'f' keypress
 		const justActivatedRef = useRef(false);
 
@@ -1513,9 +1818,9 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			getScrollElement: () => parentRef.current,
 			estimateSize: (index: number) => {
 				const displayRow = displayRows[index];
-				if (displayRow.type === "collapsed-spacer") {
-					// Fixed height spacer for collapsed stacks
-					return COLLAPSED_INDICATOR_HEIGHT;
+				if (displayRow.type === "collapsed-stack") {
+					// Same height as a regular revision row
+					return ROW_HEIGHT;
 				}
 				const row = displayRow.row;
 				const isExpanded =
@@ -1525,6 +1830,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			overscan: 10,
 			debug: debugEnabled,
 		});
+
+		// scrollToIndexIfNeededRef is updated below after virtualItems is computed
 
 		// Expose scrollToChangeId method via ref
 		useImperativeHandle(ref, () => ({
@@ -1595,15 +1902,78 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			},
 		}));
 
-		function handleSelect(changeId: string) {
+		function handleSelect(changeId: string, modifiers: { shift: boolean; meta: boolean }) {
 			const revision = revisionMapByChangeId.get(changeId);
-			if (revision) onSelectRevision(revision);
+			if (!revision) return;
+
+			// Cmd/Ctrl+click: toggle selection
+			if (modifiers.meta) {
+				toggleRevisionCheck(changeId);
+				return;
+			}
+
+			// Shift+click: range select from focused to clicked
+			if (modifiers.shift && selectedRevision) {
+				const focusedIndex = changeIdToIndex.get(selectedRevision.change_id);
+				const clickedIndex = changeIdToIndex.get(changeId);
+				if (focusedIndex !== undefined && clickedIndex !== undefined) {
+					const startIdx = Math.min(focusedIndex, clickedIndex);
+					const endIdx = Math.max(focusedIndex, clickedIndex);
+					const newSelection = new Set<string>();
+					for (let i = startIdx; i <= endIdx; i++) {
+						const displayRow = displayRows[i];
+						if (displayRow.type === "revision") {
+							newSelection.add(displayRow.row.revision.change_id);
+						}
+					}
+					// Update selection in URL
+					const selected = newSelection.size > 0 ? [...newSelection].join(",") : undefined;
+					navigate({
+						search: { ...search, selected, stack: undefined } as any,
+						replace: true,
+					});
+				}
+				return;
+			}
+
+			// Plain click: focus revision (clear selection, anchor, and stack focus)
+			navigate({
+				search: {
+					...search,
+					selected: undefined,
+					selectionAnchor: undefined,
+					stack: undefined,
+					rev: changeId,
+				} as any,
+				replace: true,
+			});
 		}
 
 		const virtualItems = rowVirtualizer.getVirtualItems();
 		const visibleStartRow = virtualItems[0]?.index ?? 0;
 		const visibleEndRow = virtualItems[virtualItems.length - 1]?.index ?? 0;
 		const totalHeight = rowVirtualizer.getTotalSize();
+
+		// Update scroll ref - compute actually visible range based on scroll position
+		scrollToIndexIfNeededRef.current = (index: number) => {
+			const scrollEl = parentRef.current;
+			if (!scrollEl) return;
+			
+			const scrollTop = scrollEl.scrollTop;
+			const clientHeight = scrollEl.clientHeight;
+			
+			// Calculate which rows are fully visible (not just rendered with overscan)
+			// Use ceil for start (first fully visible) and floor-1 for end (last fully visible)
+			const visibleStart = Math.ceil(scrollTop / ROW_HEIGHT);
+			const visibleEnd = Math.floor((scrollTop + clientHeight) / ROW_HEIGHT) - 1;
+			
+			const shouldScroll = index < visibleStart || index > visibleEnd;
+			
+			// Only scroll if the item is outside the fully visible range
+			if (shouldScroll) {
+				rowVirtualizer.scrollToIndex(index, { align: "auto" });
+			}
+		};
 		const rowOffsets = new Map<number, number>();
 		for (const item of virtualItems) {
 			rowOffsets.set(item.index, item.start);
@@ -1729,7 +2099,13 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 			window.addEventListener("keydown", handleJumpKey);
 			return () => window.removeEventListener("keydown", handleJumpKey);
-		}, [inlineJumpMode, inlineJumpQuery, setInlineJumpQuery, revisionMapByChangeId, onSelectRevision]);
+		}, [
+			inlineJumpMode,
+			inlineJumpQuery,
+			setInlineJumpQuery,
+			revisionMapByChangeId,
+			onSelectRevision,
+		]);
 
 		if (revisions.length === 0) {
 			return (
@@ -1786,69 +2162,104 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 						{virtualItems.map((virtualRow) => {
 							const displayRow = displayRows[virtualRow.index];
 
-							// Collapsed stack spacer row - button positioned at edge midpoint
-							if (displayRow.type === "collapsed-spacer") {
+							// Collapsed stack row - styled as stacked cards
+							if (displayRow.type === "collapsed-stack") {
 								const { stack, lane } = displayRow;
-								// Get the row indices for top and bottom of this stack
-								const topRowIdx = changeIdToIndex.get(stack.topChangeId);
-								const bottomRowIdx = changeIdToIndex.get(stack.bottomChangeId);
-								// Calculate button position at midpoint of dotted edge
-								const topCenter = topRowIdx !== undefined ? getRowCenter(topRowIdx) : virtualRow.start;
-								const bottomCenter = bottomRowIdx !== undefined ? getRowCenter(bottomRowIdx) : virtualRow.start + COLLAPSED_INDICATOR_HEIGHT;
-								const edgeMidY = (topCenter + bottomCenter) / 2;
-								// Position button relative to spacer row start
-								const buttonOffsetY = edgeMidY - virtualRow.start - 12; // 12 = half button height
-								
+								const nodeAreaWidth = LANE_PADDING + (lane + 1) * LANE_WIDTH;
+								const count = stack.intermediateChangeIds.length;
+								// Show up to 3 stacked card layers
+								const layers = Math.min(count, 3);
+
+								// Check if this stack is related to the selected revision (for dimming)
+								const isStackRelated = stack.changeIds.some((id) => relatedRevisions.has(id));
+								const isStackDimmed = selectedRevision !== null && !isStackRelated;
+								const isStackFocused = focusedStackId === stack.id;
+
 								return (
 									<div
-										key={`spacer-${stack.id}`}
+										key={`collapsed-${stack.id}`}
 										ref={rowVirtualizer.measureElement}
 										data-index={virtualRow.index}
-										className="absolute left-0 w-full pointer-events-none"
+										className="absolute left-0 w-full"
 										style={{
 											transform: `translateY(${virtualRow.start}px)`,
-											height: COLLAPSED_INDICATOR_HEIGHT,
+											height: ROW_HEIGHT,
 										}}
 									>
-										<button
-											type="button"
-											onClick={() => toggleStackExpansion(stack.id)}
-											className="absolute flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-muted/50 transition-colors pointer-events-auto rounded"
-											style={{
-												top: buttonOffsetY + 4,
-												left: (lane + 1) * LANE_WIDTH + 16,
-												backgroundColor: "transparent",
-											}}
-										>
-											<svg
-												className="w-3 h-3"
-												fill="none"
-												viewBox="0 0 24 24"
-												stroke="currentColor"
-											>
-												<path
-													strokeLinecap="round"
-													strokeLinejoin="round"
-													strokeWidth={2}
-													d="M19 9l-7 7-7-7"
-												/>
-											</svg>
-											<span>
-												{stack.intermediateChangeIds.length} hidden revision
-												{stack.intermediateChangeIds.length !== 1 ? "s" : ""}
-											</span>
-										</button>
+										<div className="flex flex-col relative" style={{ height: ROW_HEIGHT }}>
+											<div className="flex items-start min-h-[56px] pt-4">
+												{/* Spacer for graph area */}
+												<div className="shrink-0" style={{ width: nodeAreaWidth }} />
+												<button
+													type="button"
+													onClick={() => toggleStackExpansion(stack.id)}
+													className={`relative flex-1 mr-2 min-w-0 my-2 mx-1 cursor-pointer group ${isStackDimmed ? "opacity-40" : ""}`}
+													style={{ height: 40 }}
+												>
+													{/* Stacked card layers */}
+													{Array.from({ length: layers }).map((_, i) => {
+														const layerIndex = layers - 1 - i; // Render back layers first
+														const offset = layerIndex * 4;
+														const isTopLayer = layerIndex === 0;
+														const scale = 1 - layerIndex * 0.02;
+
+														return (
+															<div
+																key={layerIndex}
+																className={`absolute left-0 right-0 rounded border shadow-sm group-hover:border-muted-foreground/50 ${
+																	isStackFocused && isTopLayer
+																		? "bg-accent/40 border-accent/60"
+																		: "bg-card border-border"
+																} text-card-foreground`}
+																style={{
+																	top: 0,
+																	height: 40,
+																	transform: `translateY(${offset}px) scaleX(${scale})`,
+																	transformOrigin: "top center",
+																	opacity: 1 - layerIndex * 0.2,
+																	zIndex: layers - layerIndex,
+																}}
+															/>
+														);
+													})}
+													{/* Content overlay on top card */}
+													<div
+														className="absolute inset-0 flex items-center justify-center gap-2 rounded"
+														style={{ zIndex: layers + 1, height: 40 }}
+													>
+														<svg
+															className="w-3.5 h-3.5 text-muted-foreground"
+															fill="none"
+															viewBox="0 0 24 24"
+															stroke="currentColor"
+														>
+															<path
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																strokeWidth={2}
+																d="M19 9l-7 7-7-7"
+															/>
+														</svg>
+														<span className="text-xs text-muted-foreground group-hover:text-foreground">
+															{count} hidden revision{count !== 1 ? "s" : ""}
+														</span>
+													</div>
+												</button>
+											</div>
+										</div>
 									</div>
 								);
 							}
 
 							// Regular revision row
-							const row = displayRow.row;
+							const { row } = displayRow;
 							const lane = changeIdToLane.get(row.revision.change_id) ?? 0;
 							const isFlashing = flash?.changeId === row.revision.change_id;
 							const isDimmed =
 								selectedRevision !== null && !relatedRevisions.has(row.revision.change_id);
-							const isFocused = selectedRevision?.change_id === row.revision.change_id;
+							// Only show focus if no stack is focused
+							const isFocused =
+								!focusedStackId && selectedRevision?.change_id === row.revision.change_id;
 							const isSelected = isFocused;
 							const isExpanded = isSelectedExpanded && isFocused;
 
@@ -1862,22 +2273,23 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 										transform: `translateY(${virtualRow.start}px)`,
 									}}
 								>
-								<RevisionRow
-									revision={row.revision}
-									lane={lane}
-									maxLaneOnRow={row.maxLaneOnRow}
-									isSelected={isSelected}
-									isFocused={isFocused}
-									onSelect={handleSelect}
-									isFlashing={isFlashing}
-									isDimmed={isDimmed}
-									isExpanded={isExpanded}
-									repoPath={repoPath}
-									isPendingAbandon={pendingAbandon?.change_id === row.revision.change_id}
-									jumpHint={jumpHintsMap.get(row.revision.change_id) ?? null}
-									jumpModeActive={inlineJumpMode}
-									jumpQuery={inlineJumpQuery ?? ""}
-								/>
+									<RevisionRow
+										revision={row.revision}
+										lane={lane}
+										maxLaneOnRow={row.maxLaneOnRow}
+										isSelected={isSelected}
+										isChecked={selectedRevisions.has(row.revision.change_id)}
+										isFocused={isFocused}
+										onSelect={handleSelect}
+										isFlashing={isFlashing}
+										isDimmed={isDimmed}
+										isExpanded={isExpanded}
+										repoPath={repoPath}
+										isPendingAbandon={pendingAbandon?.change_id === row.revision.change_id}
+										jumpHint={jumpHintsMap.get(row.revision.change_id) ?? null}
+										jumpModeActive={inlineJumpMode}
+										jumpQuery={inlineJumpQuery ?? ""}
+									/>
 								</div>
 							);
 						})}

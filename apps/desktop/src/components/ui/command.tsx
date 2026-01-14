@@ -50,11 +50,13 @@ function CommandDialog({
 				<DialogTitle>{title}</DialogTitle>
 				<DialogDescription>{description}</DialogDescription>
 			</DialogHeader>
-		<DialogContent
-			className={cn("rounded-lg overflow-hidden p-0 top-[20%] translate-y-0", className)}
-			showCloseButton={showCloseButton}
-		>
-				<Command filter={filter} shouldFilter={shouldFilter}>{children}</Command>
+			<DialogContent
+				className={cn("rounded-lg overflow-hidden p-0 top-[20%] translate-y-0", className)}
+				showCloseButton={showCloseButton}
+			>
+				<Command filter={filter} shouldFilter={shouldFilter}>
+					{children}
+				</Command>
 			</DialogContent>
 		</Dialog>
 	);

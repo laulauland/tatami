@@ -1,9 +1,0 @@
-`$fn($args)` where {
-    $fn <: `useState`,
-    register_diagnostic(
-        span = $fn,
-        message = "useState is discouraged. Use atoms from @/atoms.ts instead for global state management.",
-        severity = "warn"
-    )
-}
-

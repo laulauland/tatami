@@ -1,0 +1,7 @@
+# Rule: Discourage useEffect for data fetching
+id: no-useeffect-data-fetching
+language: typescript
+severity: warning
+message: "useEffect for data fetching is discouraged. Use TanStack DB (useLiveQuery) instead."
+rule:
+  pattern: useEffect($$$ARGS)

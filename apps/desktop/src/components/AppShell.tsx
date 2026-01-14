@@ -1,6 +1,5 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { homeDir } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -38,9 +37,12 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 
 import {
 	abandonRevision,
+	addRepository,
 	editRevision,
 	emptyChangesCollection,
+	emptyCommitRecencyCollection,
 	emptyRevisionsCollection,
+	getCommitRecencyCollection,
 	getRevisionChangesCollection,
 	getRevisionsCollection,
 	newRevision,
@@ -50,10 +52,8 @@ import { useKeyboardNavigation, useKeyboardShortcut, useKeySequence } from "@/ho
 import {
 	findRepository,
 	findRepositoryByPath,
-	getCommitRecency,
 	type Repository,
 	type Revision,
-	upsertRepository,
 } from "@/tauri-commands";
 
 const openDirectoryDialogEffect = Effect.gen(function* () {
@@ -126,15 +126,11 @@ export function AppShell() {
 	const { data: revisions = [], isLoading = false } = useLiveQuery(revisionsCollection);
 
 	// Fetch commit recency data for branch ordering
-	const { data: commitRecency } = useQuery({
-		queryKey: ["commit-recency", activeProject?.path],
-		queryFn: () => {
-			if (!activeProject?.path) throw new Error("No repo path");
-			return getCommitRecency(activeProject.path, 500); // Walk last 500 ops
-		},
-		enabled: !!activeProject?.path,
-		staleTime: 30000, // Cache for 30s
-	});
+	const commitRecencyCollection = activeProject?.path
+		? getCommitRecencyCollection(activeProject.path)
+		: emptyCommitRecencyCollection;
+	const { data: commitRecencyEntries = [] } = useLiveQuery(commitRecencyCollection);
+	const commitRecency = commitRecencyEntries[0]?.data ?? undefined;
 
 	const orderedRevisions = reorderForGraph(revisions, commitRecency);
 
@@ -156,7 +152,7 @@ export function AppShell() {
 		}
 
 		if (hiddenChangeIds.size === 0) return orderedRevisions;
-		return orderedRevisions.filter(r => !hiddenChangeIds.has(r.change_id));
+		return orderedRevisions.filter((r) => !hiddenChangeIds.has(r.change_id));
 	}, [revisions, orderedRevisions, expandedStacks]);
 
 	// Debug: log when revisions change to track reordering
@@ -170,7 +166,9 @@ export function AppShell() {
 		const changes: string[] = [];
 		for (let i = 0; i < Math.min(currentOrder.length, prevOrder.length); i++) {
 			if (currentOrder[i] !== prevOrder[i]) {
-				changes.push(`[${i}] ${prevOrder[i]?.slice(0, 4) ?? "?"} → ${currentOrder[i]?.slice(0, 4) ?? "?"}`);
+				changes.push(
+					`[${i}] ${prevOrder[i]?.slice(0, 4) ?? "?"} → ${currentOrder[i]?.slice(0, 4) ?? "?"}`,
+				);
 				if (changes.length >= 10) break;
 			}
 		}
@@ -179,7 +177,9 @@ export function AppShell() {
 			console.log("[reorder] changes detected:", {
 				prevLength: prevOrder.length,
 				newLength: currentOrder.length,
-				wcBefore: prevOrder.findIndex((id) => revisions.find((r) => r.change_id === id)?.is_working_copy),
+				wcBefore: prevOrder.findIndex(
+					(id) => revisions.find((r) => r.change_id === id)?.is_working_copy,
+				),
 				wcAfter: currentOrder.findIndex((id) => id === workingCopy?.change_id),
 				firstChanges: changes,
 				first10: currentOrder.slice(0, 10).map((id) => id.slice(0, 4)),
@@ -229,12 +229,11 @@ export function AppShell() {
 			};
 
 			yield* Effect.tryPromise({
-				try: () => upsertRepository(repository),
+				try: () => addRepository(repositoriesCollection, repository),
 				catch: (error) => new Error(`Failed to save repository: ${error}`),
 			});
 
 			yield* Effect.sync(() => {
-				repositoriesCollection.utils.writeUpsert([repository]);
 				navigate({ to: "/project/$projectId", params: { projectId: repositoryId } });
 			});
 		}).pipe(
@@ -272,6 +271,7 @@ export function AppShell() {
 		selectedChangeId: rev ?? null,
 		onNavigate: handleNavigateToChangeId,
 		scrollToChangeId: (changeId) => revisionGraphRef.current?.scrollToChangeId(changeId),
+		disableBasicNavigation: true, // j/k/arrows handled in RevisionGraph for display row awareness
 	});
 
 	function triggerFlash(changeId: string) {
@@ -310,7 +310,9 @@ export function AppShell() {
 
 		// Debug: log indices before edit
 		const currentWCIndex = orderedRevisions.findIndex((r) => r.change_id === currentWC?.change_id);
-		const targetIndex = orderedRevisions.findIndex((r) => r.change_id === selectedRevision.change_id);
+		const targetIndex = orderedRevisions.findIndex(
+			(r) => r.change_id === selectedRevision.change_id,
+		);
 		console.log("[edit] before:", {
 			currentWC: currentWC?.change_id_short,
 			currentWCIndex,
@@ -346,7 +348,14 @@ export function AppShell() {
 		if (!activeProject || !pendingAbandon) return;
 		const preset = activeProject.revset_preset ?? "full_history";
 		const limit = preset === "full_history" ? 10000 : 100;
-		abandonRevision(revisionsCollection, activeProject.path, pendingAbandon, limit, stackRevset, preset);
+		abandonRevision(
+			revisionsCollection,
+			activeProject.path,
+			pendingAbandon,
+			limit,
+			stackRevset,
+			preset,
+		);
 		setPendingAbandon(null);
 	}
 
@@ -565,25 +574,22 @@ export function AppShell() {
 										ref={revisionGraphRef}
 										revisions={revisions}
 										selectedRevision={selectedRevision}
-									onSelectRevision={handleSelectRevision}
-									isLoading={isLoading}
-									flash={flash}
-									repoPath={activeProject?.path ?? null}
-									pendingAbandon={pendingAbandon}
-								/>
+										onSelectRevision={handleSelectRevision}
+										isLoading={isLoading}
+										flash={flash}
+										repoPath={activeProject?.path ?? null}
+										pendingAbandon={pendingAbandon}
+									/>
 								</section>
 							</ResizablePanel>
 							<ResizableHandle withHandle />
 							<ResizablePanel defaultSize={isNarrowScreen ? 60 : 67} minSize={30}>
-								<aside
-									className="h-full"
-									aria-label="Diff viewer"
-								>
-								<PrerenderedDiffPanel
-									repoPath={activeProject?.path ?? null}
-									revisions={orderedRevisions}
-									selectedChangeId={selectedRevision?.change_id ?? null}
-								/>
+								<aside className="h-full" aria-label="Diff viewer">
+									<PrerenderedDiffPanel
+										repoPath={activeProject?.path ?? null}
+										revisions={orderedRevisions}
+										selectedChangeId={selectedRevision?.change_id ?? null}
+									/>
 								</aside>
 							</ResizablePanel>
 						</ResizablePanelGroup>

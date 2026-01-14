@@ -9,6 +9,9 @@ export type ProjectSearchParams = {
 	rev?: string;
 	file?: string;
 	expanded?: boolean;
+	stack?: string; // Focused collapsed stack id
+	selected?: string; // Comma-separated list of selected revision changeIds
+	selectionAnchor?: string; // changeId where shift-selection started
 };
 
 export const Route = createRoute({
@@ -19,6 +22,10 @@ export const Route = createRoute({
 			rev: typeof search.rev === "string" ? search.rev : undefined,
 			file: typeof search.file === "string" ? search.file : undefined,
 			expanded: search.expanded === true || search.expanded === "true",
+			stack: typeof search.stack === "string" ? search.stack : undefined,
+			selected: typeof search.selected === "string" ? search.selected : undefined,
+			selectionAnchor:
+				typeof search.selectionAnchor === "string" ? search.selectionAnchor : undefined,
 		};
 	},
 	component: ProjectComponent,

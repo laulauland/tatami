@@ -33,11 +33,11 @@ export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry
 	}
 
 	const commitIds = new Set(revisions.map((r) => r.commit_id));
-	
+
 	// Build direct parent/child relationships (only within visible revset)
 	const parents = new Map<string, string[]>();
 	const children = new Map<string, string[]>();
-	
+
 	for (const rev of revisions) {
 		const visibleParents: string[] = [];
 		for (const edge of rev.parent_edges) {
@@ -45,7 +45,7 @@ export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry
 			if (edge.edge_type === "missing") continue;
 			if (!commitIds.has(edge.parent_id)) continue;
 			visibleParents.push(edge.parent_id);
-			
+
 			// Build children map
 			const parentChildren = children.get(edge.parent_id) ?? [];
 			parentChildren.push(rev.commit_id);
@@ -53,7 +53,7 @@ export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry
 		}
 		parents.set(rev.commit_id, visibleParents);
 	}
-	
+
 	// Ensure all commits have entries even if they have no children/parents
 	for (const rev of revisions) {
 		if (!children.has(rev.commit_id)) {
@@ -66,14 +66,14 @@ export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry
 	for (const rev of revisions) {
 		const ancestorSet = new Set<string>();
 		const queue = [...(parents.get(rev.commit_id) ?? [])];
-		
+
 		while (queue.length > 0) {
 			const parentId = queue.shift()!;
 			if (ancestorSet.has(parentId)) continue;
 			ancestorSet.add(parentId);
 			queue.push(...(parents.get(parentId) ?? []));
 		}
-		
+
 		ancestors.set(rev.commit_id, ancestorSet);
 	}
 
@@ -82,14 +82,14 @@ export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry
 	for (const rev of revisions) {
 		const descendantSet = new Set<string>();
 		const queue = [...(children.get(rev.commit_id) ?? [])];
-		
+
 		while (queue.length > 0) {
 			const childId = queue.shift()!;
 			if (descendantSet.has(childId)) continue;
 			descendantSet.add(childId);
 			queue.push(...(children.get(childId) ?? []));
 		}
-		
+
 		descendants.set(rev.commit_id, descendantSet);
 	}
 
@@ -122,26 +122,26 @@ export function groupIntoConnectedComponents(
 ): Map<string, string[]> {
 	const components = new Map<string, string[]>(); // componentId -> commit_ids
 	const commitToComponent = new Map<string, string>();
-	
+
 	for (const rev of revisions) {
 		if (commitToComponent.has(rev.commit_id)) continue;
-		
+
 		// Start a new component with this revision as the root
 		const componentId = rev.commit_id;
 		const componentMembers: string[] = [];
 		const queue = [rev.commit_id];
-		
+
 		while (queue.length > 0) {
 			const commitId = queue.shift()!;
 			if (commitToComponent.has(commitId)) continue;
-			
+
 			commitToComponent.set(commitId, componentId);
 			componentMembers.push(commitId);
-			
+
 			// Add all ancestors and descendants to the component
 			const ancestorSet = ancestry.ancestors.get(commitId) ?? new Set();
 			const descendantSet = ancestry.descendants.get(commitId) ?? new Set();
-			
+
 			for (const ancestorId of ancestorSet) {
 				if (!commitToComponent.has(ancestorId)) {
 					queue.push(ancestorId);
@@ -153,10 +153,10 @@ export function groupIntoConnectedComponents(
 				}
 			}
 		}
-		
+
 		components.set(componentId, componentMembers);
 	}
-	
+
 	return components;
 }
 
@@ -311,10 +311,7 @@ export function detectStacks(revisions: Revision[]): RevisionStack[] {
 	return stacks;
 }
 
-export function reorderForGraph(
-	revisions: Revision[],
-	recency?: CommitRecency,
-): Revision[] {
+export function reorderForGraph(revisions: Revision[], recency?: CommitRecency): Revision[] {
 	if (revisions.length === 0) return [];
 
 	const commitMap = new Map(revisions.map((r) => [r.commit_id, r]));

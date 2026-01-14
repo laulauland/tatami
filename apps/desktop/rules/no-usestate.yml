@@ -1,0 +1,7 @@
+# Rule: Discourage useState in favor of atoms
+id: no-usestate
+language: typescript
+severity: warning
+message: "useState is discouraged. Use atoms from '@/atoms.ts' instead for global state management."
+rule:
+  pattern: useState($$$ARGS)

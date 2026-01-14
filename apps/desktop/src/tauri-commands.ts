@@ -96,9 +96,6 @@ export interface RevsetResult {
 }
 
 /** Resolve a revset expression using jj-lib's full parser */
-export async function resolveRevset(
-	repoPath: string,
-	revset: string,
-): Promise<RevsetResult> {
+export async function resolveRevset(repoPath: string, revset: string): Promise<RevsetResult> {
 	return invoke<RevsetResult>("resolve_revset", { repoPath, revset });
 }

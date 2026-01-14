@@ -22,17 +22,17 @@ interface AceJumpProps {
 // Highlight matching text in a string
 function HighlightMatch({ text, query }: { text: string; query: string }): React.ReactElement {
 	if (!query) return <>{text}</>;
-	
+
 	const lowerText = text.toLowerCase();
 	const lowerQuery = query.toLowerCase();
 	const index = lowerText.indexOf(lowerQuery);
-	
+
 	if (index === -1) return <>{text}</>;
-	
+
 	const before = text.slice(0, index);
 	const match = text.slice(index, index + query.length);
 	const after = text.slice(index + query.length);
-	
+
 	return (
 		<>
 			{before}
@@ -46,7 +46,7 @@ function HighlightMatch({ text, query }: { text: string; query: string }): React
 function isRevsetExpression(query: string): boolean {
 	const trimmed = query.trim();
 	if (!trimmed) return false;
-	
+
 	// Revset patterns: @, @-, @--, id-, id+, or any jj revset syntax
 	// We'll be more liberal and consider anything with special chars as potential revset
 	if (trimmed === "@") return true;
@@ -58,7 +58,7 @@ function isRevsetExpression(query: string): boolean {
 	if (trimmed.includes("&")) return true; // intersection
 	if (trimmed.includes("::")) return true; // ancestors
 	if (trimmed.includes("..")) return true; // range
-	
+
 	return false;
 }
 
@@ -148,20 +148,24 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 	);
 
 	// Determine if we're in revset mode
-	const isRevsetMode = isRevsetExpression(search) && (revsetResult.loading || revsetResult.changeIds.length > 0 || revsetResult.error);
+	const isRevsetMode =
+		isRevsetExpression(search) &&
+		(revsetResult.loading || revsetResult.changeIds.length > 0 || revsetResult.error);
 	const revsetChangeIdSet = useMemo(
 		() => new Set(revsetResult.changeIds),
 		[revsetResult.changeIds],
 	);
 
 	// Determine what matched for each revision
-	function getMatchType(revision: Revision): "revset" | "changeId" | "bookmark" | "description" | null {
+	function getMatchType(
+		revision: Revision,
+	): "revset" | "changeId" | "bookmark" | "description" | null {
 		if (isRevsetMode && revsetChangeIdSet.has(revision.change_id)) {
 			return "revset";
 		}
 		if (!search || isRevsetMode) return null;
 		const lowerSearch = search.toLowerCase();
-		
+
 		if (revision.change_id.toLowerCase().startsWith(lowerSearch)) return "changeId";
 		if (revision.bookmarks.some((b) => b.toLowerCase().includes(lowerSearch))) return "bookmark";
 		if (revision.description.toLowerCase().includes(lowerSearch)) return "description";
@@ -177,32 +181,32 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 	// Custom filter function that ranks by match type
 	function customFilter(value: string, searchQuery: string): number {
 		if (!searchQuery) return 1; // Show all when no search
-		
+
 		const revision = revisionByChangeId.get(value);
 		if (!revision) return 0;
-		
+
 		// Revset match - highest priority
 		if (isRevsetMode) {
 			return revsetChangeIdSet.has(value) ? 1.0 : 0;
 		}
-		
+
 		const lowerSearch = searchQuery.toLowerCase();
-		
+
 		// Change ID match - highest priority
 		if (revision.change_id.toLowerCase().startsWith(lowerSearch)) {
 			return 1.0;
 		}
-		
+
 		// Bookmark match - medium priority
 		if (revision.bookmarks.some((b) => b.toLowerCase().includes(lowerSearch))) {
 			return 0.7;
 		}
-		
+
 		// Description match - lower priority
 		if (revision.description.toLowerCase().includes(lowerSearch)) {
 			return 0.4;
 		}
-		
+
 		return 0;
 	}
 
@@ -242,17 +246,21 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 						"No revisions found."
 					)}
 				</CommandEmpty>
-				{isRevsetMode && !revsetResult.loading && !revsetResult.error && revsetResult.changeIds.length > 0 && (
-					<div className="px-3 py-2 text-xs text-muted-foreground border-b border-border">
-						revset: {revsetResult.label} ({revsetResult.changeIds.length} match{revsetResult.changeIds.length !== 1 ? "es" : ""})
-					</div>
-				)}
+				{isRevsetMode &&
+					!revsetResult.loading &&
+					!revsetResult.error &&
+					revsetResult.changeIds.length > 0 && (
+						<div className="px-3 py-2 text-xs text-muted-foreground border-b border-border">
+							revset: {revsetResult.label} ({revsetResult.changeIds.length} match
+							{revsetResult.changeIds.length !== 1 ? "es" : ""})
+						</div>
+					)}
 				<CommandGroup>
 					{filteredRevisions.map((revision) => {
 						const firstLine = revision.description?.split("\n")[0] || "(no description)";
 						const matchType = getMatchType(revision);
 						const matchingBookmark = getMatchingBookmark(revision);
-						
+
 						return (
 							<CommandItem
 								key={revision.change_id}

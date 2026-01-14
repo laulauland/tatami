@@ -34,9 +34,7 @@ function SettingsPage() {
 			{/* Content */}
 			<div className="flex-1 overflow-auto p-6">
 				<div className="max-w-2xl space-y-8">
-					<div className="text-muted-foreground text-sm">
-						Settings coming soon...
-					</div>
+					<div className="text-muted-foreground text-sm">Settings coming soon...</div>
 				</div>
 			</div>
 		</div>

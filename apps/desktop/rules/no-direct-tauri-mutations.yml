@@ -1,0 +1,33 @@
+# Rule: Tauri mutation commands should only be called from db.ts
+# These functions update backend state and must go through TanStack DB collections
+# to maintain the source of truth pattern.
+
+id: no-direct-tauri-mutations
+language: tsx
+severity: error
+message: "Direct import of mutation function from tauri-commands is restricted. Use TanStack DB mutation functions from '@/db' instead."
+note: |
+  Restricted functions and their replacements:
+  - upsertRepository → addRepository() or updateRepository() from db.ts
+  - removeRepository → deleteRepository() from db.ts
+  - jjNew → newRevision() from db.ts
+  - jjEdit → editRevision() from db.ts
+  - jjAbandon → abandonRevision() from db.ts
+  - watchRepository/unwatchRepository → handled internally by collections
+
+files:
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+  - "!src/db.ts"
+  - "!src/tauri-commands.ts"
+
+rule:
+  all:
+    - kind: import_specifier
+    - regex: "^(upsertRepository|removeRepository|jjNew|jjEdit|jjAbandon|watchRepository|unwatchRepository)$"
+    - inside:
+        stopBy: end
+        kind: import_statement
+        has:
+          kind: string
+          regex: "tauri-commands"

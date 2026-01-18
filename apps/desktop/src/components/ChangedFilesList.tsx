@@ -62,14 +62,20 @@ function FileListItem({
 	showSelection?: boolean;
 }) {
 	return (
-		<button
-			type="button"
+		<div
 			className={cn(
 				"flex items-center gap-2 w-full px-3 py-1.5 text-left transition-colors cursor-pointer group",
 				"hover:bg-muted/50",
 				isFocused && "bg-muted text-foreground",
 			)}
 			onClick={onClick}
+			onKeyDown={(e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					onClick();
+				}
+			}}
+			role="button"
+			tabIndex={0}
 		>
 			{showSelection && (
 				<button
@@ -99,7 +105,7 @@ function FileListItem({
 			>
 				{file.path}
 			</span>
-		</button>
+		</div>
 	);
 }
 

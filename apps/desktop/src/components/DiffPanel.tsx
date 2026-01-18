@@ -1,3 +1,4 @@
+import { useAtom } from "@effect-atom/atom-react";
 import { PatchDiff } from "@pierre/diffs/react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useSearch } from "@tanstack/react-router";
@@ -6,11 +7,18 @@ import {
 	ChevronRightIcon,
 	ChevronsDownUpIcon,
 	ChevronsUpDownIcon,
-	ColumnsIcon,
+	Columns2Icon,
 	RowsIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
+import {
+	type DiffStyle,
+	diffStyleAtom,
+	expandedDiffFilesAtom,
+	fileDiffStyleOverridesAtom,
+} from "@/atoms";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { emptyDiffCollection, getRevisionDiffCollection } from "@/db";
 import type { Revision } from "@/tauri-commands";
 
@@ -24,8 +32,8 @@ function RevisionHeader({ revision }: { revision: Revision }) {
 	const commitIdShort = revision.commit_id.substring(0, 12);
 
 	return (
-		<div className="border border-border rounded-lg mb-4 bg-muted/50">
-			<div className="px-3 py-2 font-mono text-sm space-y-2">
+		<div className="border border-border rounded-lg bg-card">
+			<div className="px-3 py-2 font-mono text-xs space-y-1.5">
 				<div className="flex gap-4">
 					<div>
 						<span className="text-muted-foreground">Change ID:</span>{" "}
@@ -43,8 +51,8 @@ function RevisionHeader({ revision }: { revision: Revision }) {
 					<span className="text-foreground">{revision.timestamp}</span>
 				</div>
 				{revision.description && (
-					<div className="mt-3 pt-3 border-t border-border">
-						<pre className="text-sm text-foreground whitespace-pre-wrap font-sans">
+					<div className="mt-2 pt-2 border-t border-border">
+						<pre className="text-xs text-foreground whitespace-pre-wrap font-sans">
 							{revision.description}
 						</pre>
 					</div>
@@ -59,37 +67,44 @@ function extractFilePath(patch: string): string {
 	return match ? match[1] : "unknown";
 }
 
-type DiffStyle = "unified" | "split";
-
 function FileDiffSection({
 	patch,
-	defaultCollapsed = false,
 	isSelected = false,
 	fileRef,
-	globalDiffStyle,
-	onCollapseChange,
 }: {
 	patch: string;
-	defaultCollapsed?: boolean;
 	isSelected?: boolean;
 	fileRef?: React.RefObject<HTMLDivElement | null>;
-	globalDiffStyle: DiffStyle;
-	onCollapseChange?: (collapsed: boolean) => void;
 }) {
-	const [isCollapsedByUser, setIsCollapsedByUser] = useState(defaultCollapsed);
-	const [localDiffStyle, setLocalDiffStyle] = useState<DiffStyle | null>(null);
+	const [globalDiffStyle] = useAtom(diffStyleAtom);
+	const [expandedFiles, setExpandedFiles] = useAtom(expandedDiffFilesAtom);
+	const [styleOverrides, setStyleOverrides] = useAtom(fileDiffStyleOverridesAtom);
+
 	const filePath = extractFilePath(patch);
-
-	// Derived state: auto-expand when selected
-	const isCollapsed = isSelected ? false : isCollapsedByUser;
-
+	const isExpanded = expandedFiles?.has(filePath) ?? false;
+	// Auto-expand when selected
+	const isCollapsed = isSelected ? false : !isExpanded;
 	// Use local override if set, otherwise use global
-	const effectiveDiffStyle = localDiffStyle ?? globalDiffStyle;
+	const effectiveDiffStyle = styleOverrides.get(filePath) ?? globalDiffStyle;
 
 	function handleToggleCollapse() {
-		const newCollapsed = !isCollapsed;
-		setIsCollapsedByUser(newCollapsed);
-		onCollapseChange?.(newCollapsed);
+		setExpandedFiles((prev) => {
+			const next = new Set(prev ?? []);
+			if (isCollapsed) {
+				next.add(filePath);
+			} else {
+				next.delete(filePath);
+			}
+			return next;
+		});
+	}
+
+	function handleSetLocalStyle(style: DiffStyle) {
+		setStyleOverrides((prev) => {
+			const next = new Map(prev);
+			next.set(filePath, style);
+			return next;
+		});
 	}
 
 	return (
@@ -117,7 +132,7 @@ function FileDiffSection({
 							<ChevronDownIcon className="size-4" />
 						)}
 					</span>
-					<code className="font-mono text-sm text-foreground text-left flex-1 truncate">
+					<code className="font-mono text-xs text-foreground text-left flex-1 truncate">
 						{filePath}
 					</code>
 				</button>
@@ -127,18 +142,20 @@ function FileDiffSection({
 					<Button
 						variant={effectiveDiffStyle === "unified" ? "secondary" : "ghost"}
 						size="icon-xs"
-						onClick={() => setLocalDiffStyle("unified")}
+						onClick={() => handleSetLocalStyle("unified")}
 						title="Unified diff"
+						className="h-6 w-6"
 					>
 						<RowsIcon className="size-3" />
 					</Button>
 					<Button
 						variant={effectiveDiffStyle === "split" ? "secondary" : "ghost"}
 						size="icon-xs"
-						onClick={() => setLocalDiffStyle("split")}
+						onClick={() => handleSetLocalStyle("split")}
 						title="Split diff"
+						className="h-6 w-6"
 					>
-						<ColumnsIcon className="size-3" />
+						<Columns2Icon className="size-3" />
 					</Button>
 				</div>
 			</div>
@@ -203,71 +220,12 @@ export function PrerenderedDiffPanel({
 	return <DiffPanel repoPath={repoPath} changeId={selectedChangeId} revision={selectedRevision} />;
 }
 
-function DiffToolbar({
-	allCollapsed,
-	onToggleAllFolds,
-	diffStyle,
-	onDiffStyleChange,
-}: {
-	allCollapsed: boolean;
-	onToggleAllFolds: () => void;
-	diffStyle: DiffStyle;
-	onDiffStyleChange: (style: DiffStyle) => void;
-}) {
-	return (
-		<div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30 sticky top-0 z-10">
-			<div className="flex items-center gap-2">
-				<Button
-					variant="ghost"
-					size="xs"
-					onClick={onToggleAllFolds}
-					title={allCollapsed ? "Expand all files" : "Collapse all files"}
-				>
-					{allCollapsed ? (
-						<ChevronsUpDownIcon className="size-3.5" />
-					) : (
-						<ChevronsDownUpIcon className="size-3.5" />
-					)}
-					<span>{allCollapsed ? "Expand all" : "Collapse all"}</span>
-				</Button>
-			</div>
-			<div className="flex items-center gap-1">
-				<span className="text-xs text-muted-foreground mr-1">View:</span>
-				<Button
-					variant={diffStyle === "unified" ? "secondary" : "ghost"}
-					size="icon-xs"
-					onClick={() => onDiffStyleChange("unified")}
-					title="Unified diff view"
-				>
-					<RowsIcon className="size-3" />
-				</Button>
-				<Button
-					variant={diffStyle === "split" ? "secondary" : "ghost"}
-					size="icon-xs"
-					onClick={() => onDiffStyleChange("split")}
-					title="Split diff view"
-				>
-					<ColumnsIcon className="size-3" />
-				</Button>
-			</div>
-		</div>
-	);
-}
-
 export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 	const { file: selectedFilePath } = useSearch({ strict: false });
 	const fileRefsMap = useRef<Map<string, React.RefObject<HTMLDivElement | null>>>(new Map());
-	const [globalDiffStyle, setGlobalDiffStyle] = useState<DiffStyle>("unified");
-	const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
-	const [lastChangeId, setLastChangeId] = useState<string | null>(null);
-
-	// Reset collapsed state when revision changes
-	if (changeId !== lastChangeId) {
-		setLastChangeId(changeId);
-		if (collapsedFiles.size > 0) {
-			setCollapsedFiles(new Set());
-		}
-	}
+	const [expandedFiles, setExpandedFiles] = useAtom(expandedDiffFilesAtom);
+	const [, setStyleOverrides] = useAtom(fileDiffStyleOverridesAtom);
+	const lastChangeIdRef = useRef<string | null>(null);
 
 	// Always fetch all diffs
 	const diffCollection =
@@ -278,6 +236,29 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 	const fileDiffs = splitMultiFileDiff(revisionDiff);
 	const filePaths = fileDiffs.map(extractFilePath);
 
+	// Reset state when revision changes
+	const firstFilePath = filePaths[0] ?? null;
+	useEffect(() => {
+		if (changeId !== lastChangeIdRef.current) {
+			lastChangeIdRef.current = changeId;
+			// Reset to first file expanded
+			if (firstFilePath) {
+				setExpandedFiles(new Set([firstFilePath]));
+			} else {
+				setExpandedFiles(new Set());
+			}
+			// Clear per-file style overrides
+			setStyleOverrides(new Map());
+		}
+	}, [changeId, firstFilePath, setExpandedFiles, setStyleOverrides]);
+
+	// Initialize expanded files on first load
+	useEffect(() => {
+		if (expandedFiles === null && firstFilePath) {
+			setExpandedFiles(new Set([firstFilePath]));
+		}
+	}, [expandedFiles, firstFilePath, setExpandedFiles]);
+
 	// Get or create ref for each file
 	const getFileRef = (filePath: string): React.RefObject<HTMLDivElement | null> => {
 		if (!fileRefsMap.current.has(filePath)) {
@@ -287,29 +268,15 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 		return fileRefsMap.current.get(filePath)!;
 	};
 
-	// Track collapse state for toggle all
-	const allCollapsed = filePaths.length > 0 && filePaths.every((p) => collapsedFiles.has(p));
+	// Toggle all folds
+	const allExpanded = filePaths.length > 0 && filePaths.every((p) => expandedFiles?.has(p));
 
 	function handleToggleAllFolds() {
-		if (allCollapsed) {
-			// Expand all
-			setCollapsedFiles(new Set());
+		if (allExpanded) {
+			setExpandedFiles(new Set());
 		} else {
-			// Collapse all
-			setCollapsedFiles(new Set(filePaths));
+			setExpandedFiles(new Set(filePaths));
 		}
-	}
-
-	function handleFileCollapseChange(filePath: string, collapsed: boolean) {
-		setCollapsedFiles((prev) => {
-			const next = new Set(prev);
-			if (collapsed) {
-				next.add(filePath);
-			} else {
-				next.delete(filePath);
-			}
-			return next;
-		});
 	}
 
 	// Scroll to selected file when it changes
@@ -352,36 +319,75 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 	return (
 		<div className="h-full overflow-auto bg-background">
 			{revision && (
-				<div className="pt-6 px-4 pb-0">
+				<div className="p-4 pb-0">
 					<RevisionHeader revision={revision} />
 				</div>
 			)}
-			<DiffToolbar
-				allCollapsed={allCollapsed}
-				onToggleAllFolds={handleToggleAllFolds}
-				diffStyle={globalDiffStyle}
-				onDiffStyleChange={setGlobalDiffStyle}
-			/>
 			<div className="p-4 space-y-4">
-				{fileDiffs.map((patch, idx) => {
+				<div className="flex items-center h-8 px-2 text-xs text-muted-foreground sticky top-0 z-10 bg-background -mt-2 pt-2">
+					<span className="font-medium">
+						{fileDiffs.length} {fileDiffs.length === 1 ? "file" : "files"}
+					</span>
+					<Separator orientation="vertical" className="h-4 mx-3" />
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						onClick={handleToggleAllFolds}
+						title={allExpanded ? "Collapse all files" : "Expand all files"}
+						className="h-6 w-6"
+					>
+						{allExpanded ? (
+							<ChevronsDownUpIcon className="size-3.5" />
+						) : (
+							<ChevronsUpDownIcon className="size-3.5" />
+						)}
+					</Button>
+					<div className="flex items-center gap-0.5 ml-auto">
+						<DiffStyleToggle />
+					</div>
+				</div>
+				{fileDiffs.map((patch) => {
 					const filePath = extractFilePath(patch);
 					const fileRef = getFileRef(filePath);
 					const isSelected = selectedFilePath === filePath;
-					const isCollapsed = collapsedFiles.has(filePath);
 
 					return (
 						<FileDiffSection
 							key={filePath}
 							patch={patch}
-							defaultCollapsed={isCollapsed || (idx > 0 && !isSelected)}
 							isSelected={isSelected}
 							fileRef={fileRef}
-							globalDiffStyle={globalDiffStyle}
-							onCollapseChange={(collapsed) => handleFileCollapseChange(filePath, collapsed)}
 						/>
 					);
 				})}
 			</div>
 		</div>
+	);
+}
+
+function DiffStyleToggle() {
+	const [globalDiffStyle, setGlobalDiffStyle] = useAtom(diffStyleAtom);
+
+	return (
+		<>
+			<Button
+				variant={globalDiffStyle === "unified" ? "secondary" : "ghost"}
+				size="icon-xs"
+				onClick={() => setGlobalDiffStyle("unified")}
+				title="Unified diff view"
+				className="h-6 w-6"
+			>
+				<RowsIcon className="size-3" />
+			</Button>
+			<Button
+				variant={globalDiffStyle === "split" ? "secondary" : "ghost"}
+				size="icon-xs"
+				onClick={() => setGlobalDiffStyle("split")}
+				title="Split diff view"
+				className="h-6 w-6"
+			>
+				<Columns2Icon className="size-3" />
+			</Button>
+		</>
 	);
 }

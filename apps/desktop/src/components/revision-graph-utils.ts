@@ -311,6 +311,43 @@ export function detectStacks(revisions: Revision[]): RevisionStack[] {
 	return stacks;
 }
 
+/**
+ * Reorders revisions for optimal graph rendering in a 2-lane layout.
+ *
+ * The graph uses lane 0 for trunk commits and lane 1 for all feature branches.
+ * This creates a challenge: edges from branch commits to their trunk merge-base
+ * are drawn as vertical lines in lane 1, then elbows to lane 0. If branches are
+ * ordered poorly, these vertical segments can pass through unrelated branch nodes,
+ * creating a false visual impression that the branches are connected.
+ *
+ * ## Algorithm
+ *
+ * 1. **Identify trunk vs branch commits** using the `is_trunk` flag from backend
+ *    (commits in `::trunk()`)
+ *
+ * 2. **Compute trunk merge-base for each branch** - the first trunk commit
+ *    encountered when walking down from the branch head
+ *
+ * 3. **Sort branches by merge-base position in trunk** - branches connecting to
+ *    similar areas of trunk are grouped together. This prevents edge crossings
+ *    where a branch with a deep merge-base would have its edge pass through
+ *    other branches.
+ *
+ * 4. **Output branches in sorted order**, each branch fully (head to merge-base)
+ *    before moving to the next
+ *
+ * 5. **Output trunk commits last** in topological order
+ *
+ * ## Sort Priority
+ * - Working copy's branch always first
+ * - Then by trunk merge-base position (earlier = first)
+ * - Then by recency (most recently touched first)
+ * - Then by change_id (stable tiebreaker)
+ *
+ * @param revisions - All revisions to display
+ * @param recency - Optional map of commit_id -> timestamp for recency sorting
+ * @returns Reordered revisions for graph rendering
+ */
 export function reorderForGraph(revisions: Revision[], recency?: CommitRecency): Revision[] {
 	if (revisions.length === 0) return [];
 
@@ -332,6 +369,11 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 		}
 		parentMap.set(rev.commit_id, parents);
 	}
+
+	// Identify trunk commits (is_trunk flag from backend)
+	const trunkCommitIds = new Set(
+		revisions.filter((r) => r.is_trunk).map((r) => r.commit_id),
+	);
 
 	// Find the head that contains the working copy in its ancestry
 	const workingCopy = revisions.find((r) => r.is_working_copy);
@@ -374,21 +416,124 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 		return maxRecency;
 	}
 
-	// Find heads
+	// Find all branch commits for a head (commits from head down to but not including trunk)
+	// Also returns the trunk merge-base (first trunk commit encountered)
+	function getBranchCommitsAndMergeBase(headCommitId: string): { commits: string[]; mergeBase: string | null } {
+		const branchCommits: string[] = [];
+		const visited = new Set<string>();
+		const stack = [headCommitId];
+		let mergeBase: string | null = null;
+
+		while (stack.length > 0) {
+			const id = stack.pop()!;
+			if (visited.has(id)) continue;
+			visited.add(id);
+
+			// Stop at trunk commits - record as merge base
+			if (trunkCommitIds.has(id)) {
+				if (!mergeBase) mergeBase = id;
+				continue;
+			}
+
+			branchCommits.push(id);
+
+			// Add parents to continue traversal
+			const parents = parentMap.get(id) ?? [];
+			for (const parentId of parents) {
+				if (!visited.has(parentId)) {
+					stack.push(parentId);
+				}
+			}
+		}
+
+		return { commits: branchCommits, mergeBase };
+	}
+	
+	// Wrapper for backward compatibility
+	function getBranchCommits(headCommitId: string): string[] {
+		return getBranchCommitsAndMergeBase(headCommitId).commits;
+	}
+
+	// Find heads (commits with no children in our revset)
 	const heads = revisions.filter((r) => {
 		const children = childrenMap.get(r.commit_id) ?? [];
 		return children.filter((c) => commitIds.has(c)).length === 0;
 	});
 
-	// Sort heads: WC's branch first, then by recency (most recent first), then stable tiebreaker
-	heads.sort((a, b) => {
+	// Separate branch heads from trunk heads
+	const branchHeads = heads.filter((h) => !trunkCommitIds.has(h.commit_id));
+
+	// First, compute trunk order (topological sort of trunk commits)
+	// We need this to sort branches by their merge-base position
+	const trunkOrder = new Map<string, number>();
+	{
+		const trunkCommits = revisions.filter((r) => trunkCommitIds.has(r.commit_id));
+		const trunkChildCount = new Map<string, number>();
+		
+		for (const rev of trunkCommits) {
+			const parents = parentMap.get(rev.commit_id) ?? [];
+			for (const parentId of parents) {
+				if (trunkCommitIds.has(parentId)) {
+					trunkChildCount.set(parentId, (trunkChildCount.get(parentId) ?? 0) + 1);
+				}
+			}
+		}
+		
+		// Topological sort
+		const ready = trunkCommits.filter((r) => (trunkChildCount.get(r.commit_id) ?? 0) === 0);
+		let orderIdx = 0;
+		const visited = new Set<string>();
+		
+		while (ready.length > 0) {
+			const rev = ready.shift()!;
+			if (visited.has(rev.commit_id)) continue;
+			visited.add(rev.commit_id);
+			
+			trunkOrder.set(rev.commit_id, orderIdx++);
+			
+			const parents = parentMap.get(rev.commit_id) ?? [];
+			for (const parentId of parents) {
+				if (trunkCommitIds.has(parentId) && !visited.has(parentId)) {
+					const newCount = (trunkChildCount.get(parentId) ?? 1) - 1;
+					trunkChildCount.set(parentId, newCount);
+					if (newCount === 0) {
+						const parentRev = commitMap.get(parentId);
+						if (parentRev) ready.push(parentRev);
+					}
+				}
+			}
+		}
+	}
+
+	// Compute merge-base for each branch head
+	const branchMergeBase = new Map<string, string | null>();
+	for (const head of branchHeads) {
+		const { mergeBase } = getBranchCommitsAndMergeBase(head.commit_id);
+		branchMergeBase.set(head.commit_id, mergeBase);
+	}
+
+	// Sort branch heads by: 
+	// 1. WC's branch first
+	// 2. Trunk merge-base position (branches connecting to same trunk area are grouped)
+	// 3. Recency as tiebreaker within same merge-base area
+	// 4. Stable tiebreaker: change_id
+	branchHeads.sort((a, b) => {
 		// WC's branch always first
 		const aIsWcBranch = a.commit_id === wcAncestorHeadId;
 		const bIsWcBranch = b.commit_id === wcAncestorHeadId;
 		if (aIsWcBranch && !bIsWcBranch) return -1;
 		if (!aIsWcBranch && bIsWcBranch) return 1;
 
-		// Sort by recency (higher timestamp = more recent = should come first)
+		// Sort by merge-base position in trunk (earlier merge-base = higher in graph = first)
+		const aMergeBase = branchMergeBase.get(a.commit_id);
+		const bMergeBase = branchMergeBase.get(b.commit_id);
+		const aMergeBaseOrder = aMergeBase ? (trunkOrder.get(aMergeBase) ?? Infinity) : Infinity;
+		const bMergeBaseOrder = bMergeBase ? (trunkOrder.get(bMergeBase) ?? Infinity) : Infinity;
+		if (aMergeBaseOrder !== bMergeBaseOrder) {
+			return aMergeBaseOrder - bMergeBaseOrder; // Ascending (earlier merge-base first)
+		}
+
+		// Within same merge-base area, sort by recency (most recent first)
 		if (recency) {
 			const aRecency = getBranchRecency(a.commit_id);
 			const bRecency = getBranchRecency(b.commit_id);
@@ -401,62 +546,106 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 		return a.change_id.localeCompare(b.change_id);
 	});
 
-	// Track which commits have been output
-	const output = new Set<string>();
-	// Track remaining children count for each commit
-	const remainingChildren = new Map<string, number>();
-	for (const rev of revisions) {
-		const children = childrenMap.get(rev.commit_id) ?? [];
-		const childCount = children.filter((c) => commitIds.has(c)).length;
-		remainingChildren.set(rev.commit_id, childCount);
-	}
-
 	const result: Revision[] = [];
+	const output = new Set<string>();
 
-	// Process each head's branch using DFS
-	// This ensures we exhaust a branch before moving to the next
-	function processBranch(startId: string) {
-		const stack = [startId];
+	// Phase 1: Output each branch fully (head to merge-base, excluding trunk)
+	// This groups all commits of a branch together
+	// Branches are sorted by merge-base position, so branches connecting to similar
+	// trunk areas are adjacent, preventing edge crossings
+	for (const head of branchHeads) {
+		if (output.has(head.commit_id)) continue;
 
-		while (stack.length > 0) {
-			const id = stack[stack.length - 1]; // Peek
+		// Get all commits in this branch
+		const branchCommits = getBranchCommits(head.commit_id);
 
-			if (output.has(id)) {
-				stack.pop();
-				continue;
-			}
+		// Sort branch commits topologically (children before parents)
+		// We need to respect the parent-child ordering within the branch
+		const branchSet = new Set(branchCommits);
+		const branchChildCount = new Map<string, number>();
 
-			const remaining = remainingChildren.get(id) ?? 0;
-			if (remaining > 0) {
-				// This commit still has unprocessed children
-				// They must be from other branches - we'll come back to this commit
-				stack.pop();
-				continue;
-			}
-
-			// All children processed, we can output this commit
-			output.add(id);
-			const rev = commitMap.get(id);
-			if (rev) result.push(rev);
-			stack.pop();
-
-			// Decrease remaining children count for parents and add to stack
+		for (const id of branchCommits) {
 			const parents = parentMap.get(id) ?? [];
 			for (const parentId of parents) {
-				if (!output.has(parentId)) {
-					const newRemaining = (remainingChildren.get(parentId) ?? 1) - 1;
-					remainingChildren.set(parentId, newRemaining);
-					// Add parent to stack to continue DFS
-					stack.push(parentId);
+				if (branchSet.has(parentId)) {
+					branchChildCount.set(parentId, (branchChildCount.get(parentId) ?? 0) + 1);
+				}
+			}
+		}
+
+		// Topological sort within the branch
+		const sorted: string[] = [];
+		const ready = branchCommits.filter((id) => (branchChildCount.get(id) ?? 0) === 0);
+
+		while (ready.length > 0) {
+			const id = ready.shift()!;
+			if (output.has(id)) continue;
+
+			sorted.push(id);
+			output.add(id);
+
+			const parents = parentMap.get(id) ?? [];
+			for (const parentId of parents) {
+				if (branchSet.has(parentId) && !output.has(parentId)) {
+					const newCount = (branchChildCount.get(parentId) ?? 1) - 1;
+					branchChildCount.set(parentId, newCount);
+					if (newCount === 0) {
+						ready.push(parentId);
+					}
+				}
+			}
+		}
+
+		// Add sorted branch commits to result
+		for (const id of sorted) {
+			const rev = commitMap.get(id);
+			if (rev) result.push(rev);
+		}
+	}
+
+	// Phase 2: Output trunk commits (shared ancestors)
+	// Sort trunk commits topologically as well
+	const trunkCommits = revisions.filter((r) => trunkCommitIds.has(r.commit_id) && !output.has(r.commit_id));
+
+	// Build child counts for trunk commits
+	const trunkChildCount = new Map<string, number>();
+	for (const rev of trunkCommits) {
+		const parents = parentMap.get(rev.commit_id) ?? [];
+		for (const parentId of parents) {
+			if (trunkCommitIds.has(parentId) && !output.has(parentId)) {
+				trunkChildCount.set(parentId, (trunkChildCount.get(parentId) ?? 0) + 1);
+			}
+		}
+	}
+
+	// Start with trunk heads or commits with no unprocessed children
+	const trunkReady = trunkCommits.filter((r) => (trunkChildCount.get(r.commit_id) ?? 0) === 0);
+
+	while (trunkReady.length > 0) {
+		const rev = trunkReady.shift()!;
+		if (output.has(rev.commit_id)) continue;
+
+		result.push(rev);
+		output.add(rev.commit_id);
+
+		const parents = parentMap.get(rev.commit_id) ?? [];
+		for (const parentId of parents) {
+			if (trunkCommitIds.has(parentId) && !output.has(parentId)) {
+				const newCount = (trunkChildCount.get(parentId) ?? 1) - 1;
+				trunkChildCount.set(parentId, newCount);
+				if (newCount === 0) {
+					const parentRev = commitMap.get(parentId);
+					if (parentRev) trunkReady.push(parentRev);
 				}
 			}
 		}
 	}
 
-	// Process heads in priority order
-	for (const head of heads) {
-		if (!output.has(head.commit_id)) {
-			processBranch(head.commit_id);
+	// Phase 3: Any remaining commits (shouldn't happen, but safety net)
+	for (const rev of revisions) {
+		if (!output.has(rev.commit_id)) {
+			result.push(rev);
+			output.add(rev.commit_id);
 		}
 	}
 

@@ -34,6 +34,7 @@ notify = "8.2.0"
 notify-debouncer-mini = "0.7.0"
 tauri-plugin-deep-link = "2"
 chrono = "0.4.42"
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-shell = "2.0"

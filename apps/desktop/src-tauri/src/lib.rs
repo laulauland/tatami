@@ -10,8 +10,9 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use storage::{AppLayout, Project, Storage, get_storage};
-use tauri::Manager;
-use tauri::menu::{MenuBuilder, SubmenuBuilder};
+use tauri::{AppHandle, Emitter, Manager};
+use tauri::menu::{MenuBuilder, MenuItem, SubmenuBuilder};
+use tauri_plugin_dialog::DialogExt;
 use watcher::{WatcherManager, get_watcher_manager};
 
 #[derive(Serialize)]
@@ -337,6 +338,110 @@ async fn resolve_revset(repo_path: String, revset: String) -> Result<RevsetResul
     repo::log::resolve_revset(path, &revset).map_err(|e| format!("Failed to resolve revset: {}", e))
 }
 
+/// Handle "Open Project" menu action: show folder picker, find jj repo, save project, emit event
+fn handle_open_project(app_handle: &AppHandle) {
+    let handle = app_handle.clone();
+    
+    app_handle.dialog().file().pick_folder(move |folder_path| {
+        let Some(folder) = folder_path else { return };
+        let path_str = folder.to_string();
+        
+        // Find jj repo root
+        let Some(repo_path) = repo::find_jj_repo(&PathBuf::from(&path_str)) else {
+            // TODO: Could show an error dialog here
+            return;
+        };
+        let repo_path_str = repo_path.to_string_lossy().to_string();
+        
+        // Save project and emit event for frontend navigation
+        let handle_clone = handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let storage = get_storage(&handle_clone);
+            
+            // Check if project already exists
+            let existing = storage.find_project_by_path(&repo_path_str).await.ok().flatten();
+            let project_id = existing.as_ref().map(|p| p.id.clone())
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            
+            let name = repo_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+            
+            let project = Project {
+                id: project_id.clone(),
+                path: repo_path_str,
+                name,
+                last_opened_at: chrono::Utc::now().timestamp_millis(),
+                revset_preset: None,
+            };
+            
+            if let Err(e) = storage.upsert_project(&project).await {
+                eprintln!("Failed to save project: {}", e);
+                return;
+            }
+            
+            // Emit event for frontend to navigate
+            let _ = handle_clone.emit("open-project", project_id);
+        });
+    });
+}
+
+fn build_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let open_project = MenuItem::with_id(app, "open-project", "Open Project...", true, Some("Ctrl+Cmd+O"))?;
+    
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(&open_project)
+        .separator()
+        .close_window()
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let view_menu = SubmenuBuilder::new(app, "View")
+        .fullscreen()
+        .build()?;
+
+    let window_menu = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .maximize()
+        .separator()
+        .close_window()
+        .build()?;
+
+    #[cfg(debug_assertions)]
+    let reload_item = MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?;
+    
+    #[cfg(debug_assertions)]
+    let debug_menu = SubmenuBuilder::new(app, "Debug")
+        .item(&reload_item)
+        .build()?;
+
+    let mut menu_builder = MenuBuilder::new(app)
+        .item(&file_menu)
+        .item(&edit_menu)
+        .item(&view_menu)
+        .item(&window_menu);
+
+    #[cfg(debug_assertions)]
+    {
+        menu_builder = menu_builder.item(&debug_menu);
+    }
+
+    let menu = menu_builder.build()?;
+    app.set_menu(menu)?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -359,32 +464,24 @@ pub fn run() {
 
             app.handle().manage(WatcherManager::new());
 
-            // Add Debug menu for development
-            #[cfg(debug_assertions)]
-            {
-                let debug_menu = SubmenuBuilder::new(app, "Debug")
-                    .text("reload", "Reload")
-                    .build()?;
+            // Build application menu
+            if let Err(e) = build_app_menu(app) {
+                eprintln!("Failed to build menu: {}", e);
+            }
 
-                let menu = MenuBuilder::new(app)
-                    .copy()
-                    .paste()
-                    .undo()
-                    .redo()
-                    .separator()
-                    .item(&debug_menu)
-                    .build()?;
-
-                app.set_menu(menu)?;
-
-                app.on_menu_event(|app_handle, event| {
-                    if event.id().0.as_str() == "reload" {
+            // Handle menu events
+            app.on_menu_event(|app_handle, event| {
+                match event.id().0.as_str() {
+                    "open-project" => handle_open_project(app_handle),
+                    #[cfg(debug_assertions)]
+                    "reload" => {
                         if let Some(window) = app_handle.get_webview_window("main") {
                             let _ = window.eval("window.location.reload()");
                         }
                     }
-                });
-            }
+                    _ => {}
+                }
+            });
 
             Ok(())
         })

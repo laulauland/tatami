@@ -25,7 +25,6 @@ const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 export function useTauriLiveStoreSync(): void {
 	useEffect(() => {
 		if (!isTauri) {
-			console.log("[TauriRelay] Not in Tauri, skipping");
 			return;
 		}
 
@@ -41,17 +40,13 @@ export function useTauriLiveStoreSync(): void {
 			if (!mounted || event.data.type !== "hydrate") return;
 
 			const { afterSequence, storeId } = event.data;
-			console.log("[TauriRelay] Hydrating from seq:", afterSequence);
 
 			try {
 				const channel = new Channel<PersistedEvent | { done: true }>();
 
 				channel.onmessage = (msg) => {
 					if (!mounted) return;
-					if ("done" in msg) {
-						console.log("[TauriRelay] Hydration complete");
-					} else {
-						console.log("[TauriRelay] Hydrating:", msg.name, "seq:", msg.sequence);
+					if (!("done" in msg)) {
 						syncChannel.postMessage(msg);
 					}
 				};
@@ -61,8 +56,8 @@ export function useTauriLiveStoreSync(): void {
 					channel,
 					afterSequence,
 				});
-			} catch (err) {
-				console.error("[TauriRelay] Hydration failed:", err);
+			} catch {
+				// Hydration failed - silently ignore
 			}
 		};
 
@@ -71,12 +66,10 @@ export function useTauriLiveStoreSync(): void {
 			try {
 				unlistenEvent = await listen<PersistedEvent>("livestore:event", (event) => {
 					if (!mounted) return;
-					console.log("[TauriRelay] Relaying:", event.payload.name, "seq:", event.payload.sequence);
 					syncChannel.postMessage(event.payload);
 				});
-				console.log("[TauriRelay] Listening to livestore:event");
-			} catch (err) {
-				console.error("[TauriRelay] Setup failed:", err);
+			} catch {
+				// Setup failed - silently ignore
 			}
 		}
 

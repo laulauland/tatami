@@ -132,7 +132,6 @@ export function createTauriAdapter(config: TauriAdapterConfig = {}) {
 				await invoke("persist_events", { storeId, events: serialized });
 				lastPersistedSequence = eventsToFlush[eventsToFlush.length - 1].sequence;
 			} catch (error) {
-				console.error("Failed to persist events:", error);
 				// Re-add failed events to front of queue
 				pendingEvents = [...eventsToFlush, ...pendingEvents];
 				throw error;

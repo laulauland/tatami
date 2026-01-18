@@ -1,12 +1,9 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { homeDir } from "@tauri-apps/api/path";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
-import { Effect } from "effect";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { expandedStacksAtom, stackViewChangeIdAtom, viewModeAtom } from "@/atoms";
+import { Route as ProjectRoute } from "@/routes/project.$projectId";
+import { expandedStacksAtom, viewModeAtom } from "@/atoms";
 
 const NARROW_BREAKPOINT = 768;
 
@@ -31,13 +28,11 @@ import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { RevisionGraph, type RevisionGraphHandle } from "@/components/RevisionGraph";
 import { detectStacks, reorderForGraph } from "@/components/revision-graph-utils";
-import { StackIndicator } from "@/components/StackIndicator";
 import { StatusBar } from "@/components/StatusBar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 
 import {
 	abandonRevision,
-	addRepository,
 	editRevision,
 	emptyChangesCollection,
 	emptyCommitRecencyCollection,
@@ -48,52 +43,69 @@ import {
 	newRevision,
 	repositoriesCollection,
 } from "@/db";
+import { useAddRepository } from "@/hooks/useAddRepository";
+import { useAppTitle } from "@/hooks/useAppTitle";
 import { useKeyboardNavigation, useKeyboardShortcut, useKeySequence } from "@/hooks/useKeyboard";
-import {
-	findRepository,
-	findRepositoryByPath,
-	type Repository,
-	type Revision,
-} from "@/tauri-commands";
+import type { Repository, Revision } from "@/tauri-commands";
 
-const openDirectoryDialogEffect = Effect.gen(function* () {
-	const home = yield* Effect.tryPromise({
-		try: () => homeDir(),
-		catch: (error) => new Error(`Failed to get home directory: ${error}`),
-	});
-
-	return yield* Effect.tryPromise({
-		try: () =>
-			open({
-				directory: true,
-				multiple: false,
-				defaultPath: home,
-				title: "Select Repository",
-			}),
-		catch: (error) => new Error(`Failed to open directory dialog: ${error}`),
-	});
-});
-
-const findRepositoryEffect = (startPath: string) =>
-	Effect.tryPromise({
-		try: () => findRepository(startPath),
-		catch: (error) => new Error(`Failed to find repository: ${error}`),
-	});
-
+// Wrapper component that handles the case when no project is selected
 export function AppShell() {
-	const navigate = useNavigate();
 	const { projectId } = useParams({ strict: false });
-	const rev = useSearch({ strict: false, select: (s) => s.rev });
-	const expanded = useSearch({ strict: false, select: (s) => s.expanded });
-	const file = useSearch({ strict: false, select: (s) => s.file });
+
+	if (!projectId) {
+		return <AppShellEmpty />;
+	}
+
+	return <AppShellWithProject />;
+}
+
+// Empty state when no project is selected (rendered from root "/" route)
+function AppShellEmpty() {
+	const navigate = useNavigate();
+	const { handleAddRepository } = useAddRepository();
+	const { data: repositories = [] } = useLiveQuery(repositoriesCollection);
+
+	function handleSelectRepository(repository: Repository) {
+		navigate({ to: "/project/$projectId", params: { projectId: repository.id } });
+	}
+
+	useAppTitle("Tatami");
+
+	return (
+		<>
+			<AceJump revisions={[]} repoPath={null} onJump={() => {}} />
+			<CommandPalette
+				onOpenRepo={handleAddRepository}
+				onOpenProjects={() => navigate({ to: "/repositories" })}
+				onOpenSettings={() => navigate({ to: "/settings" })}
+			/>
+			<KeyboardShortcutsHelp />
+			<ProjectPicker repositories={repositories} onSelectRepository={handleSelectRepository} />
+			<div className="flex flex-col h-screen overflow-hidden">
+				<div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">
+					<p>Select or add a repository to get started</p>
+				</div>
+				<StatusBar branch={null} isConnected={false} />
+			</div>
+		</>
+	);
+}
+
+// Full app shell when a project is selected (rendered from "/project/$projectId" route)
+function AppShellWithProject() {
+	const navigate = useNavigate({ from: ProjectRoute.fullPath });
+	const { projectId } = useParams({ from: ProjectRoute.fullPath });
+	const rev = useSearch({ from: ProjectRoute.fullPath, select: (s) => s.rev });
+	const expanded = useSearch({ from: ProjectRoute.fullPath, select: (s) => s.expanded });
+	const file = useSearch({ from: ProjectRoute.fullPath, select: (s) => s.file });
 	// Get full search object for navigation (only re-renders when expanded/file/rev change, which we need anyway)
-	const search = useSearch({ strict: false });
+	const search = useSearch({ from: ProjectRoute.fullPath });
 	const [flash, setFlash] = useState<{ changeId: string; key: number } | null>(null);
-	const [stackViewChangeId, setStackViewChangeId] = useAtom(stackViewChangeIdAtom);
 	const [viewMode, setViewMode] = useAtom(viewModeAtom);
 	const [pendingAbandon, setPendingAbandon] = useState<Revision | null>(null);
 	const revisionGraphRef = useRef<RevisionGraphHandle>(null);
 	const isNarrowScreen = useIsNarrowScreen();
+	const { handleAddRepository } = useAddRepository();
 
 	useKeyboardShortcut({
 		key: ",",
@@ -104,23 +116,11 @@ export function AppShell() {
 	const { data: repositories = [] } = useLiveQuery(repositoriesCollection);
 
 	const activeProject = repositories.find((p) => p.id === projectId) ?? null;
-	const titleLabel = activeProject ? `Tatami - ${activeProject.path}` : "Tatami";
 
-	// Build the stack revset: the full branch containing the selected commit
-	// (::X ~ ::trunk()) gives ancestors of X that are NOT ancestors of trunk (the branch below X)
-	// X:: gives descendants of X (the branch above X)
-	// roots(...)- gives the parent of the first branch commit (the merge base)
-	// (X & ::trunk()) handles the case where X is already an ancestor of trunk (just show X)
-	const stackRevset = stackViewChangeId
-		? `(::${stackViewChangeId} ~ ::trunk()) | (${stackViewChangeId}:: ~ ::trunk()) | roots(::${stackViewChangeId} ~ ::trunk())- | (${stackViewChangeId} & ::trunk())`
-		: undefined;
+	useAppTitle(activeProject ? `Tatami - ${activeProject.path}` : "Tatami");
 
 	const revisionsCollection = activeProject
-		? getRevisionsCollection(
-				activeProject.path,
-				activeProject.revset_preset ?? "full_history",
-				stackRevset,
-			)
+		? getRevisionsCollection(activeProject.path, activeProject.revset_preset ?? "full_history")
 		: emptyRevisionsCollection;
 
 	const { data: revisions = [], isLoading = false } = useLiveQuery(revisionsCollection);
@@ -155,46 +155,6 @@ export function AppShell() {
 		return orderedRevisions.filter((r) => !hiddenChangeIds.has(r.change_id));
 	}, [revisions, orderedRevisions, expandedStacks]);
 
-	// Debug: log when revisions change to track reordering
-	const workingCopy = revisions.find((r) => r.is_working_copy);
-	const prevOrderRef = useRef<string[]>([]);
-	useEffect(() => {
-		const currentOrder = orderedRevisions.map((r) => r.change_id);
-		const prevOrder = prevOrderRef.current;
-
-		// Find which revisions changed position
-		const changes: string[] = [];
-		for (let i = 0; i < Math.min(currentOrder.length, prevOrder.length); i++) {
-			if (currentOrder[i] !== prevOrder[i]) {
-				changes.push(
-					`[${i}] ${prevOrder[i]?.slice(0, 4) ?? "?"} → ${currentOrder[i]?.slice(0, 4) ?? "?"}`,
-				);
-				if (changes.length >= 10) break;
-			}
-		}
-
-		if (changes.length > 0 || prevOrder.length !== currentOrder.length) {
-			console.log("[reorder] changes detected:", {
-				prevLength: prevOrder.length,
-				newLength: currentOrder.length,
-				wcBefore: prevOrder.findIndex(
-					(id) => revisions.find((r) => r.change_id === id)?.is_working_copy,
-				),
-				wcAfter: currentOrder.findIndex((id) => id === workingCopy?.change_id),
-				firstChanges: changes,
-				first10: currentOrder.slice(0, 10).map((id) => id.slice(0, 4)),
-			});
-		}
-
-		prevOrderRef.current = currentOrder;
-	}, [orderedRevisions, workingCopy?.change_id, revisions]);
-
-	useEffect(() => {
-		document.title = titleLabel;
-		const windowHandle = getCurrentWindow();
-		windowHandle.setTitle(titleLabel).catch(() => undefined);
-	}, [titleLabel]);
-
 	const selectedRevision = (() => {
 		if (revisions.length === 0) return null;
 		if (rev) {
@@ -204,47 +164,7 @@ export function AppShell() {
 		return revisions.find((r) => r.is_working_copy) || revisions[0];
 	})();
 
-	function handleOpenRepo() {
-		const program = Effect.gen(function* () {
-			const selected = yield* openDirectoryDialogEffect;
-			if (!selected) return;
-
-			const repoPath = yield* findRepositoryEffect(selected);
-			if (!repoPath) return;
-
-			const existingRepository = yield* Effect.tryPromise({
-				try: () => findRepositoryByPath(repoPath),
-				catch: () => null,
-			});
-
-			const repositoryId = existingRepository?.id ?? crypto.randomUUID();
-			const name = repoPath.split("/").pop() ?? repoPath;
-
-			const repository: Repository = {
-				id: repositoryId,
-				path: repoPath,
-				name,
-				last_opened_at: Date.now(),
-				revset_preset: null,
-			};
-
-			yield* Effect.tryPromise({
-				try: () => addRepository(repositoriesCollection, repository),
-				catch: (error) => new Error(`Failed to save repository: ${error}`),
-			});
-
-			yield* Effect.sync(() => {
-				navigate({ to: "/project/$projectId", params: { projectId: repositoryId } });
-			});
-		}).pipe(
-			Effect.tapError((error) => Effect.logError("handleOpenRepo failed", error)),
-			Effect.catchAll(() => Effect.void),
-		);
-		Effect.runPromise(program);
-	}
-
 	function handleSelectRepository(repository: Repository) {
-		setStackViewChangeId(null); // Clear stack view when switching repositories
 		navigate({ to: "/project/$projectId", params: { projectId: repository.id } });
 	}
 
@@ -301,26 +221,19 @@ export function AppShell() {
 
 	function handleNew() {
 		if (!activeProject || !selectedRevision) return;
-		newRevision(activeProject.path, [selectedRevision.change_id]);
+		const currentWC = revisions.find((r) => r.is_working_copy);
+		newRevision(
+			revisionsCollection,
+			activeProject.path,
+			[selectedRevision.change_id],
+			selectedRevision,
+			currentWC ?? null,
+		);
 	}
 
 	function handleEdit() {
 		if (!activeProject || !selectedRevision) return;
 		const currentWC = revisions.find((r) => r.is_working_copy);
-
-		// Debug: log indices before edit
-		const currentWCIndex = orderedRevisions.findIndex((r) => r.change_id === currentWC?.change_id);
-		const targetIndex = orderedRevisions.findIndex(
-			(r) => r.change_id === selectedRevision.change_id,
-		);
-		console.log("[edit] before:", {
-			currentWC: currentWC?.change_id_short,
-			currentWCIndex,
-			target: selectedRevision.change_id_short,
-			targetIndex,
-			totalRevisions: orderedRevisions.length,
-		});
-
 		editRevision(revisionsCollection, activeProject.path, selectedRevision, currentWC ?? null);
 	}
 
@@ -346,16 +259,7 @@ export function AppShell() {
 
 	function confirmAbandon() {
 		if (!activeProject || !pendingAbandon) return;
-		const preset = activeProject.revset_preset ?? "full_history";
-		const limit = preset === "full_history" ? 10000 : 100;
-		abandonRevision(
-			revisionsCollection,
-			activeProject.path,
-			pendingAbandon,
-			limit,
-			stackRevset,
-			preset,
-		);
+		abandonRevision(revisionsCollection, activeProject.path, pendingAbandon);
 		setPendingAbandon(null);
 	}
 
@@ -386,24 +290,6 @@ export function AppShell() {
 		key: "Escape",
 		onPress: cancelAbandon,
 		enabled: !!pendingAbandon,
-	});
-
-	// Toggle stack view: show only ancestors from selected revision to trunk
-	function handleToggleStackView() {
-		if (!selectedRevision) return;
-		if (stackViewChangeId) {
-			// Turn off stack view
-			setStackViewChangeId(null);
-		} else {
-			// Turn on stack view anchored to selected revision
-			setStackViewChangeId(selectedRevision.change_id);
-		}
-	}
-
-	useKeyboardShortcut({
-		key: "s",
-		onPress: handleToggleStackView,
-		enabled: !!activeProject && !!selectedRevision,
 	});
 
 	// View mode shortcuts: 1 = overview, 2 = split
@@ -450,13 +336,11 @@ export function AppShell() {
 
 				if (nextIndex < filePaths.length) {
 					navigate({
-						// biome-ignore lint/suspicious/noExplicitAny: TanStack Router search params require loose typing
-						search: { ...search, file: filePaths[nextIndex], expanded: true } as any,
+						search: { ...search, file: filePaths[nextIndex], expanded: true },
 					});
 				} else if (currentIndex === -1 && filePaths.length > 0) {
 					navigate({
-						// biome-ignore lint/suspicious/noExplicitAny: TanStack Router search params require loose typing
-						search: { ...search, file: filePaths[0], expanded: true } as any,
+						search: { ...search, file: filePaths[0], expanded: true },
 					});
 				}
 			} else if (event.key === "k") {
@@ -467,13 +351,15 @@ export function AppShell() {
 				if (currentIndex > 0) {
 					const prevIndex = currentIndex - 1;
 					navigate({
-						// biome-ignore lint/suspicious/noExplicitAny: TanStack Router search params require loose typing
-						search: { ...search, file: filePaths[prevIndex], expanded: true } as any,
+						search: { ...search, file: filePaths[prevIndex], expanded: true },
 					});
 				} else if (currentIndex === -1 && filePaths.length > 0) {
 					navigate({
-						// biome-ignore lint/suspicious/noExplicitAny: TanStack Router search params require loose typing
-						search: { ...search, file: filePaths[filePaths.length - 1], expanded: true } as any,
+						search: {
+							...search,
+							file: filePaths[filePaths.length - 1],
+							expanded: true,
+						},
 					});
 				}
 			}
@@ -523,7 +409,7 @@ export function AppShell() {
 		<>
 			<ProjectPicker repositories={repositories} onSelectRepository={handleSelectRepository} />
 			<CommandPalette
-				onOpenRepo={handleOpenRepo}
+				onOpenRepo={handleAddRepository}
 				onOpenProjects={() => navigate({ to: "/repositories" })}
 				onOpenSettings={() => navigate({ to: "/settings" })}
 			/>
@@ -544,11 +430,6 @@ export function AppShell() {
 					{viewMode === 1 ? (
 						// Overview mode: only revision list
 						<section className="h-full relative" aria-label="Revision list">
-							<StackIndicator
-								onDismiss={() => {
-									handleNavigateToChangeId("");
-								}}
-							/>
 							<RevisionGraph
 								ref={revisionGraphRef}
 								revisions={revisions}
@@ -565,11 +446,6 @@ export function AppShell() {
 						<ResizablePanelGroup orientation={isNarrowScreen ? "vertical" : "horizontal"}>
 							<ResizablePanel defaultSize={isNarrowScreen ? 40 : 33} minSize={20}>
 								<section className="h-full relative" aria-label="Revision list">
-									<StackIndicator
-										onDismiss={() => {
-											handleNavigateToChangeId("");
-										}}
-									/>
 									<RevisionGraph
 										ref={revisionGraphRef}
 										revisions={revisions}

@@ -17,10 +17,25 @@ export const expandedStacksAtom = Atom.make(new Set<string>());
 // Tracks which stack is currently hovered (for coordinated edge highlighting)
 export const hoveredStackIdAtom = Atom.make<string | null>(null);
 
+// DEBUG STATE
+/** Debug overlay visibility (Ctrl+Shift+D) */
+export const debugOverlayEnabledAtom = Atom.make(false);
+
 // Diff panel state
 export type DiffStyle = "unified" | "split";
 export const diffStyleAtom = Atom.make<DiffStyle>("unified");
-// Tracks expanded files in diff panel (null = not initialized, will default to first file)
-export const expandedDiffFilesAtom = Atom.make<Set<string> | null>(null);
-// Per-file diff style overrides (file path -> style)
-export const fileDiffStyleOverridesAtom = Atom.make<Map<string, DiffStyle>>(new Map());
+
+// Unified diff view state that auto-resets when changeId changes
+export type DiffViewState = {
+	forChangeId: string | null;
+	expandedFiles: Set<string>;
+	styleOverrides: Map<string, DiffStyle>;
+};
+
+const initialDiffViewState: DiffViewState = {
+	forChangeId: null,
+	expandedFiles: new Set<string>(),
+	styleOverrides: new Map<string, DiffStyle>(),
+};
+
+export const diffViewStateAtom = Atom.make(initialDiffViewState);

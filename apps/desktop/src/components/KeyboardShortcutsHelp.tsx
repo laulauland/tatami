@@ -70,19 +70,22 @@ export function KeyboardShortcutsHelp() {
 
 	return (
 		<Dialog open={open} onOpenChange={setOpen}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-2xl">
 				<DialogHeader>
 					<DialogTitle>Keyboard Shortcuts</DialogTitle>
 				</DialogHeader>
-				<div className="space-y-4">
+				<div className="grid grid-cols-2 gap-x-8 gap-y-4">
 					{shortcuts.map((section) => (
 						<div key={section.category}>
 							<h3 className="text-xs font-medium text-muted-foreground mb-2">{section.category}</h3>
 							<div className="space-y-1.5">
 								{section.items.map((shortcut) => (
-									<div key={shortcut.description} className="flex items-center justify-between">
+									<div
+										key={shortcut.description}
+										className="flex items-center justify-between gap-4"
+									>
 										<span className="text-xs">{shortcut.description}</span>
-										<div className="flex items-center gap-1">
+										<div className="flex items-center gap-1 shrink-0">
 											{shortcut.keys.map((key, i) => (
 												<Kbd key={i}>{key}</Kbd>
 											))}

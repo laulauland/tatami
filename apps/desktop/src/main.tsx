@@ -66,6 +66,21 @@ async function setupDeepLinks(): Promise<void> {
 	onOpenUrl(handleDeepLinks);
 }
 
+async function setupMenuEvents(): Promise<void> {
+	if (!IS_TAURI) return;
+
+	const { listen } = await import("@tauri-apps/api/event");
+
+	// Handle "open-project" menu action from Rust
+	listen<string>("open-project", (event) => {
+		const projectId = event.payload;
+		router.navigate({
+			to: "/project/$projectId",
+			params: { projectId },
+		});
+	});
+}
+
 declare module "@tanstack/react-router" {
 	interface Register {
 		router: typeof router;
@@ -75,6 +90,7 @@ declare module "@tanstack/react-router" {
 async function bootstrap(): Promise<void> {
 	await setupMocks();
 	await setupDeepLinks();
+	await setupMenuEvents();
 
 	initializeTheme();
 

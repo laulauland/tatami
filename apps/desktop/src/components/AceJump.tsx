@@ -1,6 +1,6 @@
 import { useAtom } from "@effect-atom/atom-react";
 import type React from "react";
-import { useRef, useState, useEffect, useMemo, useCallback } from "react";
+import { useRef, useState, useEffect, useMemo, useCallback, useDeferredValue } from "react";
 import { aceJumpOpenAtom } from "@/atoms";
 import {
 	CommandDialog,
@@ -62,29 +62,40 @@ function isRevsetExpression(query: string): boolean {
 	return false;
 }
 
+// Initial revset result state
+const initialRevsetResult = {
+	changeIds: [] as string[],
+	error: null as string | null,
+	loading: false,
+	label: null as string | null,
+};
+
 export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
-	const [open, setOpen] = useAtom(aceJumpOpenAtom);
+	const [open, setOpenRaw] = useAtom(aceJumpOpenAtom);
 	const [search, setSearch] = useState("");
-	const [revsetResult, setRevsetResult] = useState<{
-		changeIds: string[];
-		error: string | null;
-		loading: boolean;
-		label: string | null;
-	}>({ changeIds: [], error: null, loading: false, label: null });
+	// Use React's useDeferredValue for filtering debounce - no useEffect needed
+	const debouncedSearch = useDeferredValue(search);
+
+	const [revsetResult, setRevsetResult] = useState(initialRevsetResult);
+
+	// Wrap setOpen to reset state when opening
+	const setOpen = useCallback(
+		(nextOpen: boolean) => {
+			if (nextOpen) {
+				// Reset state when opening - no useEffect needed
+				setSearch("");
+				setRevsetResult(initialRevsetResult);
+			}
+			setOpenRaw(nextOpen);
+		},
+		[setOpenRaw],
+	);
 
 	useKeyboardShortcut({
 		key: "/",
 		onPress: () => setOpen(true),
 		enabled: !open,
 	});
-
-	// Reset search when dialog opens
-	useEffect(() => {
-		if (open) {
-			setSearch("");
-			setRevsetResult({ changeIds: [], error: null, loading: false, label: null });
-		}
-	}, [open]);
 
 	// Stable ref for callback
 	const onJumpRef = useRef(onJump);
@@ -132,7 +143,7 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 		[repoPath],
 	);
 
-	// Debounce the revset resolution
+	// Debounce the revset resolution (async API call - acceptable use of useEffect)
 	useEffect(() => {
 		const timeout = setTimeout(() => {
 			resolveRevsetDebounced(search);
@@ -149,7 +160,7 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 
 	// Determine if we're in revset mode
 	const isRevsetMode =
-		isRevsetExpression(search) &&
+		isRevsetExpression(debouncedSearch) &&
 		(revsetResult.loading || revsetResult.changeIds.length > 0 || revsetResult.error);
 	const revsetChangeIdSet = useMemo(
 		() => new Set(revsetResult.changeIds),
@@ -163,8 +174,8 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 		if (isRevsetMode && revsetChangeIdSet.has(revision.change_id)) {
 			return "revset";
 		}
-		if (!search || isRevsetMode) return null;
-		const lowerSearch = search.toLowerCase();
+		if (!debouncedSearch || isRevsetMode) return null;
+		const lowerSearch = debouncedSearch.toLowerCase();
 
 		if (revision.change_id.toLowerCase().startsWith(lowerSearch)) return "changeId";
 		if (revision.bookmarks.some((b) => b.toLowerCase().includes(lowerSearch))) return "bookmark";
@@ -173,19 +184,20 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 	}
 
 	function getMatchingBookmark(revision: Revision): string | null {
-		if (!search || isRevsetMode) return null;
-		const lowerSearch = search.toLowerCase();
+		if (!debouncedSearch || isRevsetMode) return null;
+		const lowerSearch = debouncedSearch.toLowerCase();
 		return revision.bookmarks.find((b) => b.toLowerCase().includes(lowerSearch)) ?? null;
 	}
 
 	// Custom filter function that ranks by match type
+	// Note: cmdk passes the current search query, we must use it for correct sorting
 	function customFilter(value: string, searchQuery: string): number {
 		if (!searchQuery) return 1; // Show all when no search
 
 		const revision = revisionByChangeId.get(value);
 		if (!revision) return 0;
 
-		// Revset match - highest priority
+		// Revset match - highest priority (use debouncedSearch for revset mode check)
 		if (isRevsetMode) {
 			return revsetChangeIdSet.has(value) ? 1.0 : 0;
 		}
@@ -289,7 +301,7 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 								{revision.bookmarks.length > 0 && (
 									<span className="text-xs text-primary font-medium shrink-0">
 										{matchType === "bookmark" && matchingBookmark ? (
-											<HighlightMatch text={matchingBookmark} query={search} />
+											<HighlightMatch text={matchingBookmark} query={debouncedSearch} />
 										) : (
 											revision.bookmarks[0]
 										)}
@@ -302,7 +314,7 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 								)}
 								<span className="text-xs text-muted-foreground truncate flex-1">
 									{matchType === "description" ? (
-										<HighlightMatch text={firstLine} query={search} />
+										<HighlightMatch text={firstLine} query={debouncedSearch} />
 									) : (
 										firstLine
 									)}

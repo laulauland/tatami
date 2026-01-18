@@ -62,22 +62,16 @@ function FileListItem({
 	showSelection?: boolean;
 }) {
 	return (
-		<div
+		<button
+			type="button"
 			className={cn(
-				"flex items-center gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer group",
+				"flex items-center gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer group w-full",
 				isFocused ? "bg-muted text-foreground" : "hover:bg-muted/50",
 			)}
 			data-focused={isFocused || undefined}
 			data-checked={isChecked || undefined}
 			data-file-path={file.path}
 			onClick={onClick}
-			onKeyDown={(e) => {
-				if (e.key === "Enter" || e.key === " ") {
-					onClick();
-				}
-			}}
-			role="button"
-			tabIndex={0}
 		>
 			{showSelection && (
 				<button
@@ -107,7 +101,7 @@ function FileListItem({
 			>
 				{file.path}
 			</span>
-		</div>
+		</button>
 	);
 }
 

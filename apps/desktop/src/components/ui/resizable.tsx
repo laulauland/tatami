@@ -19,22 +19,35 @@ function ResizablePanel({ ...props }: React.ComponentProps<typeof Panel>) {
 
 function ResizableHandle({
 	withHandle,
+	orientation = "horizontal",
 	className,
 	...props
 }: React.ComponentProps<typeof Separator> & {
 	withHandle?: boolean;
+	orientation?: "horizontal" | "vertical";
 }) {
+	const isVertical = orientation === "vertical";
 	return (
 		<Separator
 			data-slot="resizable-handle"
 			className={cn(
-				"bg-transparent hover:bg-border/50 focus-visible:ring-ring relative flex w-px items-center justify-center shrink-0 transition-colors after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 after:bg-transparent focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:outline-hidden data-[panel-group-direction=vertical]:h-px data-[panel-group-direction=vertical]:w-full data-[panel-group-direction=vertical]:after:left-0 data-[panel-group-direction=vertical]:after:h-1 data-[panel-group-direction=vertical]:after:w-full data-[panel-group-direction=vertical]:after:translate-x-0 data-[panel-group-direction=vertical]:after:-translate-y-1/2",
+				"focus-visible:ring-ring relative flex items-center justify-center shrink-0 transition-colors focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:outline-hidden",
+				isVertical
+					? "h-2 w-full bg-border/50 hover:bg-border cursor-row-resize"
+					: "w-px h-full bg-transparent hover:bg-border/50 cursor-col-resize",
 				className,
 			)}
 			{...props}
 		>
 			{withHandle && (
-				<div className="bg-border/60 hover:bg-border h-6 w-1 rounded-none z-10 flex shrink-0 transition-colors data-[panel-group-direction=vertical]:h-1 data-[panel-group-direction=vertical]:w-6" />
+				<div
+					className={cn(
+						"z-10 flex shrink-0 transition-colors",
+						isVertical
+							? "h-1.5 w-12 bg-border hover:bg-muted-foreground/60 rounded-full"
+							: "h-6 w-1 bg-border/60 hover:bg-border rounded-none",
+					)}
+				/>
 			)}
 		</Separator>
 	);

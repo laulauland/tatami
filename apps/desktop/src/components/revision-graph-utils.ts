@@ -68,8 +68,8 @@ export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry
 		const queue = [...(parents.get(rev.commit_id) ?? [])];
 
 		while (queue.length > 0) {
-			const parentId = queue.shift()!;
-			if (ancestorSet.has(parentId)) continue;
+			const parentId = queue.shift();
+			if (!parentId || ancestorSet.has(parentId)) continue;
 			ancestorSet.add(parentId);
 			queue.push(...(parents.get(parentId) ?? []));
 		}
@@ -84,8 +84,8 @@ export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry
 		const queue = [...(children.get(rev.commit_id) ?? [])];
 
 		while (queue.length > 0) {
-			const childId = queue.shift()!;
-			if (descendantSet.has(childId)) continue;
+			const childId = queue.shift();
+			if (!childId || descendantSet.has(childId)) continue;
 			descendantSet.add(childId);
 			queue.push(...(children.get(childId) ?? []));
 		}
@@ -132,8 +132,8 @@ export function groupIntoConnectedComponents(
 		const queue = [rev.commit_id];
 
 		while (queue.length > 0) {
-			const commitId = queue.shift()!;
-			if (commitToComponent.has(commitId)) continue;
+			const commitId = queue.shift();
+			if (!commitId || commitToComponent.has(commitId)) continue;
 
 			commitToComponent.set(commitId, componentId);
 			componentMembers.push(commitId);
@@ -371,9 +371,7 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 	}
 
 	// Identify trunk commits (is_trunk flag from backend)
-	const trunkCommitIds = new Set(
-		revisions.filter((r) => r.is_trunk).map((r) => r.commit_id),
-	);
+	const trunkCommitIds = new Set(revisions.filter((r) => r.is_trunk).map((r) => r.commit_id));
 
 	// Find the head that contains the working copy in its ancestry
 	const workingCopy = revisions.find((r) => r.is_working_copy);
@@ -383,8 +381,8 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 		const visited = new Set<string>();
 		const queue = [workingCopy.commit_id];
 		while (queue.length > 0) {
-			const id = queue.shift()!;
-			if (visited.has(id)) continue;
+			const id = queue.shift();
+			if (!id || visited.has(id)) continue;
 			visited.add(id);
 			const children = childrenMap.get(id) ?? [];
 			const validChildren = children.filter((c) => commitIds.has(c));
@@ -405,8 +403,8 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 		const visited = new Set<string>();
 		const queue = [headCommitId];
 		while (queue.length > 0) {
-			const id = queue.shift()!;
-			if (visited.has(id)) continue;
+			const id = queue.shift();
+			if (!id || visited.has(id)) continue;
 			visited.add(id);
 			const ts = recency[id] ?? 0;
 			if (ts > maxRecency) maxRecency = ts;
@@ -418,15 +416,18 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 
 	// Find all branch commits for a head (commits from head down to but not including trunk)
 	// Also returns the trunk merge-base (first trunk commit encountered)
-	function getBranchCommitsAndMergeBase(headCommitId: string): { commits: string[]; mergeBase: string | null } {
+	function getBranchCommitsAndMergeBase(headCommitId: string): {
+		commits: string[];
+		mergeBase: string | null;
+	} {
 		const branchCommits: string[] = [];
 		const visited = new Set<string>();
 		const stack = [headCommitId];
 		let mergeBase: string | null = null;
 
 		while (stack.length > 0) {
-			const id = stack.pop()!;
-			if (visited.has(id)) continue;
+			const id = stack.pop();
+			if (!id || visited.has(id)) continue;
 			visited.add(id);
 
 			// Stop at trunk commits - record as merge base
@@ -448,7 +449,7 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 
 		return { commits: branchCommits, mergeBase };
 	}
-	
+
 	// Wrapper for backward compatibility
 	function getBranchCommits(headCommitId: string): string[] {
 		return getBranchCommitsAndMergeBase(headCommitId).commits;
@@ -469,7 +470,7 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 	{
 		const trunkCommits = revisions.filter((r) => trunkCommitIds.has(r.commit_id));
 		const trunkChildCount = new Map<string, number>();
-		
+
 		for (const rev of trunkCommits) {
 			const parents = parentMap.get(rev.commit_id) ?? [];
 			for (const parentId of parents) {
@@ -478,19 +479,19 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 				}
 			}
 		}
-		
+
 		// Topological sort
 		const ready = trunkCommits.filter((r) => (trunkChildCount.get(r.commit_id) ?? 0) === 0);
 		let orderIdx = 0;
 		const visited = new Set<string>();
-		
+
 		while (ready.length > 0) {
-			const rev = ready.shift()!;
-			if (visited.has(rev.commit_id)) continue;
+			const rev = ready.shift();
+			if (!rev || visited.has(rev.commit_id)) continue;
 			visited.add(rev.commit_id);
-			
+
 			trunkOrder.set(rev.commit_id, orderIdx++);
-			
+
 			const parents = parentMap.get(rev.commit_id) ?? [];
 			for (const parentId of parents) {
 				if (trunkCommitIds.has(parentId) && !visited.has(parentId)) {
@@ -512,7 +513,7 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 		branchMergeBase.set(head.commit_id, mergeBase);
 	}
 
-	// Sort branch heads by: 
+	// Sort branch heads by:
 	// 1. WC's branch first
 	// 2. Trunk merge-base position (branches connecting to same trunk area are grouped)
 	// 3. Recency as tiebreaker within same merge-base area
@@ -578,8 +579,8 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 		const ready = branchCommits.filter((id) => (branchChildCount.get(id) ?? 0) === 0);
 
 		while (ready.length > 0) {
-			const id = ready.shift()!;
-			if (output.has(id)) continue;
+			const id = ready.shift();
+			if (!id || output.has(id)) continue;
 
 			sorted.push(id);
 			output.add(id);
@@ -605,7 +606,9 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 
 	// Phase 2: Output trunk commits (shared ancestors)
 	// Sort trunk commits topologically as well
-	const trunkCommits = revisions.filter((r) => trunkCommitIds.has(r.commit_id) && !output.has(r.commit_id));
+	const trunkCommits = revisions.filter(
+		(r) => trunkCommitIds.has(r.commit_id) && !output.has(r.commit_id),
+	);
 
 	// Build child counts for trunk commits
 	const trunkChildCount = new Map<string, number>();
@@ -622,8 +625,8 @@ export function reorderForGraph(revisions: Revision[], recency?: CommitRecency):
 	const trunkReady = trunkCommits.filter((r) => (trunkChildCount.get(r.commit_id) ?? 0) === 0);
 
 	while (trunkReady.length > 0) {
-		const rev = trunkReady.shift()!;
-		if (output.has(rev.commit_id)) continue;
+		const rev = trunkReady.shift();
+		if (!rev || output.has(rev.commit_id)) continue;
 
 		result.push(rev);
 		output.add(rev.commit_id);

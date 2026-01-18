@@ -64,9 +64,8 @@ function FileListItem({
 	return (
 		<div
 			className={cn(
-				"flex items-center gap-2 w-full px-3 py-1.5 text-left transition-colors cursor-pointer group",
-				"hover:bg-muted/50",
-				isFocused && "bg-muted text-foreground",
+				"flex items-center gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer group",
+				isFocused ? "bg-muted text-foreground" : "hover:bg-muted/50",
 			)}
 			data-focused={isFocused || undefined}
 			data-checked={isChecked || undefined}
@@ -167,7 +166,7 @@ export function ChangedFilesList({
 	const selectedCount = selectedFiles?.size ?? 0;
 
 	return (
-		<div className="flex flex-col">
+		<div>
 			<div className="px-3 py-2 border-b border-border flex items-center justify-between">
 				<span className="text-xs font-semibold text-muted-foreground">
 					{filesCount} {fileWord} changed
@@ -176,7 +175,7 @@ export function ChangedFilesList({
 					<span className="text-xs text-primary font-medium">{selectedCount} selected</span>
 				)}
 			</div>
-			<div className="flex flex-col">
+			<div>
 				{files.map((file) => (
 					<FileListItem
 						key={file.path}

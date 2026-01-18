@@ -1,9 +1,11 @@
-import { createCollection, createTransaction } from "@tanstack/db";
+import { createCollection } from "@tanstack/db";
 import { QueryClient } from "@tanstack/query-core";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { listen } from "@tauri-apps/api/event";
+import { Effect } from "effect";
 import type { ChangedFile, Repository, Revision } from "@/tauri-commands";
 import {
+	generateChangeIds,
 	getCommitRecency,
 	getRepositories,
 	getRevisionChanges,
@@ -46,6 +48,63 @@ function trackMutation<T>(mutationId: string, promise: Promise<T>): Promise<T> {
 }
 
 // ============================================================================
+// Change ID Pool Collection (pre-allocated IDs for optimistic updates)
+// ============================================================================
+
+const POOL_SIZE = 10;
+const POOL_REFILL_THRESHOLD = 3;
+
+interface ChangeIdPool {
+	repoPath: string;
+	ids: string[];
+}
+
+function changeIdPoolQueryKey(repoPath: string) {
+	return ["change-id-pool", repoPath] as const;
+}
+
+async function fetchChangeIdPool(repoPath: string): Promise<ChangeIdPool> {
+	const ids = await generateChangeIds(repoPath, POOL_SIZE);
+	return { repoPath, ids };
+}
+
+/** Ensure the change ID pool is loaded. Call from router beforeLoad. */
+export async function ensureChangeIdPool(repoPath: string): Promise<void> {
+	await queryClient.ensureQueryData({
+		queryKey: changeIdPoolQueryKey(repoPath),
+		queryFn: () => fetchChangeIdPool(repoPath),
+	});
+}
+
+/** Consume a change ID from the pool, triggering refill if needed */
+function consumeChangeId(repoPath: string): string | null {
+	const poolEntry = queryClient.getQueryData<ChangeIdPool>(changeIdPoolQueryKey(repoPath));
+	if (!poolEntry || poolEntry.ids.length === 0) return null;
+
+	const [id, ...remaining] = poolEntry.ids;
+
+	// Update the cache directly
+	queryClient.setQueryData<ChangeIdPool>(changeIdPoolQueryKey(repoPath), {
+		repoPath,
+		ids: remaining,
+	});
+
+	// Trigger refill if running low
+	if (remaining.length < POOL_REFILL_THRESHOLD) {
+		generateChangeIds(repoPath, POOL_SIZE).then((newIds) => {
+			const current = queryClient.getQueryData<ChangeIdPool>(changeIdPoolQueryKey(repoPath));
+			const currentIds = current?.ids ?? [];
+			queryClient.setQueryData<ChangeIdPool>(changeIdPoolQueryKey(repoPath), {
+				repoPath,
+				ids: [...currentIds, ...newIds],
+			});
+		});
+	}
+
+	return id;
+}
+
+// ============================================================================
 // Shared Repository Watcher (one per repo, invalidates all queries)
 // ============================================================================
 
@@ -83,16 +142,26 @@ async function setupRepoWatcher(repoPath: string): Promise<void> {
 // Repositories Collection
 // ============================================================================
 
+const repositoriesQueryKey = ["repositories"] as const;
+
 export const repositoriesCollection = createCollection({
 	...queryCollectionOptions({
 		queryClient,
-		queryKey: ["repositories"],
+		queryKey: repositoriesQueryKey,
 		queryFn: getRepositories,
 		getKey: (repository: Repository) => repository.id,
 	}),
 });
 
 export type RepositoriesCollection = typeof repositoriesCollection;
+
+/** Ensure repositories are loaded. Returns the list. */
+export async function ensureRepositories(): Promise<Repository[]> {
+	return queryClient.ensureQueryData({
+		queryKey: repositoriesQueryKey,
+		queryFn: getRepositories,
+	});
+}
 
 export async function addRepository(collection: RepositoriesCollection, repository: Repository) {
 	// Optimistic update first
@@ -174,7 +243,7 @@ export const emptyRevisionsCollection = createCollection({
 
 const revisionCollections = new Map<string, ReturnType<typeof createRevisionsCollection>>();
 
-function createRevisionsCollection(repoPath: string, preset?: string, customRevset?: string) {
+function createRevisionsCollection(repoPath: string, preset?: string) {
 	const limit = preset === "full_history" ? 10000 : 100;
 
 	// Set up the shared watcher (idempotent - increments refCount if already exists)
@@ -183,8 +252,8 @@ function createRevisionsCollection(repoPath: string, preset?: string, customRevs
 	return createCollection({
 		...queryCollectionOptions({
 			queryClient,
-			queryKey: ["revisions", repoPath, preset, customRevset],
-			queryFn: () => getRevisions(repoPath, limit, customRevset, customRevset ? undefined : preset),
+			queryKey: ["revisions", repoPath, preset],
+			queryFn: () => getRevisions(repoPath, limit, undefined, preset),
 			getKey: getRevisionKey,
 		}),
 	});
@@ -192,11 +261,11 @@ function createRevisionsCollection(repoPath: string, preset?: string, customRevs
 
 export type RevisionsCollection = ReturnType<typeof createRevisionsCollection>;
 
-export function getRevisionsCollection(repoPath: string, preset?: string, customRevset?: string) {
-	const cacheKey = `${repoPath}:${preset ?? "full_history"}:${customRevset ?? ""}`;
+export function getRevisionsCollection(repoPath: string, preset?: string) {
+	const cacheKey = `${repoPath}:${preset ?? "full_history"}`;
 	let collection = revisionCollections.get(cacheKey);
 	if (!collection) {
-		collection = createRevisionsCollection(repoPath, preset, customRevset);
+		collection = createRevisionsCollection(repoPath, preset);
 		revisionCollections.set(cacheKey, collection);
 	}
 	return collection;
@@ -241,33 +310,73 @@ export function editRevision(
 		});
 }
 
-export function newRevision(repoPath: string, parentChangeIds: string[]) {
+export function newRevision(
+	collection: RevisionsCollection,
+	repoPath: string,
+	parentChangeIds: string[],
+	parentRevision: Revision,
+	currentWcRevision: Revision | null,
+) {
 	const mutationId = `new-${Date.now()}-${Math.random()}`;
-	console.log("[newRevision] start, mutationId:", mutationId);
+	const preAllocatedChangeId = consumeChangeId(repoPath);
 
-	const tx = createTransaction({
-		mutationFn: async () => {
-			await trackMutation(mutationId, jjNew(repoPath, parentChangeIds));
-			// Invalidate to get fresh data including the new revision
-			await queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
-		},
-	});
+	// Create optimistic revision if we have a pre-allocated change ID
+	let optimisticRevision: Revision | null = null;
+	if (preAllocatedChangeId) {
+		optimisticRevision = {
+			commit_id: `pending-${preAllocatedChangeId}`, // Temporary, will be replaced
+			change_id: preAllocatedChangeId,
+			change_id_short: preAllocatedChangeId.slice(0, 8), // Approximate short ID
+			parent_ids: [parentRevision.commit_id],
+			parent_edges: [{ parent_id: parentRevision.commit_id, edge_type: "direct" as const }],
+			description: "",
+			author: parentRevision.author, // Inherit from parent
+			timestamp: new Date().toISOString(),
+			is_working_copy: true,
+			is_immutable: false,
+			is_mine: true,
+			is_trunk: false,
+			is_divergent: false,
+			divergent_index: null,
+			bookmarks: [],
+		};
 
-	tx.mutate(() => {
-		// No optimistic update - we don't know the new revision's ID
-		// TanStack Query invalidation will add it to the collection
-	});
+		// Optimistic update: clear WC from current, insert new revision
+		const updates: Revision[] = [];
+		if (currentWcRevision) {
+			updates.push({ ...currentWcRevision, is_working_copy: false });
+		}
+		updates.push(optimisticRevision);
+		collection.utils.writeUpsert(updates);
+	}
 
-	return tx;
+	// Fire backend call
+	const program = Effect.tryPromise({
+		try: () => jjNew(repoPath, parentChangeIds, preAllocatedChangeId ?? undefined),
+		catch: (error) => new Error(`Failed to create new revision: ${error}`),
+	}).pipe(Effect.tapError((error) => Effect.logError("jjNew failed", error)));
+
+	trackMutation(mutationId, Effect.runPromise(program))
+		.then(() => {
+			// Invalidate to get authoritative data (correct commit_id, short_id, etc.)
+			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+		})
+		.catch((err) => {
+			console.error("[newRevision] failed:", err);
+			// Revert optimistic update
+			if (optimisticRevision) {
+				collection.utils.writeDelete(getRevisionKey(optimisticRevision));
+				if (currentWcRevision) {
+					collection.utils.writeUpsert([{ ...currentWcRevision, is_working_copy: true }]);
+				}
+			}
+		});
 }
 
 export function abandonRevision(
 	collection: RevisionsCollection,
 	repoPath: string,
 	revision: Revision,
-	_limit: number,
-	_customRevset?: string,
-	_preset?: string,
 ) {
 	const mutationId = `abandon-${Date.now()}-${Math.random()}`;
 	console.log("[abandonRevision] abandoning:", revision.change_id_short, "mutationId:", mutationId);

@@ -274,12 +274,26 @@ fn unwatch_repository(app: tauri::AppHandle, repo_path: String) -> Result<(), St
     watcher_manager.unwatch(&PathBuf::from(repo_path))
 }
 
+/// Generate change IDs for optimistic UI updates
 #[tauri::command]
-async fn jj_new(repo_path: String, parent_change_ids: Vec<String>) -> Result<(), String> {
+async fn generate_change_ids(repo_path: String, count: usize) -> Result<Vec<String>, String> {
+    let path = Path::new(&repo_path);
+    let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .generate_change_ids(count)
+        .map_err(|e| format!("Failed to generate change IDs: {}", e))
+}
+
+#[tauri::command]
+async fn jj_new(
+    repo_path: String,
+    parent_change_ids: Vec<String>,
+    change_id: Option<String>,
+) -> Result<String, String> {
     let path = Path::new(&repo_path);
     let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
     jj_repo
-        .new_revision(parent_change_ids)
+        .new_revision(parent_change_ids, change_id)
         .map_err(|e| format!("Failed to create new revision: {}", e))
 }
 
@@ -391,6 +405,7 @@ pub fn run() {
             update_layout,
             watch_repository,
             unwatch_repository,
+            generate_change_ids,
             jj_new,
             jj_edit,
             jj_abandon,

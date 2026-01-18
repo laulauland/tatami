@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use jj_lib::backend::CommitId;
+use jj_lib::backend::{ChangeId, CommitId};
 use jj_lib::commit::Commit;
 use jj_lib::config::ConfigSource;
 use jj_lib::merged_tree::MergedTree;
@@ -182,7 +182,24 @@ impl JjRepo {
         self.workspace.workspace_root()
     }
 
-    pub fn new_revision(&mut self, parent_change_ids: Vec<String>) -> Result<()> {
+    /// Generate change IDs using jj-lib's RNG. Returns reverse-hex encoded IDs.
+    pub fn generate_change_ids(&self, count: usize) -> Result<Vec<String>> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let rng = self.user_settings.get_rng();
+        let length = repo.store().change_id_length();
+
+        let ids: Vec<String> = (0..count)
+            .map(|_| rng.new_change_id(length).reverse_hex())
+            .collect();
+
+        Ok(ids)
+    }
+
+    pub fn new_revision(
+        &mut self,
+        parent_change_ids: Vec<String>,
+        change_id: Option<String>,
+    ) -> Result<String> {
         let repo = self.workspace.repo_loader().load_at_head()?;
         let mut tx = repo.start_transaction();
 
@@ -204,11 +221,21 @@ impl JjRepo {
 
         // Create new commit with parent commits and their tree (no changes)
         let parent_commit_ids: Vec<_> = parent_commits.iter().map(|c| c.id().clone()).collect();
-        let new_commit = tx
-            .repo_mut()
-            .new_commit(parent_commit_ids, tree_id)
+        let mut commit_builder = tx.repo_mut().new_commit(parent_commit_ids, tree_id);
+
+        // Set pre-generated change ID if provided
+        if let Some(ref cid) = change_id {
+            let parsed = ChangeId::try_from_reverse_hex(cid)
+                .context("Invalid change ID format")?;
+            commit_builder = commit_builder.set_change_id(parsed);
+        }
+
+        let new_commit = commit_builder
             .write()
             .map_err(|e| anyhow::anyhow!("Failed to write commit: {}", e))?;
+
+        // Get the actual change ID (either provided or generated)
+        let actual_change_id = new_commit.change_id().reverse_hex();
 
         // Set as working copy
         let workspace_name = self.workspace.workspace_name().to_owned();
@@ -233,7 +260,7 @@ impl JjRepo {
             .check_out(operation_id, Some(&old_tree_id), &new_commit)
             .context("Failed to check out new commit")?;
 
-        Ok(())
+        Ok(actual_change_id)
     }
 
     pub fn abandon_revision(&mut self, change_id: &str) -> Result<()> {

@@ -69,8 +69,16 @@ export async function unwatchRepository(repoPath: string): Promise<void> {
 	return invoke("unwatch_repository", { repoPath });
 }
 
-export async function jjNew(repoPath: string, parentChangeIds: string[]): Promise<void> {
-	return invoke("jj_new", { repoPath, parentChangeIds });
+export async function generateChangeIds(repoPath: string, count: number): Promise<string[]> {
+	return invoke<string[]>("generate_change_ids", { repoPath, count });
+}
+
+export async function jjNew(
+	repoPath: string,
+	parentChangeIds: string[],
+	changeId?: string,
+): Promise<string> {
+	return invoke<string>("jj_new", { repoPath, parentChangeIds, changeId: changeId ?? null });
 }
 
 export async function jjEdit(repoPath: string, changeId: string): Promise<void> {

@@ -918,8 +918,14 @@ const handlers: Record<string, MockHandler> = {
 	get_revision_changes: (): ChangedFile[] => mockChangedFiles,
 	watch_repository: () => undefined,
 	unwatch_repository: () => undefined,
+	generate_change_ids: (args) => {
+		const count = (args.count as number) ?? 10;
+		return Array.from({ length: count }, () => generateChangeId());
+	},
 	jj_new: (args) => {
 		const parentChangeIds = args.parentChangeIds as string[];
+		const providedChangeId = args.changeId as string | null;
+
 		// Find parent revisions by change_id (handling short IDs)
 		const parentRevisions = parentChangeIds
 			.map((id) =>
@@ -936,8 +942,8 @@ const handlers: Record<string, MockHandler> = {
 			mockRevisions[currentWcIndex] = { ...mockRevisions[currentWcIndex], is_working_copy: false };
 		}
 
-		// Create new revision
-		const newChangeId = generateChangeId();
+		// Use provided change ID or generate new one
+		const newChangeId = providedChangeId ?? generateChangeId();
 		const newCommitId = `new${Date.now().toString(16).slice(-10)}`;
 		const newRevision: Omit<Revision, "change_id_short"> = {
 			commit_id: newCommitId,
@@ -963,7 +969,8 @@ const handlers: Record<string, MockHandler> = {
 		];
 		mockRevisions = calculateShortIds(allRevisionsRaw);
 
-		return undefined;
+		// Return the change ID (matching real backend behavior)
+		return newChangeId;
 	},
 	jj_edit: (args) => {
 		const changeId = args.changeId as string;

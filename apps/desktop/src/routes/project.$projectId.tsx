@@ -1,7 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { createRoute, Navigate, useParams } from "@tanstack/react-router";
 import { AppShell } from "@/components/AppShell";
-import { repositoriesCollection } from "@/db";
+import { ensureChangeIdPool, ensureRepositories, repositoriesCollection } from "@/db";
 import type { Repository } from "@/tauri-commands";
 import { Route as rootRoute } from "./__root";
 
@@ -27,6 +27,15 @@ export const Route = createRoute({
 			selectionAnchor:
 				typeof search.selectionAnchor === "string" ? search.selectionAnchor : undefined,
 		};
+	},
+	beforeLoad: async ({ params }) => {
+		// Find repository path from projectId to pre-warm change ID pool
+		const repositories = await ensureRepositories();
+		const repo = repositories.find((r) => r.id === params.projectId);
+		if (repo) {
+			// Ensure change ID pool is loaded before rendering
+			await ensureChangeIdPool(repo.path);
+		}
 	},
 	component: ProjectComponent,
 });

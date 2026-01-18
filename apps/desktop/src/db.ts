@@ -122,11 +122,9 @@ async function setupRepoWatcher(repoPath: string): Promise<void> {
 		if (event.payload === repoPath) {
 			// Skip if there are in-flight mutations - let the mutation handle state
 			if (inFlightMutations.size > 0) {
-				console.log("[watcher] skipping - in-flight mutations:", [...inFlightMutations]);
 				return;
 			}
 
-			console.log("[watcher] invalidating queries for:", repoPath);
 			// Invalidate ALL queries for this repo - TanStack Query will refetch
 			await queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
 			await queryClient.invalidateQueries({ queryKey: ["revision-changes", repoPath] });
@@ -169,11 +167,9 @@ export async function addRepository(collection: RepositoriesCollection, reposito
 
 	try {
 		await upsertRepository(repository);
-		console.log("[addRepository] upsertRepository completed");
 	} catch (err) {
 		// Revert on failure
 		collection.utils.writeDelete(repository.id);
-		console.error("[addRepository] failed, reverting:", err);
 		throw err;
 	}
 }
@@ -187,7 +183,6 @@ export async function updateRepository(collection: RepositoriesCollection, repos
 
 	try {
 		await upsertRepository(repository);
-		console.log("[updateRepository] upsertRepository completed");
 	} catch (err) {
 		// Revert on failure
 		if (current) {
@@ -195,7 +190,6 @@ export async function updateRepository(collection: RepositoriesCollection, repos
 		} else {
 			collection.utils.writeDelete(repository.id);
 		}
-		console.error("[updateRepository] failed, reverting:", err);
 		throw err;
 	}
 }
@@ -209,13 +203,11 @@ export async function deleteRepository(collection: RepositoriesCollection, repos
 
 	try {
 		await removeRepository(repositoryId);
-		console.log("[deleteRepository] removeRepository completed");
 	} catch (err) {
 		// Revert on failure
 		if (current) {
 			collection.utils.writeUpsert([current]);
 		}
-		console.error("[deleteRepository] failed, reverting:", err);
 		throw err;
 	}
 }
@@ -278,7 +270,6 @@ export function editRevision(
 	currentWcRevision: Revision | null,
 ) {
 	const mutationId = `edit-${Date.now()}-${Math.random()}`;
-	console.log("[editRevision] start, mutationId:", mutationId);
 
 	// Optimistic update
 	const updates: Revision[] = [];
@@ -291,12 +282,10 @@ export function editRevision(
 	// Track the mutation and fire backend
 	trackMutation(mutationId, jjEdit(repoPath, targetRevision.change_id_short))
 		.then(() => {
-			console.log("[editRevision] completed");
 			// Invalidate to get fresh data from backend
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
 		})
-		.catch((err) => {
-			console.error("[editRevision] failed:", err);
+		.catch(() => {
 			// Revert optimistic update
 			const revertUpdates: Revision[] = [];
 			if (
@@ -361,8 +350,7 @@ export function newRevision(
 			// Invalidate to get authoritative data (correct commit_id, short_id, etc.)
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
 		})
-		.catch((err) => {
-			console.error("[newRevision] failed:", err);
+		.catch(() => {
 			// Revert optimistic update
 			if (optimisticRevision) {
 				collection.utils.writeDelete(getRevisionKey(optimisticRevision));
@@ -379,7 +367,6 @@ export function abandonRevision(
 	revision: Revision,
 ) {
 	const mutationId = `abandon-${Date.now()}-${Math.random()}`;
-	console.log("[abandonRevision] abandoning:", revision.change_id_short, "mutationId:", mutationId);
 
 	// For working copy, jj creates a new WC - can't do optimistic delete
 	// For other revisions, we can optimistically remove
@@ -390,12 +377,10 @@ export function abandonRevision(
 	// Track the mutation and fire backend
 	trackMutation(mutationId, jjAbandon(repoPath, revision.change_id_short))
 		.then(() => {
-			console.log("[abandonRevision] completed");
 			// Invalidate to get fresh data (especially for WC abandon which creates new WC)
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
 		})
-		.catch((err) => {
-			console.error("[abandonRevision] failed:", err);
+		.catch(() => {
 			// Re-add on failure (only if we deleted it)
 			if (!revision.is_working_copy) {
 				collection.utils.writeUpsert([revision]);

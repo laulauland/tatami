@@ -882,7 +882,6 @@ const handlers: Record<string, MockHandler> = {
 	},
 	find_repository: () => "/Users/demo/projects/tatami",
 	get_revisions: () => {
-		console.log("[Mock] get_revisions called, returning", mockRevisions.length, "revisions");
 		return mockRevisions;
 	},
 	get_status: (): WorkingCopyStatus => {
@@ -974,28 +973,19 @@ const handlers: Record<string, MockHandler> = {
 	},
 	jj_edit: (args) => {
 		const changeId = args.changeId as string;
-		console.log("[Mock] jj_edit called with changeId:", changeId);
 		// Find target revision by change_id (handling short IDs)
 		const targetIndex = mockRevisions.findIndex(
 			(r) => r.change_id.startsWith(changeId) || r.change_id_short === changeId,
 		);
 		if (targetIndex < 0) {
-			console.warn(`[Mock] jj_edit: revision not found: ${changeId}`);
 			return undefined;
 		}
-
-		console.log("[Mock] jj_edit: found revision at index", targetIndex);
 
 		// Clear working copy from all revisions, set on target
 		mockRevisions = mockRevisions.map((r, i) => ({
 			...r,
 			is_working_copy: i === targetIndex,
 		}));
-
-		console.log(
-			"[Mock] jj_edit: updated mockRevisions, new WC:",
-			mockRevisions.find((r) => r.is_working_copy)?.change_id_short,
-		);
 
 		return undefined;
 	},
@@ -1006,7 +996,6 @@ const handlers: Record<string, MockHandler> = {
 			(r) => r.change_id.startsWith(changeId) || r.change_id_short === changeId,
 		);
 		if (revisionIndex < 0) {
-			console.warn(`[Mock] jj_abandon: revision not found: ${changeId}`);
 			return undefined;
 		}
 
@@ -1088,31 +1077,17 @@ const handlers: Record<string, MockHandler> = {
 
 export async function setupMocks(): Promise<void> {
 	if (IS_TAURI) {
-		console.log("[Mocks] Running in Tauri, skipping mock setup");
 		return;
 	}
-
-	console.log("[Mocks] Not in Tauri, setting up IPC mocks...");
 
 	// Dynamically import to avoid loading in Tauri
 	const { mockIPC } = await import("@tauri-apps/api/mocks");
 
 	mockIPC((cmd, args) => {
-		console.log(`[Mock] IPC call: ${cmd}`, args);
 		const handler = handlers[cmd];
 		if (!handler) {
-			console.warn(`[Mock] No handler for command: ${cmd}`, args);
 			return undefined;
 		}
-		try {
-			const result = handler((args ?? {}) as Record<string, unknown>);
-			console.log(`[Mock] IPC result for ${cmd}:`, result);
-			return result;
-		} catch (error) {
-			console.error(`[Mock] IPC error for ${cmd}:`, error);
-			throw error;
-		}
+		return handler((args ?? {}) as Record<string, unknown>);
 	});
-
-	console.log("[Mocks] IPC mocks ready");
 }

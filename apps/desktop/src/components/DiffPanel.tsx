@@ -1,33 +1,14 @@
 import { useAtom } from "@effect-atom/atom-react";
-import { PatchDiff } from "@pierre/diffs/react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { useNavigate, useSearch } from "@tanstack/react-router";
-import {
-	ChevronDownIcon,
-	ChevronRightIcon,
-	ChevronsDownUpIcon,
-	ChevronsUpDownIcon,
-	Columns2Icon,
-	RowsIcon,
-} from "lucide-react";
+import { useSearch } from "@tanstack/react-router";
+import { Route } from "@/routes/project.$projectId";
 import { useEffect, useRef } from "react";
-import {
-	type DiffStyle,
-	diffStyleAtom,
-	expandedDiffFilesAtom,
-	fileDiffStyleOverridesAtom,
-	focusPanelAtom,
-} from "@/atoms";
-import { ChangedFilesList } from "@/components/ChangedFilesList";
-import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
-import {
-	emptyChangesCollection,
-	emptyDiffCollection,
-	getRevisionChangesCollection,
-	getRevisionDiffCollection,
-} from "@/db";
-import { useKeyboardShortcut } from "@/hooks/useKeyboard";
+import { type DiffViewState, diffViewStateAtom } from "@/atoms";
+// Note: useEffect is kept for scroll-to-file behavior, which is acceptable
+// (DOM side effect, not state synchronization)
+import { DiffToolbar, FileDiffSection, RevisionHeader } from "@/components/diff";
+import { emptyDiffCollection, getRevisionDiffCollection } from "@/db";
+import { useDiffPanelKeyboard } from "@/hooks/useDiffPanelKeyboard";
 import type { Revision } from "@/tauri-commands";
 
 interface DiffPanelProps {
@@ -36,154 +17,23 @@ interface DiffPanelProps {
 	revision: Revision | null;
 }
 
-function RevisionHeader({ revision }: { revision: Revision }) {
-	const commitIdShort = revision.commit_id.substring(0, 12);
-
-	return (
-		<div className="border border-border rounded-lg bg-card">
-			<div className="px-3 py-2 font-mono text-xs space-y-1.5">
-				<div className="flex gap-4">
-					<div>
-						<span className="text-muted-foreground">Change ID:</span>{" "}
-						<span className="text-foreground font-semibold">{revision.change_id_short}</span>
-					</div>
-					<div>
-						<span className="text-muted-foreground">Commit ID:</span>{" "}
-						<span className="text-foreground">{commitIdShort}</span>
-					</div>
-				</div>
-				<div>
-					<span className="text-muted-foreground">Author:</span>{" "}
-					<span className="text-foreground">{revision.author}</span>
-					<span className="text-muted-foreground ml-4">at</span>{" "}
-					<span className="text-foreground">{revision.timestamp}</span>
-				</div>
-				{revision.description && (
-					<div className="mt-2 pt-2 border-t border-border">
-						<pre className="text-xs text-foreground whitespace-pre-wrap font-sans">
-							{revision.description}
-						</pre>
-					</div>
-				)}
-			</div>
-		</div>
-	);
+interface PrerenderedDiffPanelProps {
+	repoPath: string | null;
+	revisions: Revision[];
+	selectedChangeId: string | null;
 }
 
+/**
+ * Extract file path from a unified diff patch.
+ */
 function extractFilePath(patch: string): string {
 	const match = patch.match(/^\+\+\+ b\/(.+)$/m);
 	return match ? match[1] : "unknown";
 }
 
-function FileDiffSection({
-	patch,
-	isSelected = false,
-	fileRef,
-}: {
-	patch: string;
-	isSelected?: boolean;
-	fileRef?: React.RefObject<HTMLDivElement | null>;
-}) {
-	const [globalDiffStyle] = useAtom(diffStyleAtom);
-	const [expandedFiles, setExpandedFiles] = useAtom(expandedDiffFilesAtom);
-	const [styleOverrides, setStyleOverrides] = useAtom(fileDiffStyleOverridesAtom);
-
-	const filePath = extractFilePath(patch);
-	const isExpanded = expandedFiles?.has(filePath) ?? false;
-	// Auto-expand when selected
-	const isCollapsed = isSelected ? false : !isExpanded;
-	// Use local override if set, otherwise use global
-	const effectiveDiffStyle = styleOverrides.get(filePath) ?? globalDiffStyle;
-
-	function handleToggleCollapse() {
-		setExpandedFiles((prev) => {
-			const next = new Set(prev ?? []);
-			if (isCollapsed) {
-				next.add(filePath);
-			} else {
-				next.delete(filePath);
-			}
-			return next;
-		});
-	}
-
-	function handleSetLocalStyle(style: DiffStyle) {
-		setStyleOverrides((prev) => {
-			const next = new Map(prev);
-			next.set(filePath, style);
-			return next;
-		});
-	}
-
-	return (
-		<div
-			ref={fileRef}
-			className={`border rounded-lg overflow-hidden ${
-				isSelected ? "border-accent-foreground border-2" : "border-border"
-			}`}
-			data-selected={isSelected || undefined}
-			data-file-path={filePath}
-		>
-			<div
-				className={`flex items-center gap-2 px-2 py-1.5 border-b cursor-pointer transition-colors ${
-					isSelected
-						? "bg-accent border-accent-foreground"
-						: "bg-muted border-border hover:bg-accent/50"
-				}`}
-				onClick={handleToggleCollapse}
-			>
-				{/* Collapse toggle - left side */}
-				<span className="text-muted-foreground shrink-0">
-					{isCollapsed ? (
-						<ChevronRightIcon className="size-4" />
-					) : (
-						<ChevronDownIcon className="size-4" />
-					)}
-				</span>
-				<code className="font-mono text-xs text-foreground text-left flex-1 truncate min-w-0">
-					{filePath}
-				</code>
-
-				{/* Per-file diff style toggle buttons */}
-				<div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-					<Button
-						variant={effectiveDiffStyle === "unified" ? "secondary" : "ghost"}
-						size="icon-xs"
-						onClick={() => handleSetLocalStyle("unified")}
-						title="Unified diff"
-						className="h-6 w-6"
-					>
-						<RowsIcon className="size-3" />
-					</Button>
-					<Button
-						variant={effectiveDiffStyle === "split" ? "secondary" : "ghost"}
-						size="icon-xs"
-						onClick={() => handleSetLocalStyle("split")}
-						title="Split diff"
-						className="h-6 w-6"
-					>
-						<Columns2Icon className="size-3" />
-					</Button>
-				</div>
-			</div>
-			{!isCollapsed && (
-				<div>
-					{!patch.trim() ? (
-						<div className="px-4 py-8 text-center text-muted-foreground text-sm">
-							No changes in this file
-						</div>
-					) : (
-						<PatchDiff
-							patch={patch}
-							options={{ hunkSeparators: "line-info", diffStyle: effectiveDiffStyle }}
-						/>
-					)}
-				</div>
-			)}
-		</div>
-	);
-}
-
+/**
+ * Split a multi-file unified diff into individual file diffs.
+ */
 function splitMultiFileDiff(unifiedDiff: string): string[] {
 	if (!unifiedDiff.trim()) {
 		return [];
@@ -209,12 +59,6 @@ function splitMultiFileDiff(unifiedDiff: string): string[] {
 	return fileDiffs;
 }
 
-interface PrerenderedDiffPanelProps {
-	repoPath: string | null;
-	revisions: Revision[];
-	selectedChangeId: string | null;
-}
-
 export function PrerenderedDiffPanel({
 	repoPath,
 	revisions,
@@ -227,83 +71,36 @@ export function PrerenderedDiffPanel({
 	return <DiffPanel repoPath={repoPath} changeId={selectedChangeId} revision={selectedRevision} />;
 }
 
+/**
+ * Get the current diff view state, resetting if the changeId has changed.
+ * This is a pure derivation - no useEffect needed for state sync.
+ */
+function getDiffViewState(
+	currentState: DiffViewState,
+	changeId: string | null,
+	firstFilePath: string | null,
+): DiffViewState {
+	// If changeId matches, return current state as-is
+	if (currentState.forChangeId === changeId) {
+		return currentState;
+	}
+	// ChangeId changed - return reset state
+	return {
+		forChangeId: changeId,
+		expandedFiles: firstFilePath ? new Set([firstFilePath]) : new Set(),
+		styleOverrides: new Map(),
+	};
+}
+
 export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
-	const navigate = useNavigate();
-	const search = useSearch({ strict: false });
+	const search = useSearch({ from: Route.fullPath });
 	const { file: selectedFilePath } = search;
 	const fileRefsMap = useRef<Map<string, React.RefObject<HTMLDivElement | null>>>(new Map());
-	const [expandedFiles, setExpandedFiles] = useAtom(expandedDiffFilesAtom);
-	const [, setStyleOverrides] = useAtom(fileDiffStyleOverridesAtom);
-	const lastChangeIdRef = useRef<string | null>(null);
-	const [focusPanel, setFocusPanel] = useAtom(focusPanelAtom);
+	const [diffViewState, setDiffViewState] = useAtom(diffViewStateAtom);
+	const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-	// Fetch changed files for the file list
-	const changesCollection =
-		repoPath && changeId
-			? getRevisionChangesCollection(repoPath, changeId)
-			: emptyChangesCollection;
-	const { data: changedFiles = [], isLoading: filesLoading } = useLiveQuery(changesCollection);
-
-	// j/k navigation when diff panel has focus
-	useKeyboardShortcut({
-		key: "j",
-		modifiers: {},
-		onPress: () => {
-			if (changedFiles.length === 0) return;
-			const filePaths = changedFiles.map((f) => f.path);
-			const currentIndex = selectedFilePath ? filePaths.indexOf(selectedFilePath) : -1;
-			const nextIndex = currentIndex + 1;
-			if (nextIndex < filePaths.length) {
-				// biome-ignore lint/suspicious/noExplicitAny: TanStack Router search params require loose typing
-				navigate({ search: { ...search, file: filePaths[nextIndex] } as any });
-			} else if (currentIndex === -1) {
-				// biome-ignore lint/suspicious/noExplicitAny: TanStack Router search params require loose typing
-				navigate({ search: { ...search, file: filePaths[0] } as any });
-			}
-		},
-		enabled: focusPanel === "diff",
-	});
-
-	useKeyboardShortcut({
-		key: "k",
-		modifiers: {},
-		onPress: () => {
-			if (changedFiles.length === 0) return;
-			const filePaths = changedFiles.map((f) => f.path);
-			const currentIndex = selectedFilePath ? filePaths.indexOf(selectedFilePath) : -1;
-			if (currentIndex > 0) {
-				// biome-ignore lint/suspicious/noExplicitAny: TanStack Router search params require loose typing
-				navigate({ search: { ...search, file: filePaths[currentIndex - 1] } as any });
-			} else if (currentIndex === -1) {
-				// biome-ignore lint/suspicious/noExplicitAny: TanStack Router search params require loose typing
-				navigate({ search: { ...search, file: filePaths[filePaths.length - 1] } as any });
-			}
-		},
-		enabled: focusPanel === "diff",
-	});
-
-	// Handle h/ArrowLeft to move focus back to revisions panel
-	useKeyboardShortcut({
-		key: "h",
-		modifiers: {},
-		onPress: () => {
-			if (focusPanel === "diff") {
-				setFocusPanel("revisions");
-			}
-		},
-		enabled: focusPanel === "diff",
-	});
-
-	useKeyboardShortcut({
-		key: "ArrowLeft",
-		modifiers: {},
-		onPress: () => {
-			if (focusPanel === "diff") {
-				setFocusPanel("revisions");
-			}
-		},
-		enabled: focusPanel === "diff",
-	});
+	// Keyboard navigation
+	useDiffPanelKeyboard({ scrollContainerRef });
 
 	// Always fetch all diffs
 	const diffCollection =
@@ -314,28 +111,17 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 	const fileDiffs = splitMultiFileDiff(revisionDiff);
 	const filePaths = fileDiffs.map(extractFilePath);
 
-	// Reset state when revision changes
 	const firstFilePath = filePaths[0] ?? null;
-	useEffect(() => {
-		if (changeId !== lastChangeIdRef.current) {
-			lastChangeIdRef.current = changeId;
-			// Reset to first file expanded
-			if (firstFilePath) {
-				setExpandedFiles(new Set([firstFilePath]));
-			} else {
-				setExpandedFiles(new Set());
-			}
-			// Clear per-file style overrides
-			setStyleOverrides(new Map());
-		}
-	}, [changeId, firstFilePath, setExpandedFiles, setStyleOverrides]);
 
-	// Initialize expanded files on first load
-	useEffect(() => {
-		if (expandedFiles === null && firstFilePath) {
-			setExpandedFiles(new Set([firstFilePath]));
-		}
-	}, [expandedFiles, firstFilePath, setExpandedFiles]);
+	// Derive the effective state - resets automatically when changeId changes
+	const effectiveState = getDiffViewState(diffViewState, changeId, firstFilePath);
+
+	// Sync atom if state was reset (only writes when needed)
+	if (effectiveState !== diffViewState) {
+		setDiffViewState(effectiveState);
+	}
+
+	const { expandedFiles } = effectiveState;
 
 	// Get or create ref for each file
 	const getFileRef = (filePath: string): React.RefObject<HTMLDivElement | null> => {
@@ -347,33 +133,30 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 	};
 
 	// Toggle all folds
-	const allExpanded = filePaths.length > 0 && filePaths.every((p) => expandedFiles?.has(p));
+	const allExpanded = filePaths.length > 0 && filePaths.every((p) => expandedFiles.has(p));
 
 	function handleToggleAllFolds() {
-		if (allExpanded) {
-			setExpandedFiles(new Set());
-		} else {
-			setExpandedFiles(new Set(filePaths));
-		}
-	}
-
-	function handleSelectFile(filePath: string) {
-		// biome-ignore lint/suspicious/noExplicitAny: TanStack Router search params require loose typing
-		navigate({ search: { ...search, file: filePath } as any });
+		setDiffViewState((prev) => ({
+			...prev,
+			expandedFiles: allExpanded ? new Set() : new Set(filePaths),
+		}));
 	}
 
 	// Scroll to selected file when it changes
 	useEffect(() => {
-		if (selectedFilePath && fileRefsMap.current.has(selectedFilePath)) {
+		if (!selectedFilePath || fileDiffs.length === 0) return;
+
+		// Use requestAnimationFrame to ensure DOM is updated before scrolling
+		requestAnimationFrame(() => {
 			const ref = fileRefsMap.current.get(selectedFilePath);
 			if (ref?.current) {
 				ref.current.scrollIntoView({
-					behavior: "smooth",
+					behavior: "instant",
 					block: "start",
 				});
 			}
-		}
-	}, [selectedFilePath]);
+		});
+	}, [selectedFilePath, fileDiffs.length]);
 
 	if (!repoPath || !changeId) {
 		return (
@@ -400,45 +183,19 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 	}
 
 	return (
-		<div
-			className={`h-full overflow-auto bg-background ${focusPanel === "diff" ? "ring-2 ring-inset ring-accent" : ""}`}
-		>
+		<div ref={scrollContainerRef} className="h-full overflow-auto bg-background outline-none">
 			{revision && (
-				<div className="p-4 pb-0 space-y-3">
+				<div className="px-4 pt-6 pb-2">
 					<RevisionHeader revision={revision} />
-					<div className="border border-border rounded-lg overflow-hidden bg-background">
-						<ChangedFilesList
-							files={changedFiles}
-							selectedFile={selectedFilePath ?? null}
-							onSelectFile={handleSelectFile}
-							isLoading={filesLoading}
-						/>
-					</div>
 				</div>
 			)}
+			<DiffToolbar
+				fileCount={fileDiffs.length}
+				allExpanded={allExpanded}
+				onToggleAllFolds={handleToggleAllFolds}
+			/>
+			{/* File diffs */}
 			<div className="p-4 space-y-4">
-				<div className="flex items-center h-8 px-2 text-xs text-muted-foreground sticky top-0 z-10 bg-background -mt-2 pt-2">
-					<span className="font-medium">
-						{fileDiffs.length} {fileDiffs.length === 1 ? "file" : "files"}
-					</span>
-					<Separator orientation="vertical" className="h-4 mx-3" />
-					<Button
-						variant="ghost"
-						size="icon-xs"
-						onClick={handleToggleAllFolds}
-						title={allExpanded ? "Collapse all files" : "Expand all files"}
-						className="h-6 w-6"
-					>
-						{allExpanded ? (
-							<ChevronsDownUpIcon className="size-3.5" />
-						) : (
-							<ChevronsUpDownIcon className="size-3.5" />
-						)}
-					</Button>
-					<div className="flex items-center gap-0.5 ml-auto">
-						<DiffStyleToggle />
-					</div>
-				</div>
 				{fileDiffs.map((patch) => {
 					const filePath = extractFilePath(patch);
 					const fileRef = getFileRef(filePath);
@@ -448,6 +205,7 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 						<FileDiffSection
 							key={filePath}
 							patch={patch}
+							filePath={filePath}
 							isSelected={isSelected}
 							fileRef={fileRef}
 						/>
@@ -455,32 +213,5 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 				})}
 			</div>
 		</div>
-	);
-}
-
-function DiffStyleToggle() {
-	const [globalDiffStyle, setGlobalDiffStyle] = useAtom(diffStyleAtom);
-
-	return (
-		<>
-			<Button
-				variant={globalDiffStyle === "unified" ? "secondary" : "ghost"}
-				size="icon-xs"
-				onClick={() => setGlobalDiffStyle("unified")}
-				title="Unified diff view"
-				className="h-6 w-6"
-			>
-				<RowsIcon className="size-3" />
-			</Button>
-			<Button
-				variant={globalDiffStyle === "split" ? "secondary" : "ghost"}
-				size="icon-xs"
-				onClick={() => setGlobalDiffStyle("split")}
-				title="Split diff view"
-				className="h-6 w-6"
-			>
-				<Columns2Icon className="size-3" />
-			</Button>
-		</>
 	);
 }

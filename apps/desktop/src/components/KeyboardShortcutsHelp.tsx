@@ -24,7 +24,6 @@ const shortcuts = [
 		items: [
 			{ keys: ["n"], description: "New revision on selected" },
 			{ keys: ["e"], description: "Edit selected revision" },
-			{ keys: ["s"], description: "Toggle stack view" },
 		],
 	},
 	{

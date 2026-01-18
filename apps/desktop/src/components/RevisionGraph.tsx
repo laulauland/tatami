@@ -3,7 +3,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { expandedStacksAtom, inlineJumpQueryAtom } from "@/atoms";
+import { expandedStacksAtom, focusPanelAtom, hoveredStackIdAtom, inlineJumpQueryAtom, viewModeAtom } from "@/atoms";
 import { ChangedFilesList } from "@/components/ChangedFilesList";
 import {
 	reorderForGraph,
@@ -335,6 +335,8 @@ interface GraphEdgeProps {
 	targetRevision: Revision | null;
 	stackTopY?: number;
 	stackBottomY?: number;
+	hoveredStackId: string | null;
+	onHoverStack: (stackId: string | null) => void;
 	onToggleStack?: (stackId: string) => void;
 }
 
@@ -347,6 +349,8 @@ function GraphEdge({
 	targetRevision,
 	stackTopY,
 	stackBottomY,
+	hoveredStackId,
+	onHoverStack,
 	onToggleStack,
 }: GraphEdgeProps) {
 	const {
@@ -359,6 +363,9 @@ function GraphEdge({
 		collapsedCount,
 		expandedStackId,
 	} = binding;
+	
+	// Check if this edge's stack is currently hovered
+	const isStackHovered = expandedStackId !== undefined && hoveredStackId === expandedStackId;
 
 	const sourceX = laneToX(sourceLane);
 	const targetX = laneToX(targetLane);
@@ -448,13 +455,19 @@ function GraphEdge({
 			// Use full stack bounds if available, otherwise fall back to node bounds
 			const hitboxY1 = stackTopY !== undefined ? stackTopY : y1;
 			const hitboxY2 = stackBottomY !== undefined ? stackBottomY : y2;
+			
+			// Apply hover styling reactively based on atom state
+			const hoverStrokeWidth = isStackHovered ? 3 : strokeWidth;
+			const hoverStrokeOpacity = isStackHovered ? 1 : strokeOpacity;
+			
 			return (
 				<g
 					aria-label={expandedLabel}
-					className="cursor-pointer stack-group"
-					data-stack-id={expandedStackId}
+					className="cursor-pointer"
 					style={{ pointerEvents: "auto" }}
 					onClick={() => onToggleStack?.(expandedStackId)}
+					onMouseEnter={() => onHoverStack(expandedStackId)}
+					onMouseLeave={() => onHoverStack(null)}
 				>
 					<title>{expandedLabel}</title>
 					{/* Invisible wider hitbox covering full stack height */}
@@ -472,12 +485,11 @@ function GraphEdge({
 						x2={targetX}
 						y2={y2}
 						stroke={isDeemphasized ? strokeColor : sourceColor}
-						strokeWidth={strokeWidth}
-						strokeOpacity={strokeOpacity}
+						strokeWidth={hoverStrokeWidth}
+						strokeOpacity={hoverStrokeOpacity}
 						strokeDasharray={isDashed ? "4 4" : undefined}
-						className="stack-edge transition-[stroke-width,stroke-opacity] duration-150"
+						className="transition-[stroke-width,stroke-opacity] duration-150"
 						data-edge-type={edgeType}
-						data-stack-id={expandedStackId}
 						data-source-revision={sourceRevision.change_id}
 						data-target-revision={targetRevision?.change_id}
 					/>
@@ -558,7 +570,8 @@ function EdgeLayer({
 	changeIdToCommitId,
 	onToggleStack,
 }: EdgeLayerProps) {
-	const svgRef = useRef<SVGSVGElement>(null);
+	// Use atom for hover state - automatically syncs with stack toggling and view mode changes
+	const [hoveredStackId, setHoveredStackId] = useAtom(hoveredStackIdAtom);
 
 	// Add overscan for edges that might span across viewport boundary
 	// Use larger overscan to handle collapsed stack edges that span many rows
@@ -585,67 +598,8 @@ function EdgeLayer({
 		return maxRow >= startRow && minRow <= endRow;
 	});
 
-	// Handle hover for stack edges - make all edges in the same stack respond together
-	// Use event delegation on the SVG to handle dynamically added groups
-	useEffect(() => {
-		const svg = svgRef.current;
-		if (!svg) return;
-
-		let hoveredStackId: string | null = null;
-
-		const handleMouseOver = (e: Event) => {
-			const target = e.target as HTMLElement;
-			// Check if the event originated from a stack group
-			const group = target.closest("g.stack-group[data-stack-id]") as HTMLElement;
-			if (!group) return;
-
-			const stackId = group.getAttribute("data-stack-id");
-			if (!stackId || stackId === hoveredStackId) return;
-
-			hoveredStackId = stackId;
-			// Find all edges with the same stack-id and add hover class
-			const edges = svg.querySelectorAll(`line.stack-edge[data-stack-id="${stackId}"]`);
-			edges.forEach((edge) => {
-				edge.classList.add("stack-edge-hovered");
-			});
-		};
-
-		const handleMouseOut = (e: Event) => {
-			const target = e.target as HTMLElement;
-			const relatedTarget = (e as MouseEvent).relatedTarget as HTMLElement;
-
-			// Check if we're leaving a stack group
-			const group = target.closest("g.stack-group[data-stack-id]") as HTMLElement;
-			if (!group) return;
-
-			// Check if we're moving to another element within the same stack group
-			if (relatedTarget && group.contains(relatedTarget)) return;
-
-			const stackId = group.getAttribute("data-stack-id");
-			if (!stackId || stackId !== hoveredStackId) return;
-
-			hoveredStackId = null;
-			// Remove hover class from all edges with the same stack-id
-			const edges = svg.querySelectorAll(`line.stack-edge[data-stack-id="${stackId}"]`);
-			edges.forEach((edge) => {
-				edge.classList.remove("stack-edge-hovered");
-			});
-		};
-
-		// Use event delegation - attach listeners to the SVG element
-		// mouseover/mouseout bubble, unlike mouseenter/mouseleave
-		svg.addEventListener("mouseover", handleMouseOver, true);
-		svg.addEventListener("mouseout", handleMouseOut, true);
-
-		return () => {
-			svg.removeEventListener("mouseover", handleMouseOver, true);
-			svg.removeEventListener("mouseout", handleMouseOut, true);
-		};
-	}, []);
-
 	return (
 		<svg
-			ref={svgRef}
 			width={width}
 			height={totalHeight}
 			className="shrink-0 absolute top-0 left-0 z-20"
@@ -687,9 +641,13 @@ function EdgeLayer({
 					}
 				}
 
+				// Use a key that captures the edge's structural identity:
+				// source, target (which changes when collapsed), and stack state
+				const edgeKey = `${binding.sourceRevisionId}->${binding.targetRevisionId}:${binding.collapsedStackId ?? binding.expandedStackId ?? "none"}`;
+				
 				return (
 					<GraphEdge
-						key={binding.id}
+						key={edgeKey}
 						binding={binding}
 						sourceY={getRowCenter(sourceRow)}
 						targetY={
@@ -701,6 +659,8 @@ function EdgeLayer({
 						targetRevision={targetRevision}
 						stackTopY={stackTopY}
 						stackBottomY={stackBottomY}
+						hoveredStackId={hoveredStackId}
+						onHoverStack={setHoveredStackId}
 						onToggleStack={onToggleStack}
 					/>
 				);
@@ -1048,6 +1008,7 @@ function RevisionRow({
 
 	function handleSelectFile(filePath: string) {
 		navigate({
+			// biome-ignore lint/suspicious/noExplicitAny: TanStack Router search params require loose typing
 			search: { ...search, file: filePath } as any,
 		});
 	}
@@ -1080,6 +1041,11 @@ function RevisionRow({
 					} text-card-foreground shadow-sm hover:shadow hover:cursor-pointer ${
 						revision.is_immutable ? "opacity-60" : ""
 					} ${isDimmed ? "opacity-40" : ""}`}
+					data-focused={isFocused || undefined}
+					data-selected={isSelected || undefined}
+					data-checked={isChecked || undefined}
+					data-expanded={isExpanded || undefined}
+					data-change-id={revision.change_id}
 					onClick={(e) => {
 						// Prevent text selection on shift+click
 						if (e.shiftKey) {
@@ -1236,6 +1202,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const navigate = useNavigate();
 		const [inlineJumpQuery, setInlineJumpQuery] = useAtom(inlineJumpQueryAtom);
 		const inlineJumpMode = inlineJumpQuery !== null;
+		const [viewMode] = useAtom(viewModeAtom);
+		const [, setFocusPanel] = useAtom(focusPanelAtom);
 
 		// Detect collapsible stacks
 		const stacks = useMemo(() => detectStacks(revisions), [revisions]);
@@ -1251,6 +1219,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 		// Track which stacks are expanded (empty = all collapsed by default)
 		const [expandedStacks, setExpandedStacks] = useAtom(expandedStacksAtom);
+		// Track hovered stack for coordinated edge highlighting
+		const [, setHoveredStackId] = useAtom(hoveredStackIdAtom);
 
 		// Read focused stack and selection from URL params
 		const focusedStackId = useSearch({ strict: false, select: (s) => s.stack ?? null });
@@ -1268,18 +1238,6 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			const selected = newSelection.size > 0 ? [...newSelection].join(",") : undefined;
 			navigate({
 				search: { ...search, selected } as any,
-				replace: true,
-			});
-		}
-
-		// Update URL with focused stack
-		function setFocusedStackId(stackId: string | null) {
-			navigate({
-				search: {
-					...search,
-					stack: stackId ?? undefined,
-					rev: stackId ? undefined : search.rev,
-				} as any,
 				replace: true,
 			});
 		}
@@ -1386,6 +1344,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 		// Toggle stack expansion
 		function toggleStackExpansion(stackId: string) {
+			// Clear hover state since stack structure is changing
+			setHoveredStackId(null);
 			setExpandedStacks((prev) => {
 				const next = new Set(prev);
 				if (next.has(stackId)) {
@@ -1397,10 +1357,45 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			});
 		}
 
+		// Toggle stack expansion and focus the top of newly revealed revisions when expanding
+		function handleToggleStack(stackId: string) {
+			const stack = stackById.get(stackId);
+			const isCurrentlyExpanded = expandedStacks.has(stackId);
+			toggleStackExpansion(stackId);
+
+			// If expanding (not currently expanded), focus the first intermediate revision
+			// (the top of the newly revealed revisions, not the already-visible top of the stack)
+			if (!isCurrentlyExpanded && stack && stack.intermediateChangeIds.length > 0) {
+				navigate({
+					search: {
+						...search,
+						stack: undefined,
+						rev: stack.intermediateChangeIds[0],
+						selected: undefined,
+						selectionAnchor: undefined,
+					} as any,
+					replace: true,
+				});
+			}
+		}
+
 		// Maps for lookups - by change_id for UI, by commit_id for graph edges
 		const revisionMapByChangeId = new Map(revisions.map((r) => [r.change_id, r]));
 		const revisionMapByCommitId = new Map(revisions.map((r) => [r.commit_id, r]));
-		const relatedRevisions = getRelatedRevisions(revisions, selectedRevision?.change_id ?? null);
+
+		// Compute related revisions for dimming logic
+		// When a stack is focused, use the stack's top and bottom as the "selected" revisions
+		const focusedStack = focusedStackId ? stackById.get(focusedStackId) : null;
+		const relatedRevisions = useMemo(() => {
+			if (focusedStack) {
+				// When stack is focused, highlight the stack endpoints and their ancestors/descendants
+				const topRelated = getRelatedRevisions(revisions, focusedStack.topChangeId);
+				const bottomRelated = getRelatedRevisions(revisions, focusedStack.bottomChangeId);
+				// Union of both sets
+				return new Set([...topRelated, ...bottomRelated]);
+			}
+			return getRelatedRevisions(revisions, selectedRevision?.change_id ?? null);
+		}, [revisions, focusedStack, selectedRevision?.change_id]);
 
 		// Build change_id -> displayRow index map for scrolling and edge positioning
 		// IMPORTANT: Use displayRows indices (not rows) to match virtualizer positioning
@@ -1415,89 +1410,83 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		}
 
 		// Create a mapping of change_id -> commit_id for edge remapping
-		const changeIdToCommitId = new Map<string, string>();
-		for (const rev of revisions) {
-			changeIdToCommitId.set(rev.change_id, rev.commit_id);
-		}
+		const changeIdToCommitId = useMemo(() => {
+			const map = new Map<string, string>();
+			for (const rev of revisions) {
+				map.set(rev.change_id, rev.commit_id);
+			}
+			return map;
+		}, [revisions]);
 
 		// Filter edge bindings to handle collapsed/expanded stacks
 		// When a stack is collapsed, edges from/to intermediates should be remapped
 		// When a stack is expanded, edges within it should be clickable to collapse
 		const filteredEdgeBindings = useMemo(() => {
-			// Build mapping: hidden commit_id -> { visible commit_id, stack info }
+			// Maps for collapsed stacks: intermediate commits -> bottom commit
 			const hiddenToVisible = new Map<string, { targetCommitId: string; stack: RevisionStack }>();
-			// Build mapping: top commit_id -> stack (for marking edges as collapsed)
 			const topCommitToStack = new Map<string, RevisionStack>();
-			// Build mapping: commit_id -> stack (for edges within expanded stacks)
+			// Map for expanded stacks: all commits in expanded stacks
 			const commitToExpandedStack = new Map<string, RevisionStack>();
 
 			for (const stack of stacks) {
-				if (!expandedStacks.has(stack.id)) {
-					// Stack is collapsed - map all intermediates to bottom revision
-					const bottomCommitId = changeIdToCommitId.get(stack.bottomChangeId);
-					const topCommitId = changeIdToCommitId.get(stack.topChangeId);
+				const isExpanded = expandedStacks.has(stack.id);
 
-					if (bottomCommitId && topCommitId) {
-						topCommitToStack.set(topCommitId, stack);
-
-						for (const intermediateChangeId of stack.intermediateChangeIds) {
-							const intermediateCommitId = changeIdToCommitId.get(intermediateChangeId);
-							if (intermediateCommitId) {
-								hiddenToVisible.set(intermediateCommitId, {
-									targetCommitId: bottomCommitId,
-									stack,
-								});
-							}
-						}
-					}
-				} else {
-					// Stack is expanded - mark all commits in the stack for clickable edges
+				if (isExpanded) {
 					for (const changeId of stack.changeIds) {
 						const commitId = changeIdToCommitId.get(changeId);
-						if (commitId) {
-							commitToExpandedStack.set(commitId, stack);
+						if (commitId) commitToExpandedStack.set(commitId, stack);
+					}
+				} else {
+					const bottomCommitId = changeIdToCommitId.get(stack.bottomChangeId);
+					const topCommitId = changeIdToCommitId.get(stack.topChangeId);
+					if (!bottomCommitId || !topCommitId) continue;
+
+					topCommitToStack.set(topCommitId, stack);
+					for (const intermediateChangeId of stack.intermediateChangeIds) {
+						const intermediateCommitId = changeIdToCommitId.get(intermediateChangeId);
+						if (intermediateCommitId) {
+							hiddenToVisible.set(intermediateCommitId, { targetCommitId: bottomCommitId, stack });
 						}
 					}
 				}
 			}
 
-			// Remap edge bindings
 			const remapped: EdgeBinding[] = [];
-			const seen = new Set<string>(); // Deduplicate edges
+			const seen = new Set<string>();
 
 			for (const binding of edgeBindings) {
-				let targetId = binding.targetRevisionId;
+				const { sourceRevisionId, targetRevisionId } = binding;
+				const sourceExpandedStack = commitToExpandedStack.get(sourceRevisionId);
+
+				// Skip hidden intermediates (unless in an expanded stack)
+				if (hiddenToVisible.has(sourceRevisionId) && !sourceExpandedStack) continue;
+
+				let targetId = targetRevisionId;
 				let collapsedStackId: string | undefined;
 				let collapsedCount: number | undefined;
 				let expandedStackId: string | undefined;
 
-				// Check if this edge originates from a collapsed stack top
-				const stackFromTop = topCommitToStack.get(binding.sourceRevisionId);
-				if (stackFromTop && hiddenToVisible.has(targetId)) {
-					// This is the edge from top to first intermediate - remap to bottom
-					const info = hiddenToVisible.get(targetId)!;
-					targetId = info.targetCommitId;
-					collapsedStackId = info.stack.id;
-					collapsedCount = info.stack.intermediateChangeIds.length;
-				} else if (hiddenToVisible.has(targetId)) {
-					// Remap target if it's a hidden intermediate
-					targetId = hiddenToVisible.get(targetId)!.targetCommitId;
+				if (sourceExpandedStack) {
+					// Source is in expanded stack - check if edge is within same stack
+					const targetExpandedStack = commitToExpandedStack.get(targetRevisionId);
+					if (targetExpandedStack?.id === sourceExpandedStack.id) {
+						expandedStackId = sourceExpandedStack.id;
+					}
 				} else {
-					// Check if both source and target are in the same expanded stack
-					const sourceStack = commitToExpandedStack.get(binding.sourceRevisionId);
-					const targetStack = commitToExpandedStack.get(targetId);
-					if (sourceStack && targetStack && sourceStack.id === targetStack.id) {
-						expandedStackId = sourceStack.id;
+					// Source not in expanded stack - apply collapsed stack remapping
+					const hiddenInfo = hiddenToVisible.get(targetId);
+					if (hiddenInfo) {
+						const isFromStackTop = topCommitToStack.has(sourceRevisionId);
+						targetId = hiddenInfo.targetCommitId;
+						if (isFromStackTop) {
+							collapsedStackId = hiddenInfo.stack.id;
+							collapsedCount = hiddenInfo.stack.intermediateChangeIds.length;
+						}
 					}
 				}
 
-				// Skip edges where source is a hidden intermediate
-				if (hiddenToVisible.has(binding.sourceRevisionId)) {
-					continue;
-				}
-
 				// Deduplicate
-				const key = `${binding.sourceRevisionId}->${targetId}`;
+				const key = `${sourceRevisionId}->${targetId}`;
 				if (seen.has(key)) continue;
 				seen.add(key);
 
@@ -1530,37 +1519,75 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			onPress: () => setDebugEnabled((prev) => !prev),
 		});
 
-		// Expand selected revision with 'l' key (only expands, doesn't collapse)
+		// Expand selected revision with 'l' or ArrowRight key
+		// In overview mode: expands revision inline
+		// In split mode: moves focus to diff panel
 		useKeyboardShortcut({
 			key: "l",
 			modifiers: {},
 			onPress: () => {
+				if (viewMode === 2) {
+					// Split mode: move focus to diff panel
+					setFocusPanel("diff");
+					return;
+				}
+				// Overview mode: expand inline
 				if (!selectedRevision) return;
-
-				// Check if already expanded
-				if (isSelectedExpanded) return; // Do nothing if already expanded
-
-				// Expand the revision by setting expanded=true in URL
+				if (isSelectedExpanded) return;
 				navigate({
 					search: { ...search, expanded: true } as any,
 				});
 			},
 		});
 
-		// Collapse selected revision with 'h' key (only collapses, doesn't expand)
+		useKeyboardShortcut({
+			key: "ArrowRight",
+			modifiers: {},
+			onPress: () => {
+				if (viewMode === 2) {
+					setFocusPanel("diff");
+					return;
+				}
+				if (!selectedRevision) return;
+				if (isSelectedExpanded) return;
+				navigate({
+					search: { ...search, expanded: true } as any,
+				});
+			},
+		});
+
+		// Collapse selected revision with 'h' or ArrowLeft key
+		// In overview mode: collapses revision inline
+		// In split mode: moves focus to revision list
 		useKeyboardShortcut({
 			key: "h",
 			modifiers: {},
 			onPress: () => {
+				if (viewMode === 2) {
+					// Split mode: move focus back to revisions (but don't do anything if already there)
+					// Note: This handler runs in RevisionGraph, so focus is already here
+					return;
+				}
+				// Overview mode: collapse inline
 				if (!selectedRevision) return;
-
-				// Check if already collapsed
-				if (!isSelectedExpanded) return; // Do nothing if already collapsed
-
-				// Collapse the revision by removing expanded from URL
-				const { expanded: _expanded, ...restSearch } = search;
+				if (!isSelectedExpanded) return;
 				navigate({
-					search: restSearch as any,
+					search: { ...search, expanded: undefined } as any,
+				});
+			},
+		});
+
+		useKeyboardShortcut({
+			key: "ArrowLeft",
+			modifiers: {},
+			onPress: () => {
+				if (viewMode === 2) {
+					return;
+				}
+				if (!selectedRevision) return;
+				if (!isSelectedExpanded) return;
+				navigate({
+					search: { ...search, expanded: undefined } as any,
 				});
 			},
 		});
@@ -1760,14 +1787,13 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			enabled: !inlineJumpMode,
 		});
 
-		// Space/Enter on collapsed stack: expand it
+		// Space/Enter on collapsed stack: expand it and focus the top revision
 		useKeyboardShortcut({
 			key: " ",
 			modifiers: {},
 			onPress: () => {
 				if (focusedStackId) {
-					toggleStackExpansion(focusedStackId);
-					setFocusedStackId(null);
+					handleToggleStack(focusedStackId);
 				} else if (selectedRevision) {
 					toggleRevisionCheck(selectedRevision.change_id);
 				}
@@ -1780,8 +1806,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			modifiers: {},
 			onPress: () => {
 				if (focusedStackId) {
-					toggleStackExpansion(focusedStackId);
-					setFocusedStackId(null);
+					handleToggleStack(focusedStackId);
 				}
 			},
 			enabled: !!focusedStackId && !inlineJumpMode,
@@ -1958,17 +1983,17 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		scrollToIndexIfNeededRef.current = (index: number) => {
 			const scrollEl = parentRef.current;
 			if (!scrollEl) return;
-			
+
 			const scrollTop = scrollEl.scrollTop;
 			const clientHeight = scrollEl.clientHeight;
-			
+
 			// Calculate which rows are fully visible (not just rendered with overscan)
 			// Use ceil for start (first fully visible) and floor-1 for end (last fully visible)
 			const visibleStart = Math.ceil(scrollTop / ROW_HEIGHT);
 			const visibleEnd = Math.floor((scrollTop + clientHeight) / ROW_HEIGHT) - 1;
-			
+
 			const shouldScroll = index < visibleStart || index > visibleEnd;
-			
+
 			// Only scroll if the item is outside the fully visible range
 			if (shouldScroll) {
 				rowVirtualizer.scrollToIndex(index, { align: "auto" });
@@ -2143,7 +2168,9 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 					}}
 				>
 					{/* Edge layer - semantic edge components positioned absolutely */}
+					{/* Key includes expandedStacks to force remount when stack state changes */}
 					<EdgeLayer
+						key={`edges-${[...expandedStacks].sort().join(",")}`}
 						bindings={filteredEdgeBindings}
 						revisionMap={revisionMapByCommitId}
 						getRowCenter={getRowCenter}
@@ -2154,7 +2181,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 						visibleEndRow={visibleEndRow}
 						stackById={stackById}
 						changeIdToCommitId={changeIdToCommitId}
-						onToggleStack={toggleStackExpansion}
+						onToggleStack={handleToggleStack}
 					/>
 
 					{/* Virtualized rows with inline graph nodes */}
@@ -2192,9 +2219,11 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 												<div className="shrink-0" style={{ width: nodeAreaWidth }} />
 												<button
 													type="button"
-													onClick={() => toggleStackExpansion(stack.id)}
+													onClick={() => handleToggleStack(stack.id)}
 													className={`relative flex-1 mr-2 min-w-0 my-2 mx-1 cursor-pointer group ${isStackDimmed ? "opacity-40" : ""}`}
 													style={{ height: 40 }}
+													data-focused={isStackFocused || undefined}
+													data-stack-id={stack.id}
 												>
 													{/* Stacked card layers */}
 													{Array.from({ length: layers }).map((_, i) => {
@@ -2256,7 +2285,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 							const lane = changeIdToLane.get(row.revision.change_id) ?? 0;
 							const isFlashing = flash?.changeId === row.revision.change_id;
 							const isDimmed =
-								selectedRevision !== null && !relatedRevisions.has(row.revision.change_id);
+								(selectedRevision !== null || focusedStackId !== null) &&
+								!relatedRevisions.has(row.revision.change_id);
 							// Only show focus if no stack is focused
 							const isFocused =
 								!focusedStackId && selectedRevision?.change_id === row.revision.change_id;

@@ -68,6 +68,9 @@ function FileListItem({
 				"hover:bg-muted/50",
 				isFocused && "bg-muted text-foreground",
 			)}
+			data-focused={isFocused || undefined}
+			data-checked={isChecked || undefined}
+			data-file-path={file.path}
 			onClick={onClick}
 			onKeyDown={(e) => {
 				if (e.key === "Enter" || e.key === " ") {

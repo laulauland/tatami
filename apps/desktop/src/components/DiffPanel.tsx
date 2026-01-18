@@ -113,6 +113,8 @@ function FileDiffSection({
 			className={`border rounded-lg overflow-hidden ${
 				isSelected ? "border-accent-foreground border-2" : "border-border"
 			}`}
+			data-selected={isSelected || undefined}
+			data-file-path={filePath}
 		>
 			<div
 				className={`flex items-center gap-2 px-2 py-1.5 border-b ${

@@ -34,7 +34,7 @@ function ResizableHandle({
 				"focus-visible:ring-ring relative flex items-center justify-center shrink-0 transition-colors focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:outline-hidden",
 				isVertical
 					? "h-2 w-full bg-border/50 hover:bg-border cursor-row-resize"
-					: "w-px h-full bg-transparent hover:bg-border/50 cursor-col-resize",
+					: "w-px h-full bg-border/50 hover:bg-border cursor-col-resize",
 				className,
 			)}
 			{...props}

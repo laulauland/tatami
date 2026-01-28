@@ -1,7 +1,6 @@
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 import type { Revision } from "@/tauri-commands";
-import { cn } from "@/lib/utils";
 
 interface RevisionHeaderProps {
 	revision: Revision;
@@ -18,7 +17,7 @@ export function RevisionHeader({ revision }: RevisionHeaderProps) {
 	const hasBody = body.length > 0;
 
 	return (
-		<div className="border border-border rounded-lg bg-card">
+		<div>
 			<div className="px-3 py-2 font-mono text-xs space-y-1.5">
 				<div className="flex gap-4">
 					<div>
@@ -38,33 +37,24 @@ export function RevisionHeader({ revision }: RevisionHeaderProps) {
 				</div>
 				{title && (
 					<div className="mt-2 pt-2 border-t border-border">
-						<div className="flex items-start justify-between gap-2">
-							<span className="text-sm font-semibold text-foreground font-sans">{title}</span>
+						<div className="flex items-start gap-1">
 							{hasBody && (
 								<button
 									type="button"
 									onClick={() => setIsExpanded(!isExpanded)}
-									className={cn(
-										"flex items-center gap-1 text-muted-foreground hover:text-foreground",
-										"text-xs shrink-0 transition-colors",
-									)}
+									className="text-muted-foreground hover:text-foreground shrink-0 transition-colors mt-0.5"
 								>
 									{isExpanded ? (
-										<>
-											<ChevronDownIcon className="size-3" />
-											<span>collapse</span>
-										</>
+										<ChevronDownIcon className="size-4" />
 									) : (
-										<>
-											<ChevronRightIcon className="size-3" />
-											<span>expand</span>
-										</>
+										<ChevronRightIcon className="size-4" />
 									)}
 								</button>
 							)}
+							<span className="text-sm font-semibold text-foreground font-sans">{title}</span>
 						</div>
 						{hasBody && isExpanded && (
-							<pre className="text-xs text-muted-foreground whitespace-pre-wrap font-sans mt-2">
+							<pre className="text-xs text-muted-foreground whitespace-pre-wrap font-sans mt-2 ml-5">
 								{body}
 							</pre>
 						)}

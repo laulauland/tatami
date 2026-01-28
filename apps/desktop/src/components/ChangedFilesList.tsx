@@ -53,6 +53,7 @@ function FileListItem({
 	onClick,
 	onToggleSelection,
 	showSelection,
+	isOdd,
 }: {
 	file: ChangedFile;
 	isFocused: boolean;
@@ -60,13 +61,18 @@ function FileListItem({
 	onClick: () => void;
 	onToggleSelection?: () => void;
 	showSelection?: boolean;
+	isOdd: boolean;
 }) {
 	return (
 		<button
 			type="button"
 			className={cn(
-				"flex items-center gap-2 px-3 py-1.5 text-left transition-colors cursor-pointer group w-full",
-				isFocused ? "bg-muted text-foreground" : "hover:bg-muted/50",
+				"flex items-center gap-2 px-3 py-1.5 text-left w-full",
+				isFocused
+					? "bg-accent/40 text-foreground"
+					: isOdd
+						? "bg-muted/30 text-muted-foreground"
+						: "text-muted-foreground",
 			)}
 			data-focused={isFocused || undefined}
 			data-checked={isChecked || undefined}
@@ -95,7 +101,7 @@ function FileListItem({
 			<span
 				className={cn(
 					"font-mono text-xs truncate flex-1",
-					isFocused ? "text-foreground" : "text-muted-foreground group-hover:text-foreground",
+					isFocused ? "text-foreground" : "text-muted-foreground",
 				)}
 				title={file.path}
 			>
@@ -170,7 +176,7 @@ export function ChangedFilesList({
 				)}
 			</div>
 			<div>
-				{files.map((file) => (
+				{files.map((file, index) => (
 					<FileListItem
 						key={file.path}
 						file={file}
@@ -181,6 +187,7 @@ export function ChangedFilesList({
 							onToggleFileSelection ? () => onToggleFileSelection(file.path) : undefined
 						}
 						showSelection={showSelection}
+						isOdd={index % 2 === 1}
 					/>
 				))}
 			</div>

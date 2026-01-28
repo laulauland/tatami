@@ -1,11 +1,13 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
+import { PatchDiff } from "@pierre/diffs/react";
 import { Columns2Icon, RowsIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type DiffStyle, type DiffViewState, diffStyleAtom, diffViewStateAtom } from "@/atoms";
-import { FileList, RevisionHeader, SingleFileDiff } from "@/components/diff";
+import { FileList, RevisionHeader } from "@/components/diff";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
 	emptyChangesCollection,
 	emptyDiffCollection,
@@ -99,6 +101,51 @@ export function PrerenderedDiffPanel({
 }
 
 /**
+ * Multi-file diff viewer - shows multiple diffs in a scrollable container
+ */
+function MultiFileDiff({
+	patches,
+	diffViewState,
+	globalDiffStyle,
+}: {
+	patches: Array<{ path: string; patch: string }>;
+	diffViewState: DiffViewState;
+	globalDiffStyle: DiffStyle;
+}) {
+	if (patches.length === 0) {
+		return (
+			<div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+				Select a file to view its diff
+			</div>
+		);
+	}
+
+	return (
+		<ScrollArea className="h-full w-full">
+			<div className="divide-y divide-border">
+				{patches.map(({ path, patch }) => {
+					const effectiveStyle = diffViewState.styleOverrides.get(path) ?? globalDiffStyle;
+					return (
+						<div key={path} className="min-h-0">
+							{!patch.trim() ? (
+								<div className="px-4 py-8 text-center text-muted-foreground text-sm">
+									No changes in {path}
+								</div>
+							) : (
+								<PatchDiff
+									patch={patch}
+									options={{ hunkSeparators: "line-info", diffStyle: effectiveStyle }}
+								/>
+							)}
+						</div>
+					);
+				})}
+			</div>
+		</ScrollArea>
+	);
+}
+
+/**
  * Get the current diff view state, resetting if the changeId has changed.
  * This is a pure derivation - no useEffect needed for state sync.
  */
@@ -119,28 +166,34 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const [globalDiffStyle] = useAtom(diffStyleAtom);
 	const [diffViewState, setDiffViewState] = useAtom(diffViewStateAtom);
-	const [selectedFile, setSelectedFile] = useState<string | null>(null);
+	const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 	const prevChangeIdRef = useRef<string | null>(null);
 
-	// Get effective diff style for selected file
-	const effectiveDiffStyle = selectedFile
-		? (diffViewState.styleOverrides.get(selectedFile) ?? globalDiffStyle)
+	// Get first selected file for style override display
+	const firstSelectedFile = selectedFiles.size > 0 ? [...selectedFiles][0] : null;
+
+	// Get effective diff style for first selected file
+	const effectiveDiffStyle = firstSelectedFile
+		? (diffViewState.styleOverrides.get(firstSelectedFile) ?? globalDiffStyle)
 		: globalDiffStyle;
 
 	function handleSetLocalStyle(style: DiffStyle) {
-		if (!selectedFile) return;
+		if (selectedFiles.size === 0) return;
 		setDiffViewState((prev) => {
 			const next = new Map(prev.styleOverrides);
-			next.set(selectedFile, style);
+			// Apply style to all selected files
+			for (const file of selectedFiles) {
+				next.set(file, style);
+			}
 			return { ...prev, styleOverrides: next };
 		});
 	}
 
-	// Reset selected file when changeId changes
+	// Reset selected files when changeId changes
 	if (prevChangeIdRef.current !== changeId) {
 		prevChangeIdRef.current = changeId;
-		if (selectedFile !== null) {
-			setSelectedFile(null);
+		if (selectedFiles.size > 0) {
+			setSelectedFiles(new Set());
 		}
 	}
 
@@ -195,13 +248,25 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 
 	// Auto-select first file when files load and none selected
 	useEffect(() => {
-		if (changedFiles.length > 0 && !selectedFile) {
-			setSelectedFile(changedFiles[0].path);
+		if (changedFiles.length > 0 && selectedFiles.size === 0) {
+			setSelectedFiles(new Set([changedFiles[0].path]));
 		}
-	}, [changedFiles, selectedFile]);
+	}, [changedFiles, selectedFiles.size]);
 
-	// Get patch for selected file
-	const selectedPatch = selectedFile ? (patchMap.get(selectedFile) ?? null) : null;
+	// Get patches for selected files (in order)
+	const selectedPatches = useMemo(() => {
+		const patches: Array<{ path: string; patch: string }> = [];
+		// Maintain file order from changedFiles
+		for (const file of changedFiles) {
+			if (selectedFiles.has(file.path)) {
+				const patch = patchMap.get(file.path);
+				if (patch) {
+					patches.push({ path: file.path, patch });
+				}
+			}
+		}
+		return patches;
+	}, [changedFiles, selectedFiles, patchMap]);
 
 	if (!repoPath || !changeId) {
 		return (
@@ -234,24 +299,21 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 		>
 			{/* Revision header */}
 			{revision && (
-				<div className="px-4 pt-4 pb-2 shrink-0">
+				<div className="px-4 pt-2 pb-2 shrink-0">
 					<RevisionHeader revision={revision} />
 				</div>
 			)}
 
-			{/* Toolbar spanning both columns */}
-			<div className="flex items-center justify-between px-3 py-2 border-b border-border bg-background shrink-0 min-w-0">
-				<code className="font-mono text-xs text-foreground truncate min-w-0">
-					{selectedFile ?? "No file selected"}
-				</code>
-				<div className="flex items-center gap-0.5 shrink-0 ml-2">
+			{/* Toolbar */}
+			<div className="flex items-center justify-end px-3 py-2 border-b border-border bg-background shrink-0 min-w-0">
+				<div className="flex items-center gap-0.5 shrink-0">
 					<Button
 						variant={effectiveDiffStyle === "unified" ? "secondary" : "ghost"}
 						size="icon-xs"
 						onClick={() => handleSetLocalStyle("unified")}
 						title="Unified diff view"
 						className="h-6 w-6"
-						disabled={!selectedFile}
+						disabled={selectedFiles.size === 0}
 					>
 						<RowsIcon className="size-3" />
 					</Button>
@@ -261,7 +323,7 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 						onClick={() => handleSetLocalStyle("split")}
 						title="Split diff view"
 						className="h-6 w-6"
-						disabled={!selectedFile}
+						disabled={selectedFiles.size === 0}
 					>
 						<Columns2Icon className="size-3" />
 					</Button>
@@ -280,8 +342,8 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 						<div className="h-full w-full min-w-0">
 							<FileList
 								files={changedFiles}
-								selectedFile={selectedFile}
-								onSelectFile={setSelectedFile}
+								selectedFiles={selectedFiles}
+								onSelectFiles={setSelectedFiles}
 								totalAdditions={totalAdditions}
 								totalDeletions={totalDeletions}
 							/>
@@ -293,7 +355,11 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 					{/* Diff content panel */}
 					<ResizablePanel id="diff-content" defaultSize="70%">
 						<div className="h-full w-full min-w-0">
-							<SingleFileDiff patch={selectedPatch} filePath={selectedFile} />
+							<MultiFileDiff
+								patches={selectedPatches}
+								diffViewState={diffViewState}
+								globalDiffStyle={globalDiffStyle}
+							/>
 						</div>
 					</ResizablePanel>
 				</ResizablePanelGroup>

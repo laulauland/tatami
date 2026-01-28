@@ -23,8 +23,8 @@ import type { ChangedFile, ChangedFileStatus } from "@/schemas";
 
 interface FileListProps {
 	files: ChangedFile[];
-	selectedFile: string | null;
-	onSelectFile: (filePath: string) => void;
+	selectedFiles: Set<string>;
+	onSelectFiles: (filePaths: Set<string>) => void;
 	totalAdditions: number;
 	totalDeletions: number;
 }
@@ -140,18 +140,32 @@ function getSortedChildren(node: TreeNode): TreeNode[] {
 interface TreeNodeComponentProps {
 	node: TreeNode;
 	depth: number;
-	selectedFile: string | null;
-	onSelectFile: (filePath: string) => void;
+	selectedFiles: Set<string>;
+	onSelectFile: (filePath: string, modifiers: { shift: boolean; meta: boolean }) => void;
+	onSelectFolder: (folderPath: string) => void;
 	expandedDirs: Set<string>;
 	toggleDir: (path: string) => void;
 	itemRefs: React.RefObject<Map<string, HTMLButtonElement>>;
 }
 
+// Collect all file paths under a tree node
+function collectFilePaths(node: TreeNode): string[] {
+	if (!node.isDirectory) {
+		return node.path ? [node.path] : [];
+	}
+	const paths: string[] = [];
+	for (const child of node.children.values()) {
+		paths.push(...collectFilePaths(child));
+	}
+	return paths;
+}
+
 function TreeNodeComponent({
 	node,
 	depth,
-	selectedFile,
+	selectedFiles,
 	onSelectFile,
+	onSelectFolder,
 	expandedDirs,
 	toggleDir,
 	itemRefs,
@@ -164,11 +178,15 @@ function TreeNodeComponent({
 			<div>
 				<button
 					type="button"
-					onClick={() => toggleDir(node.path)}
-					className={cn(
-						"w-full flex items-center gap-1.5 px-3 py-1 text-left text-sm transition-colors",
-						"hover:bg-accent/50 text-muted-foreground",
-					)}
+					onClick={(e) => {
+						if (e.metaKey || e.ctrlKey) {
+							// Cmd/Ctrl+click selects all files in folder
+							onSelectFolder(node.path);
+						} else {
+							toggleDir(node.path);
+						}
+					}}
+					className="w-full flex items-center gap-1.5 px-3 py-1 text-left text-sm text-muted-foreground"
 					style={{ paddingLeft: `${depth * 12 + 12}px` }}
 				>
 					{isExpanded ? (
@@ -177,9 +195,9 @@ function TreeNodeComponent({
 						<ChevronRightIcon className="size-3 shrink-0" />
 					)}
 					{isExpanded ? (
-						<FolderOpenIcon className="size-4 shrink-0 text-amber-500" />
+						<FolderOpenIcon className="size-4 shrink-0 text-muted-foreground" />
 					) : (
-						<FolderIcon className="size-4 shrink-0 text-amber-500" />
+						<FolderIcon className="size-4 shrink-0 text-muted-foreground" />
 					)}
 					<span className="truncate">{node.name}</span>
 				</button>
@@ -190,8 +208,9 @@ function TreeNodeComponent({
 								key={child.path}
 								node={child}
 								depth={depth + 1}
-								selectedFile={selectedFile}
+								selectedFiles={selectedFiles}
 								onSelectFile={onSelectFile}
+								onSelectFolder={onSelectFolder}
 								expandedDirs={expandedDirs}
 								toggleDir={toggleDir}
 								itemRefs={itemRefs}
@@ -204,7 +223,9 @@ function TreeNodeComponent({
 	}
 
 	// File node
-	const isSelected = node.path === selectedFile;
+	const isSelected = selectedFiles.has(node.path);
+	// Add extra padding to align with folder text (chevron width + gap)
+	const fileIndent = depth * 12 + 12 + 18;
 	return (
 		<button
 			key={node.path}
@@ -213,13 +234,12 @@ function TreeNodeComponent({
 				else itemRefs.current?.delete(node.path);
 			}}
 			type="button"
-			onClick={() => onSelectFile(node.path)}
+			onClick={(e) => onSelectFile(node.path, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey })}
 			className={cn(
-				"w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
-				"hover:bg-accent/50",
-				isSelected && "bg-primary/10 text-foreground",
+				"w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm",
+				isSelected ? "bg-accent/40 text-foreground" : "text-muted-foreground",
 			)}
-			style={{ paddingLeft: `${depth * 12 + 12}px` }}
+			style={{ paddingLeft: `${fileIndent}px` }}
 		>
 			{node.file && getFileStatusIcon(node.file.status)}
 			<span className="truncate font-medium">{node.name}</span>
@@ -229,18 +249,19 @@ function TreeNodeComponent({
 
 export function FileList({
 	files,
-	selectedFile,
-	onSelectFile,
+	selectedFiles,
+	onSelectFiles,
 	totalAdditions,
 	totalDeletions,
 }: FileListProps) {
-	const [focusPanel] = useAtom(focusPanelAtom);
+	const [focusPanel, setFocusPanel] = useAtom(focusPanelAtom);
 	const hasFocus = focusPanel === "diff";
 	const listRef = useRef<HTMLDivElement>(null);
 	const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 	const [filterQuery, setFilterQuery] = useState("");
 	const [viewMode, setViewMode] = useState<"flat" | "tree">("tree");
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+	const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
 
 	// Filter files by search query
 	const filteredFiles = useMemo(() => {
@@ -284,23 +305,105 @@ export function FileList({
 		});
 	}, []);
 
-	const selectedIndex = selectedFile ? filteredFiles.findIndex((f) => f.path === selectedFile) : -1;
+	// Handle file selection with modifiers
+	const handleSelectFile = useCallback(
+		(filePath: string, modifiers: { shift: boolean; meta: boolean }) => {
+			const clickedIndex = filteredFiles.findIndex((f) => f.path === filePath);
+
+			// Set focus to diff panel when clicking on a file
+			setFocusPanel("diff");
+
+			if (modifiers.meta) {
+				// Cmd/Ctrl+click: toggle selection
+				const newSelected = new Set(selectedFiles);
+				if (newSelected.has(filePath)) {
+					newSelected.delete(filePath);
+				} else {
+					newSelected.add(filePath);
+				}
+				onSelectFiles(newSelected);
+				setLastClickedIndex(clickedIndex);
+			} else if (modifiers.shift && lastClickedIndex !== null) {
+				// Shift+click: range selection
+				const start = Math.min(lastClickedIndex, clickedIndex);
+				const end = Math.max(lastClickedIndex, clickedIndex);
+				const newSelected = new Set(selectedFiles);
+				for (let i = start; i <= end; i++) {
+					newSelected.add(filteredFiles[i].path);
+				}
+				onSelectFiles(newSelected);
+			} else {
+				// Normal click: single selection
+				onSelectFiles(new Set([filePath]));
+				setLastClickedIndex(clickedIndex);
+			}
+		},
+		[filteredFiles, selectedFiles, onSelectFiles, lastClickedIndex, setFocusPanel],
+	);
+
+	// Handle folder selection (select all files in folder)
+	const handleSelectFolder = useCallback(
+		(folderPath: string) => {
+			// Find the tree node for this folder
+			const findNode = (node: TreeNode, path: string): TreeNode | null => {
+				if (node.path === path) return node;
+				for (const child of node.children.values()) {
+					const found = findNode(child, path);
+					if (found) return found;
+				}
+				return null;
+			};
+
+			const folderNode = findNode(tree, folderPath);
+			if (!folderNode) return;
+
+			const folderFiles = collectFilePaths(folderNode);
+			const allSelected = folderFiles.every((f) => selectedFiles.has(f));
+
+			const newSelected = new Set(selectedFiles);
+			if (allSelected) {
+				// Deselect all files in folder
+				for (const f of folderFiles) {
+					newSelected.delete(f);
+				}
+			} else {
+				// Select all files in folder
+				for (const f of folderFiles) {
+					newSelected.add(f);
+				}
+			}
+			onSelectFiles(newSelected);
+		},
+		[tree, selectedFiles, onSelectFiles],
+	);
+
+	// Get first selected file index for navigation
+	const firstSelectedPath = selectedFiles.size > 0 ? [...selectedFiles][0] : null;
+	const selectedIndex = firstSelectedPath
+		? filteredFiles.findIndex((f) => f.path === firstSelectedPath)
+		: -1;
 
 	// Navigate to next file
 	const navigateDown = useCallback(() => {
 		if (filteredFiles.length === 0) return;
 		const nextIndex = selectedIndex < filteredFiles.length - 1 ? selectedIndex + 1 : selectedIndex;
 		const nextFile = filteredFiles[nextIndex];
-		if (nextFile) onSelectFile(nextFile.path);
-	}, [filteredFiles, selectedIndex, onSelectFile]);
+		if (nextFile) {
+			onSelectFiles(new Set([nextFile.path]));
+			setLastClickedIndex(nextIndex);
+		}
+	}, [filteredFiles, selectedIndex, onSelectFiles]);
 
 	// Navigate to previous file
 	const navigateUp = useCallback(() => {
 		if (filteredFiles.length === 0) return;
 		const prevIndex = selectedIndex > 0 ? selectedIndex - 1 : 0;
 		const prevFile = filteredFiles[prevIndex];
-		if (prevFile) onSelectFile(prevFile.path);
-	}, [filteredFiles, selectedIndex, onSelectFile]);
+		if (prevFile) {
+			onSelectFiles(new Set([prevFile.path]));
+			setLastClickedIndex(prevIndex);
+		}
+	}, [filteredFiles, selectedIndex, onSelectFiles]);
 
 	// Keyboard navigation when diff panel is focused
 	useKeyboardShortcut({
@@ -327,13 +430,13 @@ export function FileList({
 		enabled: hasFocus,
 	});
 
-	// Scroll selected item into view
+	// Scroll first selected item into view
 	useEffect(() => {
-		if (selectedFile) {
-			const item = itemRefs.current.get(selectedFile);
+		if (firstSelectedPath) {
+			const item = itemRefs.current.get(firstSelectedPath);
 			item?.scrollIntoView({ block: "nearest", behavior: "instant" });
 		}
-	}, [selectedFile]);
+	}, [firstSelectedPath]);
 
 	return (
 		<div className="flex flex-col h-full w-full overflow-hidden">
@@ -375,17 +478,17 @@ export function FileList({
 						placeholder="Filter files..."
 						value={filterQuery}
 						onChange={(e) => setFilterQuery(e.target.value)}
-						className="h-7 pl-7 text-xs"
+						className="h-7 pl-7 text-xs rounded-md"
 					/>
 				</div>
 			</div>
 
 			<ScrollArea className="flex-1">
-				<div ref={listRef} className="py-1">
+				<div ref={listRef}>
 					{viewMode === "flat"
 						? // Flat list view
-							filteredFiles.map((file) => {
-								const isSelected = file.path === selectedFile;
+							filteredFiles.map((file, index) => {
+								const isSelected = selectedFiles.has(file.path);
 								const fileName = getFileName(file.path);
 								const directory = getFileDirectory(file.path);
 
@@ -397,11 +500,19 @@ export function FileList({
 											else itemRefs.current.delete(file.path);
 										}}
 										type="button"
-										onClick={() => onSelectFile(file.path)}
+										onClick={(e) =>
+											handleSelectFile(file.path, {
+												shift: e.shiftKey,
+												meta: e.metaKey || e.ctrlKey,
+											})
+										}
 										className={cn(
-											"w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
-											"hover:bg-accent/50",
-											isSelected && "bg-primary/10 text-foreground",
+											"w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm",
+											isSelected
+												? "bg-accent/40 text-foreground"
+												: index % 2 === 1
+													? "bg-muted/30 text-muted-foreground"
+													: "text-muted-foreground",
 										)}
 									>
 										{getFileStatusIcon(file.status)}
@@ -420,8 +531,9 @@ export function FileList({
 									key={child.path}
 									node={child}
 									depth={0}
-									selectedFile={selectedFile}
-									onSelectFile={onSelectFile}
+									selectedFiles={selectedFiles}
+									onSelectFile={handleSelectFile}
+									onSelectFolder={handleSelectFolder}
 									expandedDirs={expandedDirs}
 									toggleDir={toggleDir}
 									itemRefs={itemRefs}

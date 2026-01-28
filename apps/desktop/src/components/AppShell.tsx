@@ -22,6 +22,7 @@ function useIsNarrowScreen() {
 }
 
 import { AceJump } from "@/components/AceJump";
+import { AppHeader } from "@/components/AppHeader";
 import { CommandPalette } from "@/components/CommandPalette";
 import { PrerenderedDiffPanel } from "@/components/DiffPanel";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
@@ -64,6 +65,7 @@ function AppShellEmpty() {
 	const navigate = useNavigate();
 	const { handleAddRepository } = useAddRepository();
 	const { data: repositories = [] } = useLiveQuery(repositoriesCollection);
+	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 
 	function handleSelectRepository(repository: Repository) {
 		navigate({ to: "/project/$projectId", params: { projectId: repository.id } });
@@ -80,8 +82,19 @@ function AppShellEmpty() {
 				onOpenSettings={() => navigate({ to: "/settings" })}
 			/>
 			<KeyboardShortcutsHelp />
-			<ProjectPicker repositories={repositories} onSelectRepository={handleSelectRepository} />
+			<ProjectPicker
+				repositories={repositories}
+				onSelectRepository={handleSelectRepository}
+				open={projectPickerOpen}
+				onOpenChange={setProjectPickerOpen}
+			/>
 			<div className="flex flex-col h-screen overflow-hidden">
+				<AppHeader
+					projectName={null}
+					onOpenProject={() => setProjectPickerOpen(true)}
+					onSync={() => {}}
+					onOpenSearch={() => {}}
+				/>
 				<div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">
 					<p>Select or add a repository to get started</p>
 				</div>
@@ -103,6 +116,8 @@ function AppShellWithProject() {
 	const [flash, setFlash] = useState<{ changeId: string; key: number } | null>(null);
 	const [viewMode, setViewMode] = useAtom(viewModeAtom);
 	const [pendingAbandon, setPendingAbandon] = useState<Revision | null>(null);
+	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+	const [isSyncing, setIsSyncing] = useState(false);
 	const revisionGraphRef = useRef<RevisionGraphHandle>(null);
 	const isNarrowScreen = useIsNarrowScreen();
 	const { handleAddRepository } = useAddRepository();
@@ -405,9 +420,28 @@ function AppShellWithProject() {
 		return null;
 	})();
 
+	function handleSync() {
+		if (!activeProject || isSyncing) return;
+		setIsSyncing(true);
+		// TODO: Implement jj git fetch
+		// For now, just simulate a sync delay
+		setTimeout(() => setIsSyncing(false), 1000);
+	}
+
+	function handleOpenSearch() {
+		// Focus the AceJump / revision search
+		// The "/" key already triggers this via AceJump
+		window.dispatchEvent(new KeyboardEvent("keydown", { key: "/" }));
+	}
+
 	return (
 		<>
-			<ProjectPicker repositories={repositories} onSelectRepository={handleSelectRepository} />
+			<ProjectPicker
+				repositories={repositories}
+				onSelectRepository={handleSelectRepository}
+				open={projectPickerOpen}
+				onOpenChange={setProjectPickerOpen}
+			/>
 			<CommandPalette
 				onOpenRepo={handleAddRepository}
 				onOpenProjects={() => navigate({ to: "/repositories" })}
@@ -426,6 +460,13 @@ function AppShellWithProject() {
 				}}
 			/>
 			<div className="flex flex-col h-screen overflow-hidden">
+				<AppHeader
+					projectName={activeProject?.name ?? null}
+					onOpenProject={() => setProjectPickerOpen(true)}
+					onSync={handleSync}
+					onOpenSearch={handleOpenSearch}
+					isSyncing={isSyncing}
+				/>
 				<div className="flex-1 min-h-0">
 					{viewMode === 1 ? (
 						// Overview mode: only revision list

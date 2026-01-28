@@ -1000,16 +1000,14 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const wcIndex = workingCopy ? changeIdToIndex.get(workingCopy.change_id) : undefined;
 
 		// Calculate edge layer dimensions and row center positions
-		const TOP_PADDING = 16; // Matches pt-4 on RevisionRow
-		const CONTENT_MIN_HEIGHT = 56; // Matches min-h-[56px] on RevisionRow content
 		const getRowStart = (row: number) => rowOffsets.get(row) ?? row * ROW_HEIGHT;
-		const getRowCenter = (row: number) => getRowStart(row) + TOP_PADDING + CONTENT_MIN_HEIGHT / 2;
+		const getRowCenter = (row: number) => getRowStart(row) + ROW_HEIGHT / 2;
 		const graphWidth = LANE_PADDING + laneCount * LANE_WIDTH + NODE_RADIUS + 2;
 
 		return (
 			<div
 				ref={parentRef}
-				className="h-full overflow-auto ascii-bg"
+				className="h-full overflow-auto ascii-bg pt-4"
 				style={{ overflowAnchor: "none" }}
 			>
 				<div
@@ -1046,8 +1044,6 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 								const { stack, lane } = displayRow;
 								const nodeAreaWidth = LANE_PADDING + (lane + 1) * LANE_WIDTH;
 								const count = stack.intermediateChangeIds.length;
-								// Show up to 3 stacked card layers
-								const layers = Math.min(count, 3);
 
 								// Check if this stack is related to the selected revision (for dimming)
 								const isStackRelated = stack.changeIds.some((id) => relatedRevisions.has(id));
@@ -1065,69 +1061,46 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 											height: ROW_HEIGHT,
 										}}
 									>
-										<div className="flex flex-col relative" style={{ height: ROW_HEIGHT }}>
-											<div className="flex items-start min-h-[56px] pt-4">
-												{/* Spacer for graph area */}
-												<div className="shrink-0" style={{ width: nodeAreaWidth }} />
-												<button
-													type="button"
-													onClick={() => handleToggleStack(stack.id)}
-													className={`relative flex-1 mr-2 min-w-0 my-2 mx-1 cursor-pointer group ${isStackDimmed ? "opacity-40" : ""}`}
-													style={{ height: 40 }}
-													data-focused={isStackFocused || undefined}
-													data-stack-id={stack.id}
-												>
-													{/* Stacked card layers */}
-													{Array.from({ length: layers }).map((_, i) => {
-														const layerIndex = layers - 1 - i; // Render back layers first
-														const offset = layerIndex * 4;
-														const isTopLayer = layerIndex === 0;
-														const scale = 1 - layerIndex * 0.02;
-
-														return (
-															<div
-																key={layerIndex}
-																className={`absolute left-0 right-0 rounded border shadow-sm group-hover:border-muted-foreground/50 ${
-																	isStackFocused && isTopLayer
-																		? "bg-accent/40 border-accent/60"
-																		: "bg-card border-border"
-																} text-card-foreground`}
-																style={{
-																	top: 0,
-																	height: 40,
-																	transform: `translateY(${offset}px) scaleX(${scale})`,
-																	transformOrigin: "top center",
-																	opacity: 1 - layerIndex * 0.2,
-																	zIndex: layers - layerIndex,
-																}}
-															/>
-														);
-													})}
-													{/* Content overlay on top card */}
-													<div
-														className="absolute inset-0 flex items-center justify-center gap-2 rounded"
-														style={{ zIndex: layers + 1, height: 40 }}
+										<div className="flex relative" style={{ height: ROW_HEIGHT }}>
+											{/* Spacer for graph area */}
+											<div className="shrink-0" style={{ width: nodeAreaWidth + 8 }} />
+											<button
+												type="button"
+												onClick={() => handleToggleStack(stack.id)}
+												className={`relative flex-1 mr-2 min-w-0 py-1 flex items-center justify-center outline-none border-b ${
+													isStackFocused
+														? "bg-accent/40 rounded-md border-transparent"
+														: "border-border/30"
+												} ${isStackDimmed ? "opacity-40" : ""}`}
+												ref={(el) => {
+													// Programmatically focus when stack becomes focused
+													if (isStackFocused && el && document.activeElement !== el) {
+														el.focus({ preventScroll: true });
+													}
+												}}
+												data-stack-id={stack.id}
+											>
+												{/* Content */}
+												<div className="flex items-center justify-center gap-2">
+													<svg
+														className="w-3.5 h-3.5 text-muted-foreground"
+														fill="none"
+														viewBox="0 0 24 24"
+														stroke="currentColor"
+														aria-hidden="true"
 													>
-														<svg
-															className="w-3.5 h-3.5 text-muted-foreground"
-															fill="none"
-															viewBox="0 0 24 24"
-															stroke="currentColor"
-															aria-hidden="true"
-														>
-															<path
-																strokeLinecap="round"
-																strokeLinejoin="round"
-																strokeWidth={2}
-																d="M19 9l-7 7-7-7"
-															/>
-														</svg>
-														<span className="text-xs text-muted-foreground group-hover:text-foreground">
-															{count} hidden revision{count !== 1 ? "s" : ""}
-														</span>
-													</div>
-												</button>
-											</div>
+														<path
+															strokeLinecap="round"
+															strokeLinejoin="round"
+															strokeWidth={2}
+															d="M19 9l-7 7-7-7"
+														/>
+													</svg>
+													<span className="text-xs text-muted-foreground">
+														{count} hidden revision{count !== 1 ? "s" : ""}
+													</span>
+												</div>
+											</button>
 										</div>
 									</div>
 								);

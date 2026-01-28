@@ -210,22 +210,9 @@
 	}
 }
 
-/* ASCII pattern background for revision graph */
+/* Background for revision graph (dotted pattern removed for Mac-native look) */
 .ascii-bg {
 	background-color: var(--background);
-	background-image:
-		radial-gradient(
-			circle,
-			color-mix(in oklch, var(--foreground) 12%, transparent) 1px,
-			transparent 1px
-		),
-		radial-gradient(
-			circle,
-			color-mix(in oklch, var(--foreground) 8%, transparent) 1px,
-			transparent 1px
-		);
-	background-size: 40px 40px;
-	background-position: 2px 2px, 22px 22px;
 }
 
 
@@ -233,6 +220,16 @@
 line.stack-edge.stack-edge-hovered {
 	stroke-width: 3;
 	stroke-opacity: 1;
+}
+
+/* @pierre/diffs theme integration */
+[data-diffs-header],
+[data-diffs],
+[data-error-wrapper] {
+	--diffs-light-bg: var(--background);
+	--diffs-dark-bg: var(--background);
+	--diffs-light: var(--foreground);
+	--diffs-dark: var(--foreground);
 }
 
 /* Sticky header for @pierre/diffs file diffs */

@@ -80,120 +80,124 @@ export function RevisionRow({
 		});
 	}
 
-	// Constants matching edge layer calculations
-	const TOP_PADDING = 16;
-	const CONTENT_MIN_HEIGHT = 56;
 	const nodeSize = revision.is_working_copy ? NODE_RADIUS * 2 + 14 : NODE_RADIUS * 2 + 8;
 
 	return (
-		<div style={{ height: isExpanded ? "auto" : ROW_HEIGHT }} className="flex flex-col relative">
+		// biome-ignore lint/a11y/useSemanticElements: Complex styling requires div
+		<div
+			ref={(el) => {
+				// Focus management: when this row is focused and rendered, focus the DOM element
+				if (isFocused && el && document.activeElement !== el) {
+					el.focus({ preventScroll: true });
+				}
+			}}
+			role="button"
+			tabIndex={0}
+			style={{ height: isExpanded ? "auto" : ROW_HEIGHT }}
+			className={`flex relative select-none outline-none ${
+				revision.is_immutable ? "opacity-60" : ""
+			} ${isDimmed ? "opacity-40" : ""}`}
+			data-selected={isSelected || undefined}
+			data-checked={isChecked || undefined}
+			data-expanded={isExpanded || undefined}
+			data-change-id={revision.change_id}
+			onClick={(e) => {
+				// Prevent text selection on shift+click
+				if (e.shiftKey) {
+					e.preventDefault();
+					window.getSelection()?.removeAllRanges();
+				}
+				// Set focus to revisions panel when clicking
+				setFocusPanel("revisions");
+				onSelect(revision.change_id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
+			}}
+			onKeyDown={(e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					onSelect(revision.change_id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
+				}
+			}}
+		>
 			{/* Graph node - absolutely positioned to align with edge layer */}
 			<div
 				className="absolute z-20 flex items-center justify-center"
 				style={{
 					left: nodeOffset - nodeSize / 2,
-					top: TOP_PADDING + CONTENT_MIN_HEIGHT / 2 - nodeSize / 2,
+					top: ROW_HEIGHT / 2 - nodeSize / 2,
 				}}
 			>
 				<GraphNode revision={revision} lane={lane} isSelected={isSelected} color={color} />
 			</div>
-			<div className="flex items-start min-h-[56px] pt-4">
-				{/* Spacer for graph area */}
-				<div className="shrink-0" style={{ width: nodeAreaWidth }} />
-				{/* biome-ignore lint/a11y/useSemanticElements: Complex styling requires div */}
-				<div
-					role="button"
-					tabIndex={0}
-					className={`relative flex-1 mr-2 min-w-0 overflow-hidden rounded my-2 mx-1 select-none border ${
-						isFocused || isChecked
-							? "bg-accent/40 border-accent/60 hover:bg-accent/50"
-							: "bg-card hover:bg-muted border-border"
-					} text-card-foreground shadow-sm hover:shadow hover:cursor-pointer ${
-						revision.is_immutable ? "opacity-60" : ""
-					} ${isDimmed ? "opacity-40" : ""}`}
-					data-focused={isFocused || undefined}
-					data-selected={isSelected || undefined}
-					data-checked={isChecked || undefined}
-					data-expanded={isExpanded || undefined}
-					data-change-id={revision.change_id}
-					onClick={(e) => {
-						// Prevent text selection on shift+click
-						if (e.shiftKey) {
-							e.preventDefault();
-							window.getSelection()?.removeAllRanges();
-						}
-						onSelect(revision.change_id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
-					}}
-					onKeyDown={(e) => {
-						if (e.key === "Enter" || e.key === " ") {
-							onSelect(revision.change_id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
-						}
-					}}
-				>
-					<div className={`px-3 py-2 min-w-0 ${isPendingAbandon ? "blur-sm" : ""}`}>
-						<div className="flex items-center gap-2 flex-nowrap min-w-0">
-							<code
-								className={`text-xs font-mono rounded px-0.5 shrink-0 ${
-									isFlashing ? "bg-primary/40 animate-pulse" : ""
-								} text-muted-foreground`}
-							>
-								{jumpModeActive && jumpHint ? (
-									<>
-										{/* Already matched portion */}
-										{jumpQuery && (
-											<span className="bg-primary/30 text-primary font-semibold">
-												{revision.change_id_short.slice(0, jumpQuery.length)}
-											</span>
-										)}
-										{/* Next character to type (the hint) */}
-										<span className="bg-primary text-primary-foreground font-semibold rounded-sm">
-											{revision.change_id_short[jumpQuery.length]}
+			{/* Spacer for graph area */}
+			<div className="shrink-0" style={{ width: nodeAreaWidth + 8 }} />
+			{/* Content area with visual styling - full row height */}
+			<div
+				className={`relative flex-1 mr-2 min-w-0 overflow-hidden text-card-foreground flex flex-col justify-center py-1 border-b ${
+					isChecked || isFocused ? "bg-accent/40 rounded-md border-transparent" : "border-border/30"
+				}`}
+			>
+				<div className={`px-3 py-1.5 min-w-0 ${isPendingAbandon ? "blur-sm" : ""}`}>
+					<div className="flex items-center gap-2 flex-nowrap min-w-0">
+						<code
+							className={`text-xs font-mono rounded px-0.5 shrink-0 ${
+								isFlashing ? "bg-primary/40 animate-pulse" : ""
+							} text-muted-foreground`}
+						>
+							{jumpModeActive && jumpHint ? (
+								<>
+									{/* Already matched portion */}
+									{jumpQuery && (
+										<span className="bg-primary/30 text-primary font-semibold">
+											{revision.change_id_short.slice(0, jumpQuery.length)}
 										</span>
-										{/* Rest of the ID */}
-										<span>{revision.change_id_short.slice(jumpQuery.length + 1)}</span>
-									</>
-								) : (
-									revision.change_id_short
-								)}
-							</code>
-							{revision.bookmarks.length > 0 && (
-								<span
-									className="text-xs text-primary font-medium truncate min-w-0 whitespace-nowrap"
-									title={revision.bookmarks.join(", ")}
-								>
-									{revision.bookmarks.join(", ")}
-								</span>
+									)}
+									{/* Next character to type (the hint) */}
+									<span className="bg-primary text-primary-foreground font-semibold rounded-sm">
+										{revision.change_id_short[jumpQuery.length]}
+									</span>
+									{/* Rest of the ID */}
+									<span>{revision.change_id_short.slice(jumpQuery.length + 1)}</span>
+								</>
+							) : (
+								revision.change_id_short
 							)}
-							<span className="text-xs text-muted-foreground truncate min-w-0 shrink-0">
-								{revision.author.split("@")[0]} · {revision.timestamp}
+						</code>
+						{revision.bookmarks.length > 0 && (
+							<span
+								className="text-xs text-primary font-medium truncate min-w-0 whitespace-nowrap"
+								title={revision.bookmarks.join(", ")}
+							>
+								{revision.bookmarks.join(", ")}
 							</span>
-						</div>
-						<div className={`text-sm mt-1 ${isExpanded ? "" : "truncate"}`}>{firstLine}</div>
+						)}
+						<span className="text-xs text-muted-foreground truncate min-w-0 shrink-0">
+							{revision.author.split("@")[0]} · {revision.timestamp}
+						</span>
 					</div>
-					{isExpanded && (
-						<div className={`px-3 pb-3 pt-0 space-y-3 ${isPendingAbandon ? "blur-sm" : ""}`}>
-							<pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-mono bg-muted/40 border border-border/60 rounded p-2">
-								{fullDescription}
-							</pre>
-							<div className="border border-border rounded-lg overflow-hidden bg-background">
-								<ChangedFilesList
-									files={changedFilesQuery.data ?? []}
-									selectedFile={selectedFile}
-									onSelectFile={handleSelectFile}
-									isLoading={changedFilesQuery.isLoading}
-								/>
-							</div>
-						</div>
-					)}
-					{isPendingAbandon && (
-						<div className="absolute inset-0 flex items-center justify-center bg-destructive/10 rounded">
-							<div className="text-sm font-medium text-destructive-foreground bg-destructive/90 px-3 py-1.5 rounded">
-								Abandon this revision? <kbd className="ml-1 px-1 bg-background/20 rounded">Y</kbd> /{" "}
-								<kbd className="px-1 bg-background/20 rounded">N</kbd>
-							</div>
-						</div>
-					)}
+					<div className={`text-sm mt-1 ${isExpanded ? "" : "truncate"}`}>{firstLine}</div>
 				</div>
+				{isExpanded && (
+					<div className={`px-3 pb-3 pt-0 space-y-3 ${isPendingAbandon ? "blur-sm" : ""}`}>
+						<pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-mono bg-muted/40 border border-border/60 rounded p-2">
+							{fullDescription}
+						</pre>
+						<div className="border border-border rounded-lg overflow-hidden bg-background">
+							<ChangedFilesList
+								files={changedFilesQuery.data ?? []}
+								selectedFile={selectedFile}
+								onSelectFile={handleSelectFile}
+								isLoading={changedFilesQuery.isLoading}
+							/>
+						</div>
+					</div>
+				)}
+				{isPendingAbandon && (
+					<div className="absolute inset-0 flex items-center justify-center bg-destructive/10 rounded">
+						<div className="text-sm font-medium text-destructive-foreground bg-destructive/90 px-3 py-1.5 rounded">
+							Abandon this revision? <kbd className="ml-1 px-1 bg-background/20 rounded">Y</kbd> /{" "}
+							<kbd className="px-1 bg-background/20 rounded">N</kbd>
+						</div>
+					</div>
+				)}
 			</div>
 		</div>
 	);

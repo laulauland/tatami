@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import agentation from "vite-plugin-agentation";
+import { consoleForwardPlugin } from "./dev/vite-plugin-console-forward";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -16,7 +17,8 @@ export default defineConfig({
 			},
 		}),
 		tailwindcss(),
-		agentation()
+		agentation(),
+		consoleForwardPlugin()
 	],
 	resolve: {
 		alias: {

@@ -1,12 +1,12 @@
-import { useAtom } from "@effect-atom/atom-react";
 import type { RefObject } from "react";
-import { focusPanelAtom } from "@/atoms";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 
 const SCROLL_AMOUNT = 100;
 
 interface UseDiffPanelKeyboardOptions {
 	scrollContainerRef: RefObject<HTMLDivElement | null>;
+	revisionsPanelRef: RefObject<HTMLElement | null>;
+	hasFocus: boolean;
 	enabled?: boolean;
 }
 
@@ -17,11 +17,11 @@ interface UseDiffPanelKeyboardOptions {
  */
 export function useDiffPanelKeyboard({
 	scrollContainerRef,
+	revisionsPanelRef,
+	hasFocus,
 	enabled = true,
 }: UseDiffPanelKeyboardOptions) {
-	const [focusPanel, setFocusPanel] = useAtom(focusPanelAtom);
-	const hasDiffFocus = focusPanel === "diff";
-	const isEnabled = enabled && hasDiffFocus;
+	const isEnabled = enabled && hasFocus;
 
 	// j/k/arrows scroll the diff panel
 	useKeyboardShortcut({
@@ -60,14 +60,14 @@ export function useDiffPanelKeyboard({
 	useKeyboardShortcut({
 		key: "h",
 		modifiers: {},
-		onPress: () => setFocusPanel("revisions"),
+		onPress: () => revisionsPanelRef.current?.focus(),
 		enabled: isEnabled,
 	});
 
 	useKeyboardShortcut({
 		key: "ArrowLeft",
 		modifiers: {},
-		onPress: () => setFocusPanel("revisions"),
+		onPress: () => revisionsPanelRef.current?.focus(),
 		enabled: isEnabled,
 	});
 }

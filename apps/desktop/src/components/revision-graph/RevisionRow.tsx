@@ -2,7 +2,7 @@ import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Route } from "@/routes/project.$projectId";
-import { focusPanelAtom, viewModeAtom } from "@/atoms";
+import { draggingBookmarkAtom, viewModeAtom } from "@/atoms";
 import { ChangedFilesList } from "@/components/ChangedFilesList";
 import { emptyChangesCollection, getRevisionChangesCollection } from "@/db";
 import type { Revision } from "@/tauri-commands";
@@ -60,7 +60,6 @@ export function RevisionRow({
 	const search = useSearch({ from: Route.fullPath });
 	const navigate = useNavigate({ from: Route.fullPath });
 	const [viewMode, setViewMode] = useAtom(viewModeAtom);
-	const [, setFocusPanel] = useAtom(focusPanelAtom);
 
 	const changedFilesCollection =
 		isExpanded && repoPath
@@ -69,10 +68,9 @@ export function RevisionRow({
 	const changedFilesQuery = useLiveQuery(changedFilesCollection);
 
 	function handleSelectFile(filePath: string) {
-		// If in overview mode, switch to split mode and focus diff panel
+		// If in overview mode, switch to split mode
 		if (viewMode === 1) {
 			setViewMode(2);
-			setFocusPanel("diff");
 		}
 		// Clear expanded state and navigate to file
 		navigate({
@@ -107,8 +105,6 @@ export function RevisionRow({
 					e.preventDefault();
 					window.getSelection()?.removeAllRanges();
 				}
-				// Set focus to revisions panel when clicking
-				setFocusPanel("revisions");
 				onSelect(revision.change_id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
 			}}
 			onKeyDown={(e) => {

@@ -1,4 +1,3 @@
-import { useAtom } from "@effect-atom/atom-react";
 import {
 	ChevronDownIcon,
 	ChevronRightIcon,
@@ -13,7 +12,6 @@ import {
 	SearchIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { focusPanelAtom } from "@/atoms";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -27,6 +25,7 @@ interface FileListProps {
 	onSelectFiles: (filePaths: Set<string>) => void;
 	totalAdditions: number;
 	totalDeletions: number;
+	hasFocus: boolean;
 }
 
 function getFileStatusIcon(status: ChangedFileStatus) {
@@ -253,9 +252,8 @@ export function FileList({
 	onSelectFiles,
 	totalAdditions,
 	totalDeletions,
+	hasFocus,
 }: FileListProps) {
-	const [focusPanel, setFocusPanel] = useAtom(focusPanelAtom);
-	const hasFocus = focusPanel === "diff";
 	const listRef = useRef<HTMLDivElement>(null);
 	const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 	const [filterQuery, setFilterQuery] = useState("");
@@ -310,9 +308,6 @@ export function FileList({
 		(filePath: string, modifiers: { shift: boolean; meta: boolean }) => {
 			const clickedIndex = filteredFiles.findIndex((f) => f.path === filePath);
 
-			// Set focus to diff panel when clicking on a file
-			setFocusPanel("diff");
-
 			if (modifiers.meta) {
 				// Cmd/Ctrl+click: toggle selection
 				const newSelected = new Set(selectedFiles);
@@ -338,7 +333,7 @@ export function FileList({
 				setLastClickedIndex(clickedIndex);
 			}
 		},
-		[filteredFiles, selectedFiles, onSelectFiles, lastClickedIndex, setFocusPanel],
+		[filteredFiles, selectedFiles, onSelectFiles, lastClickedIndex],
 	);
 
 	// Handle folder selection (select all files in folder)

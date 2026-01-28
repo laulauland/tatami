@@ -36,7 +36,7 @@ export function RevisionHeader({ revision }: RevisionHeaderProps) {
 					<span className="text-foreground">{revision.timestamp}</span>
 				</div>
 				{title && (
-					<div className="mt-2 pt-2 border-t border-border">
+					<div className="mt-2 pt-2">
 						<div className="flex items-start gap-1">
 							{hasBody && (
 								<button

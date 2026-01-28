@@ -1,6 +1,7 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { RefObject } from "react";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { Route } from "@/routes/project.$projectId";
 import {
@@ -17,6 +18,7 @@ import {
 	type RevisionStack,
 } from "@/components/revision-graph-utils";
 import { prefetchRevisionDiffs } from "@/db";
+import { useFocusWithin } from "@/hooks/useFocusWithin";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import { useRevisionGraphNavigation } from "@/hooks/useRevisionGraphNavigation";
 import type { Revision } from "@/tauri-commands";
@@ -54,6 +56,7 @@ interface RevisionGraphProps {
 	flash?: { changeId: string; key: number } | null;
 	repoPath: string | null;
 	pendingAbandon?: Revision | null;
+	diffPanelRef: RefObject<HTMLElement | null>;
 }
 
 // Get the set of commit IDs in the working copy's ancestor chain (for lane 0)
@@ -365,10 +368,23 @@ function getRelatedRevisions(revisions: Revision[], selectedChangeId: string | n
 
 export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>(
 	function RevisionGraph(
-		{ revisions, selectedRevision, onSelectRevision, isLoading, flash, repoPath, pendingAbandon },
+		{
+			revisions,
+			selectedRevision,
+			onSelectRevision,
+			isLoading,
+			flash,
+			repoPath,
+			pendingAbandon,
+			diffPanelRef,
+		},
 		ref,
 	) {
 		const parentRef = useRef<HTMLDivElement>(null);
+		const containerRef = useRef<HTMLDivElement>(null);
+
+		// Use native focus tracking
+		const hasFocus = useFocusWithin(containerRef);
 		const {
 			nodes,
 			laneCount,
@@ -678,6 +694,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			scrollToIndex: (index) => scrollToIndexIfNeededRef.current?.(index),
 			onToggleStack: handleToggleStack,
 			isSelectedExpanded,
+			hasFocus,
+			diffPanelRef,
 		});
 
 		// Toggle debug overlay with Ctrl+Shift+D
@@ -713,14 +731,15 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			enabled: inlineJumpMode,
 		});
 
+		const COLLAPSED_STACK_HEIGHT = 32;
+
 		const rowVirtualizer = useVirtualizer({
 			count: displayRows.length,
 			getScrollElement: () => parentRef.current,
 			estimateSize: (index: number) => {
 				const displayRow = displayRows[index];
 				if (displayRow.type === "collapsed-stack") {
-					// Same height as a regular revision row
-					return ROW_HEIGHT;
+					return COLLAPSED_STACK_HEIGHT;
 				}
 				const row = displayRow.row;
 				const isExpanded =
@@ -986,7 +1005,11 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 		if (revisions.length === 0) {
 			return (
-				<div className="flex items-center justify-center h-full bg-background text-muted-foreground text-sm">
+				<div
+					ref={containerRef}
+					tabIndex={-1}
+					className="flex items-center justify-center h-full bg-background text-muted-foreground text-sm outline-none"
+				>
 					{isLoading ? "Loading revisions..." : "Select a project to view revisions"}
 				</div>
 			);
@@ -1005,164 +1028,179 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const graphWidth = LANE_PADDING + laneCount * LANE_WIDTH + NODE_RADIUS + 2;
 
 		return (
-			<div
-				ref={parentRef}
-				className="h-full overflow-auto ascii-bg pt-4"
-				style={{ overflowAnchor: "none" }}
-			>
+			<div ref={containerRef} tabIndex={-1} className="h-full outline-none">
 				<div
-					className="relative"
-					style={{
-						height: `${totalHeight}px`,
-						width: "100%",
-					}}
+					ref={parentRef}
+					className="h-full overflow-auto ascii-bg pt-4"
+					style={{ overflowAnchor: "none" }}
 				>
-					{/* Edge layer - semantic edge components positioned absolutely */}
-					{/* Key includes expandedStacks to force remount when stack state changes */}
-					<EdgeLayer
-						key={`edges-${[...expandedStacks].sort().join(",")}`}
-						bindings={filteredEdgeBindings}
-						commitToRow={commitToRowIndex}
-						revisionMap={revisionMapByCommitId}
-						getRowCenter={getRowCenter}
-						totalHeight={totalHeight}
-						width={graphWidth}
-						visibleStartRow={visibleStartRow}
-						visibleEndRow={visibleEndRow}
-						stackById={stackById}
-						changeIdToCommitId={changeIdToCommitId}
-						onToggleStack={handleToggleStack}
-					/>
+					<div
+						className="relative"
+						style={{
+							height: `${totalHeight}px`,
+							width: "100%",
+						}}
+					>
+						{/* Edge layer - semantic edge components positioned absolutely */}
+						{/* Key includes expandedStacks to force remount when stack state changes */}
+						<EdgeLayer
+							key={`edges-${[...expandedStacks].sort().join(",")}`}
+							bindings={filteredEdgeBindings}
+							commitToRow={commitToRowIndex}
+							revisionMap={revisionMapByCommitId}
+							getRowCenter={getRowCenter}
+							totalHeight={totalHeight}
+							width={graphWidth}
+							visibleStartRow={visibleStartRow}
+							visibleEndRow={visibleEndRow}
+							stackById={stackById}
+							changeIdToCommitId={changeIdToCommitId}
+							onToggleStack={handleToggleStack}
+						/>
 
-					{/* Virtualized rows with inline graph nodes */}
-					<div className="relative z-10">
-						{virtualItems.map((virtualRow) => {
-							const displayRow = displayRows[virtualRow.index];
+						{/* Virtualized rows with inline graph nodes */}
+						<div className="relative z-10">
+							{virtualItems.map((virtualRow) => {
+								const displayRow = displayRows[virtualRow.index];
 
-							// Collapsed stack row - styled as stacked cards
-							if (displayRow.type === "collapsed-stack") {
-								const { stack, lane } = displayRow;
-								const nodeAreaWidth = LANE_PADDING + (lane + 1) * LANE_WIDTH;
-								const count = stack.intermediateChangeIds.length;
+								// Collapsed stack row - styled as stacked cards
+								if (displayRow.type === "collapsed-stack") {
+									const { stack, lane } = displayRow;
+									const nodeAreaWidth = LANE_PADDING + (lane + 1) * LANE_WIDTH;
+									const count = stack.intermediateChangeIds.length;
 
-								// Check if this stack is related to the selected revision (for dimming)
-								const isStackRelated = stack.changeIds.some((id) => relatedRevisions.has(id));
-								const isStackDimmed = selectedRevision !== null && !isStackRelated;
-								const isStackFocused = focusedStackId === stack.id;
+									// Check if this stack is related to the selected revision (for dimming)
+									const isStackRelated = stack.changeIds.some((id) => relatedRevisions.has(id));
+									const isStackDimmed = selectedRevision !== null && !isStackRelated;
+									const isStackFocused = focusedStackId === stack.id;
+
+									return (
+										<div
+											key={`collapsed-${stack.id}`}
+											ref={rowVirtualizer.measureElement}
+											data-index={virtualRow.index}
+											className="absolute left-0 w-full"
+											style={{
+												transform: `translateY(${virtualRow.start}px)`,
+												height: COLLAPSED_STACK_HEIGHT,
+											}}
+										>
+											<div className="flex relative" style={{ height: COLLAPSED_STACK_HEIGHT }}>
+												{/* Spacer for graph area */}
+												<div className="shrink-0" style={{ width: nodeAreaWidth + 8 }} />
+												<button
+													type="button"
+													onClick={() => {
+														// Focus the stack (similar to keyboard navigation)
+														navigate({
+															search: {
+																...search,
+																stack: stack.id,
+																rev: undefined,
+																selected: undefined,
+																selectionAnchor: undefined,
+															},
+															replace: true,
+														});
+													}}
+													onDoubleClick={() => handleToggleStack(stack.id)}
+													className={`relative flex-1 mr-2 min-w-0 py-1 flex items-center justify-center outline-none border-b ${
+														isStackFocused
+															? "bg-accent/40 rounded-md border-transparent"
+															: "border-border/30"
+													} ${isStackDimmed ? "opacity-40" : ""}`}
+													ref={(el) => {
+														// Programmatically focus when stack becomes focused
+														if (isStackFocused && el && document.activeElement !== el) {
+															el.focus({ preventScroll: true });
+														}
+													}}
+													data-stack-id={stack.id}
+												>
+													{/* Content */}
+													<div className="flex items-center justify-center gap-2">
+														<svg
+															className="w-3.5 h-3.5 text-muted-foreground"
+															fill="none"
+															viewBox="0 0 24 24"
+															stroke="currentColor"
+															aria-hidden="true"
+														>
+															<path
+																strokeLinecap="round"
+																strokeLinejoin="round"
+																strokeWidth={2}
+																d="M7 10l5-5 5 5M7 14l5 5 5-5"
+															/>
+														</svg>
+														<span className="text-xs text-muted-foreground">
+															{count} elided revision{count !== 1 ? "s" : ""}
+														</span>
+													</div>
+												</button>
+											</div>
+										</div>
+									);
+								}
+
+								// Regular revision row
+								const { row } = displayRow;
+								const lane = changeIdToLane.get(row.revision.change_id) ?? 0;
+								const isFlashing = flash?.changeId === row.revision.change_id;
+								const isDimmed =
+									(selectedRevision !== null || focusedStackId !== null) &&
+									!relatedRevisions.has(row.revision.change_id);
+								// Only show focus if no stack is focused
+								const isFocused =
+									!focusedStackId && selectedRevision?.change_id === row.revision.change_id;
+								const isSelected = isFocused;
+								const isExpanded = isSelectedExpanded && isFocused;
 
 								return (
 									<div
-										key={`collapsed-${stack.id}`}
+										key={row.revision.change_id}
 										ref={rowVirtualizer.measureElement}
 										data-index={virtualRow.index}
 										className="absolute left-0 w-full"
 										style={{
 											transform: `translateY(${virtualRow.start}px)`,
-											height: ROW_HEIGHT,
 										}}
 									>
-										<div className="flex relative" style={{ height: ROW_HEIGHT }}>
-											{/* Spacer for graph area */}
-											<div className="shrink-0" style={{ width: nodeAreaWidth + 8 }} />
-											<button
-												type="button"
-												onClick={() => handleToggleStack(stack.id)}
-												className={`relative flex-1 mr-2 min-w-0 py-1 flex items-center justify-center outline-none border-b ${
-													isStackFocused
-														? "bg-accent/40 rounded-md border-transparent"
-														: "border-border/30"
-												} ${isStackDimmed ? "opacity-40" : ""}`}
-												ref={(el) => {
-													// Programmatically focus when stack becomes focused
-													if (isStackFocused && el && document.activeElement !== el) {
-														el.focus({ preventScroll: true });
-													}
-												}}
-												data-stack-id={stack.id}
-											>
-												{/* Content */}
-												<div className="flex items-center justify-center gap-2">
-													<svg
-														className="w-3.5 h-3.5 text-muted-foreground"
-														fill="none"
-														viewBox="0 0 24 24"
-														stroke="currentColor"
-														aria-hidden="true"
-													>
-														<path
-															strokeLinecap="round"
-															strokeLinejoin="round"
-															strokeWidth={2}
-															d="M19 9l-7 7-7-7"
-														/>
-													</svg>
-													<span className="text-xs text-muted-foreground">
-														{count} hidden revision{count !== 1 ? "s" : ""}
-													</span>
-												</div>
-											</button>
-										</div>
+										<RevisionRow
+											revision={row.revision}
+											lane={lane}
+											maxLaneOnRow={row.maxLaneOnRow}
+											isSelected={isSelected}
+											isChecked={selectedRevisions.has(row.revision.change_id)}
+											isFocused={isFocused}
+											onSelect={handleSelect}
+											isFlashing={isFlashing}
+											isDimmed={isDimmed}
+											isExpanded={isExpanded}
+											repoPath={repoPath}
+											isPendingAbandon={pendingAbandon?.change_id === row.revision.change_id}
+											jumpModeActive={inlineJumpMode}
+											jumpQuery={inlineJumpQuery ?? ""}
+											jumpHint={jumpHintsMap.get(row.revision.change_id) ?? null}
+										/>
 									</div>
 								);
-							}
-
-							// Regular revision row
-							const { row } = displayRow;
-							const lane = changeIdToLane.get(row.revision.change_id) ?? 0;
-							const isFlashing = flash?.changeId === row.revision.change_id;
-							const isDimmed =
-								(selectedRevision !== null || focusedStackId !== null) &&
-								!relatedRevisions.has(row.revision.change_id);
-							// Only show focus if no stack is focused
-							const isFocused =
-								!focusedStackId && selectedRevision?.change_id === row.revision.change_id;
-							const isSelected = isFocused;
-							const isExpanded = isSelectedExpanded && isFocused;
-
-							return (
-								<div
-									key={row.revision.change_id}
-									ref={rowVirtualizer.measureElement}
-									data-index={virtualRow.index}
-									className="absolute left-0 w-full"
-									style={{
-										transform: `translateY(${virtualRow.start}px)`,
-									}}
-								>
-									<RevisionRow
-										revision={row.revision}
-										lane={lane}
-										maxLaneOnRow={row.maxLaneOnRow}
-										isSelected={isSelected}
-										isChecked={selectedRevisions.has(row.revision.change_id)}
-										isFocused={isFocused}
-										onSelect={handleSelect}
-										isFlashing={isFlashing}
-										isDimmed={isDimmed}
-										isExpanded={isExpanded}
-										repoPath={repoPath}
-										isPendingAbandon={pendingAbandon?.change_id === row.revision.change_id}
-										jumpModeActive={inlineJumpMode}
-										jumpQuery={inlineJumpQuery ?? ""}
-										jumpHint={jumpHintsMap.get(row.revision.change_id) ?? null}
-									/>
-								</div>
-							);
-						})}
+							})}
+						</div>
 					</div>
-				</div>
 
-				{/* Debug overlay - toggle with Ctrl+Shift+D */}
-				<DebugOverlay
-					scrollRef={parentRef}
-					selectedIndex={selectedIndex}
-					visibleStartRow={visibleStartRow}
-					visibleEndRow={visibleEndRow}
-					totalRows={rows.length}
-					wcIndex={wcIndex}
-					selectedChangeId={selectedRevision?.change_id}
-					wcChangeId={workingCopy?.change_id}
-				/>
+					{/* Debug overlay - toggle with Ctrl+Shift+D */}
+					<DebugOverlay
+						scrollRef={parentRef}
+						selectedIndex={selectedIndex}
+						visibleStartRow={visibleStartRow}
+						visibleEndRow={visibleEndRow}
+						totalRows={rows.length}
+						wcIndex={wcIndex}
+						selectedChangeId={selectedRevision?.change_id}
+						wcChangeId={workingCopy?.change_id}
+					/>
+				</div>
 			</div>
 		);
 	},

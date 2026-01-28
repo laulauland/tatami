@@ -2,7 +2,8 @@ import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { PatchDiff } from "@pierre/diffs/react";
 import { Columns2Icon, RowsIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { type DiffStyle, type DiffViewState, diffStyleAtom, diffViewStateAtom } from "@/atoms";
 import { FileList, RevisionHeader } from "@/components/diff";
 import { Button } from "@/components/ui/button";
@@ -15,18 +16,21 @@ import {
 	getRevisionDiffCollection,
 } from "@/db";
 import { useDiffPanelKeyboard } from "@/hooks/useDiffPanelKeyboard";
+import { useFocusWithin } from "@/hooks/useFocusWithin";
 import type { Revision } from "@/tauri-commands";
 
 interface DiffPanelProps {
 	repoPath: string | null;
 	changeId: string | null;
 	revision: Revision | null;
+	revisionsPanelRef: RefObject<HTMLElement | null>;
 }
 
 interface PrerenderedDiffPanelProps {
 	repoPath: string | null;
 	revisions: Revision[];
 	selectedChangeId: string | null;
+	revisionsPanelRef: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -88,17 +92,23 @@ function parsePatchStats(patch: string): { additions: number; deletions: number 
 	return { additions, deletions };
 }
 
-export function PrerenderedDiffPanel({
-	repoPath,
-	revisions,
-	selectedChangeId,
-}: PrerenderedDiffPanelProps) {
-	const selectedRevision = selectedChangeId
-		? (revisions.find((r) => r.change_id === selectedChangeId) ?? null)
-		: null;
+export const PrerenderedDiffPanel = forwardRef<HTMLDivElement, PrerenderedDiffPanelProps>(
+	function PrerenderedDiffPanel({ repoPath, revisions, selectedChangeId, revisionsPanelRef }, ref) {
+		const selectedRevision = selectedChangeId
+			? (revisions.find((r) => r.change_id === selectedChangeId) ?? null)
+			: null;
 
-	return <DiffPanel repoPath={repoPath} changeId={selectedChangeId} revision={selectedRevision} />;
-}
+		return (
+			<DiffPanel
+				ref={ref}
+				repoPath={repoPath}
+				changeId={selectedChangeId}
+				revision={selectedRevision}
+				revisionsPanelRef={revisionsPanelRef}
+			/>
+		);
+	},
+);
 
 /**
  * Multi-file diff viewer - shows multiple diffs in a scrollable container
@@ -162,12 +172,29 @@ function getDiffViewState(currentState: DiffViewState, changeId: string | null):
 	};
 }
 
-export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
+export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function DiffPanel(
+	{ repoPath, changeId, revision, revisionsPanelRef },
+	ref,
+) {
+	const containerRef = useRef<HTMLDivElement>(null);
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const [globalDiffStyle] = useAtom(diffStyleAtom);
 	const [diffViewState, setDiffViewState] = useAtom(diffViewStateAtom);
 	const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 	const prevChangeIdRef = useRef<string | null>(null);
+
+	// Use native focus tracking
+	const hasFocus = useFocusWithin(containerRef);
+
+	// Merge refs if external ref is provided
+	const setRefs = (el: HTMLDivElement | null) => {
+		(containerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+		if (typeof ref === "function") {
+			ref(el);
+		} else if (ref) {
+			ref.current = el;
+		}
+	};
 
 	// Get first selected file for style override display
 	const firstSelectedFile = selectedFiles.size > 0 ? [...selectedFiles][0] : null;
@@ -198,7 +225,7 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 	}
 
 	// Keyboard navigation
-	useDiffPanelKeyboard({ scrollContainerRef });
+	useDiffPanelKeyboard({ scrollContainerRef, revisionsPanelRef, hasFocus });
 
 	// Fetch file changes (for the file list with status)
 	const changesCollection =
@@ -270,7 +297,11 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 
 	if (!repoPath || !changeId) {
 		return (
-			<div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+			<div
+				ref={setRefs}
+				tabIndex={-1}
+				className="flex items-center justify-center h-full text-muted-foreground text-sm outline-none"
+			>
 				Select a revision to view diffs
 			</div>
 		);
@@ -278,7 +309,11 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 
 	if (isLoading) {
 		return (
-			<div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+			<div
+				ref={setRefs}
+				tabIndex={-1}
+				className="flex items-center justify-center h-full text-muted-foreground text-sm outline-none"
+			>
 				Loading diffs...
 			</div>
 		);
@@ -286,7 +321,11 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 
 	if (changedFiles.length === 0) {
 		return (
-			<div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+			<div
+				ref={setRefs}
+				tabIndex={-1}
+				className="flex items-center justify-center h-full text-muted-foreground text-sm outline-none"
+			>
 				No changes in this revision
 			</div>
 		);
@@ -294,7 +333,8 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 
 	return (
 		<div
-			ref={scrollContainerRef}
+			ref={setRefs}
+			tabIndex={-1}
 			className="h-full w-full flex flex-col bg-background outline-none overflow-hidden"
 		>
 			{/* Revision header */}
@@ -331,7 +371,7 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 			</div>
 
 			{/* Two-column layout wrapper */}
-			<div className="relative flex-1 min-h-0 min-w-0">
+			<div ref={scrollContainerRef} className="relative flex-1 min-h-0 min-w-0 overflow-auto">
 				<ResizablePanelGroup
 					id="diff-panel-layout"
 					orientation="horizontal"
@@ -346,6 +386,7 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 								onSelectFiles={setSelectedFiles}
 								totalAdditions={totalAdditions}
 								totalDeletions={totalDeletions}
+								hasFocus={hasFocus}
 							/>
 						</div>
 					</ResizablePanel>
@@ -366,4 +407,4 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 			</div>
 		</div>
 	);
-}
+});

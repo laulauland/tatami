@@ -119,6 +119,8 @@ function AppShellWithProject() {
 	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 	const [isSyncing, setIsSyncing] = useState(false);
 	const revisionGraphRef = useRef<RevisionGraphHandle>(null);
+	const revisionsPanelRef = useRef<HTMLDivElement>(null);
+	const diffPanelRef = useRef<HTMLDivElement>(null);
 	const isNarrowScreen = useIsNarrowScreen();
 	const { handleAddRepository } = useAddRepository();
 
@@ -470,7 +472,7 @@ function AppShellWithProject() {
 				<div className="flex-1 min-h-0">
 					{viewMode === 1 ? (
 						// Overview mode: only revision list
-						<section className="h-full relative" aria-label="Revision list">
+						<section ref={revisionsPanelRef} className="h-full relative" aria-label="Revision list">
 							<RevisionGraph
 								ref={revisionGraphRef}
 								revisions={revisions}
@@ -480,13 +482,18 @@ function AppShellWithProject() {
 								flash={flash}
 								repoPath={activeProject?.path ?? null}
 								pendingAbandon={pendingAbandon}
+								diffPanelRef={diffPanelRef}
 							/>
 						</section>
 					) : (
 						// Split mode: revision list + diff panel (vertical on narrow screens)
 						<ResizablePanelGroup orientation={isNarrowScreen ? "vertical" : "horizontal"}>
 							<ResizablePanel defaultSize={isNarrowScreen ? 40 : 25} minSize={15}>
-								<section className="h-full relative" aria-label="Revision list">
+								<section
+									ref={revisionsPanelRef}
+									className="h-full relative"
+									aria-label="Revision list"
+								>
 									<RevisionGraph
 										ref={revisionGraphRef}
 										revisions={revisions}
@@ -496,6 +503,7 @@ function AppShellWithProject() {
 										flash={flash}
 										repoPath={activeProject?.path ?? null}
 										pendingAbandon={pendingAbandon}
+										diffPanelRef={diffPanelRef}
 									/>
 								</section>
 							</ResizablePanel>
@@ -503,9 +511,11 @@ function AppShellWithProject() {
 							<ResizablePanel defaultSize={isNarrowScreen ? 60 : 75} minSize={30}>
 								<aside className="h-full" aria-label="Diff viewer">
 									<PrerenderedDiffPanel
+										ref={diffPanelRef}
 										repoPath={activeProject?.path ?? null}
 										revisions={orderedRevisions}
 										selectedChangeId={selectedRevision?.change_id ?? null}
+										revisionsPanelRef={revisionsPanelRef}
 									/>
 								</aside>
 							</ResizablePanel>

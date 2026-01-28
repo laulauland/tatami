@@ -1,8 +1,9 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import type { RefObject } from "react";
 import { useRef } from "react";
 import { Route } from "@/routes/project.$projectId";
-import { focusPanelAtom, viewModeAtom } from "@/atoms";
+import { viewModeAtom } from "@/atoms";
 import type { RevisionStack } from "@/components/revision-graph-utils";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import type { Revision } from "@/tauri-commands";
@@ -45,6 +46,10 @@ interface UseRevisionGraphNavigationParams {
 	onToggleStack: (stackId: string) => void;
 	/** Check if inline expanded for h/l behavior */
 	isSelectedExpanded?: boolean;
+	/** Whether the revisions panel has focus */
+	hasFocus: boolean;
+	/** Ref to the diff panel for focus transfer */
+	diffPanelRef: RefObject<HTMLElement | null>;
 }
 
 /**
@@ -70,11 +75,12 @@ export function useRevisionGraphNavigation({
 	scrollToIndex,
 	onToggleStack,
 	isSelectedExpanded = false,
+	hasFocus,
+	diffPanelRef,
 }: UseRevisionGraphNavigationParams) {
 	const navigate = useNavigate({ from: Route.fullPath });
 	const search = useSearch({ from: Route.fullPath });
 	const [viewMode] = useAtom(viewModeAtom);
-	const [focusPanel, setFocusPanel] = useAtom(focusPanelAtom);
 
 	// Read focused stack and selection from URL params
 	const focusedStackId = useSearch({ from: Route.fullPath, select: (s) => s.stack ?? null });
@@ -89,9 +95,6 @@ export function useRevisionGraphNavigation({
 		? new Set(selectedParam.split(",").filter(Boolean))
 		: new Set<string>();
 	const hasSelection = selectedRevisions.size > 0;
-
-	// Diff panel has keyboard focus
-	const diffPanelHasFocus = focusPanel === "diff";
 
 	// Build commit map for parent/child navigation
 	const commitMapRef = useRef<Map<string, Revision>>(new Map());
@@ -316,7 +319,7 @@ export function useRevisionGraphNavigation({
 				navigateToDisplayRow(currentIndex + 1);
 			}
 		},
-		enabled: enabled && !diffPanelHasFocus,
+		enabled: enabled && hasFocus,
 	});
 
 	useKeyboardShortcut({
@@ -330,7 +333,7 @@ export function useRevisionGraphNavigation({
 				navigateToDisplayRow(currentIndex + 1);
 			}
 		},
-		enabled: enabled && !diffPanelHasFocus,
+		enabled: enabled && hasFocus,
 	});
 
 	// k / ArrowUp: navigate to previous display row
@@ -343,7 +346,7 @@ export function useRevisionGraphNavigation({
 				navigateToDisplayRow(currentIndex - 1);
 			}
 		},
-		enabled: enabled && !diffPanelHasFocus,
+		enabled: enabled && hasFocus,
 	});
 
 	useKeyboardShortcut({
@@ -355,7 +358,7 @@ export function useRevisionGraphNavigation({
 				navigateToDisplayRow(currentIndex - 1);
 			}
 		},
-		enabled: enabled && !diffPanelHasFocus,
+		enabled: enabled && hasFocus,
 	});
 
 	// J: navigate down in working copy chain
@@ -363,7 +366,7 @@ export function useRevisionGraphNavigation({
 		key: "J",
 		modifiers: { shift: true },
 		onPress: () => navigateRelated("down"),
-		enabled: enabled && !diffPanelHasFocus && !!selectedRevision,
+		enabled: enabled && hasFocus && !!selectedRevision,
 	});
 
 	// K: navigate up in working copy chain
@@ -371,7 +374,7 @@ export function useRevisionGraphNavigation({
 		key: "K",
 		modifiers: { shift: true },
 		onPress: () => navigateRelated("up"),
-		enabled: enabled && !diffPanelHasFocus && !!selectedRevision,
+		enabled: enabled && hasFocus && !!selectedRevision,
 	});
 
 	// Shift+j: extend selection downward
@@ -379,7 +382,7 @@ export function useRevisionGraphNavigation({
 		key: "j",
 		modifiers: { shift: true },
 		onPress: () => extendSelection("down"),
-		enabled: enabled && !diffPanelHasFocus && !!selectedRevision,
+		enabled: enabled && hasFocus && !!selectedRevision,
 	});
 
 	// Shift+k: extend selection upward
@@ -387,7 +390,7 @@ export function useRevisionGraphNavigation({
 		key: "k",
 		modifiers: { shift: true },
 		onPress: () => extendSelection("up"),
-		enabled: enabled && !diffPanelHasFocus && !!selectedRevision,
+		enabled: enabled && hasFocus && !!selectedRevision,
 	});
 
 	// Shift+ArrowDown: extend selection downward
@@ -395,7 +398,7 @@ export function useRevisionGraphNavigation({
 		key: "ArrowDown",
 		modifiers: { shift: true },
 		onPress: () => extendSelection("down"),
-		enabled: enabled && !diffPanelHasFocus && !!selectedRevision,
+		enabled: enabled && hasFocus && !!selectedRevision,
 	});
 
 	// Shift+ArrowUp: extend selection upward
@@ -403,7 +406,7 @@ export function useRevisionGraphNavigation({
 		key: "ArrowUp",
 		modifiers: { shift: true },
 		onPress: () => extendSelection("up"),
-		enabled: enabled && !diffPanelHasFocus && !!selectedRevision,
+		enabled: enabled && hasFocus && !!selectedRevision,
 	});
 
 	// G: go to bottom
@@ -421,7 +424,7 @@ export function useRevisionGraphNavigation({
 				}
 			}
 		},
-		enabled: enabled && !diffPanelHasFocus,
+		enabled: enabled && hasFocus,
 	});
 
 	// Home: go to top
@@ -433,7 +436,7 @@ export function useRevisionGraphNavigation({
 				navigateToDisplayRow(0);
 			}
 		},
-		enabled: enabled && !diffPanelHasFocus,
+		enabled: enabled && hasFocus,
 	});
 
 	// End: go to bottom
@@ -450,7 +453,7 @@ export function useRevisionGraphNavigation({
 				}
 			}
 		},
-		enabled: enabled && !diffPanelHasFocus,
+		enabled: enabled && hasFocus,
 	});
 
 	// l / ArrowRight: expand revision (overview) or focus diff panel (split)
@@ -459,7 +462,7 @@ export function useRevisionGraphNavigation({
 		modifiers: {},
 		onPress: () => {
 			if (viewMode === 2) {
-				setFocusPanel("diff");
+				diffPanelRef.current?.focus();
 				return;
 			}
 			if (!selectedRevision) return;
@@ -468,7 +471,7 @@ export function useRevisionGraphNavigation({
 				search: { ...search, expanded: true },
 			});
 		},
-		enabled: enabled,
+		enabled: enabled && hasFocus,
 	});
 
 	useKeyboardShortcut({
@@ -476,7 +479,7 @@ export function useRevisionGraphNavigation({
 		modifiers: {},
 		onPress: () => {
 			if (viewMode === 2) {
-				setFocusPanel("diff");
+				diffPanelRef.current?.focus();
 				return;
 			}
 			if (!selectedRevision) return;
@@ -485,7 +488,7 @@ export function useRevisionGraphNavigation({
 				search: { ...search, expanded: true },
 			});
 		},
-		enabled: enabled,
+		enabled: enabled && hasFocus,
 	});
 
 	// h / ArrowLeft: collapse revision (overview)
@@ -503,7 +506,7 @@ export function useRevisionGraphNavigation({
 				search: { ...search, expanded: undefined },
 			});
 		},
-		enabled: enabled,
+		enabled: enabled && hasFocus,
 	});
 
 	useKeyboardShortcut({
@@ -519,7 +522,7 @@ export function useRevisionGraphNavigation({
 				search: { ...search, expanded: undefined },
 			});
 		},
-		enabled: enabled,
+		enabled: enabled && hasFocus,
 	});
 
 	// Space: toggle check or expand stack

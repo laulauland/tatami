@@ -19,7 +19,7 @@ export interface EdgeBinding {
 	isMissingStub?: boolean;
 	/** If set, this edge represents a collapsed stack and clicking it should expand */
 	collapsedStackId?: string;
-	/** Number of hidden revisions in the collapsed stack */
+	/** Number of elided revisions in the collapsed stack */
 	collapsedCount?: number;
 	/** If set, this edge is part of an expanded stack and clicking it should collapse */
 	expandedStackId?: string;

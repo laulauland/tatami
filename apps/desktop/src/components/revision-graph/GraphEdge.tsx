@@ -95,7 +95,7 @@ export function GraphEdge({
 
 		// For collapsed stacks, draw a dotted line with clickable area
 		if (isCollapsedStack) {
-			const collapsedLabel = `${collapsedCount ?? 0} hidden revision${(collapsedCount ?? 0) !== 1 ? "s" : ""} - click to expand`;
+			const collapsedLabel = `${collapsedCount ?? 0} elided revision${(collapsedCount ?? 0) !== 1 ? "s" : ""} - click to expand`;
 
 			return (
 				// biome-ignore lint/a11y/useSemanticElements: Cannot use button inside SVG

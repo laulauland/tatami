@@ -234,3 +234,11 @@ line.stack-edge.stack-edge-hovered {
 	stroke-width: 3;
 	stroke-opacity: 1;
 }
+
+/* Sticky header for @pierre/diffs file diffs */
+[data-diffs-header] {
+	position: sticky;
+	top: 0;
+	z-index: 10;
+	border-bottom: 1px solid var(--border);
+}

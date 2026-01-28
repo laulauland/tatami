@@ -1,4 +1,7 @@
+import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
+import { useState } from "react";
 import type { Revision } from "@/tauri-commands";
+import { cn } from "@/lib/utils";
 
 interface RevisionHeaderProps {
 	revision: Revision;
@@ -6,6 +9,13 @@ interface RevisionHeaderProps {
 
 export function RevisionHeader({ revision }: RevisionHeaderProps) {
 	const commitIdShort = revision.commit_id.substring(0, 12);
+	const [isExpanded, setIsExpanded] = useState(false);
+
+	// Split description into title (first line) and body (rest)
+	const descriptionLines = revision.description?.split("\n") ?? [];
+	const title = descriptionLines[0] ?? "";
+	const body = descriptionLines.slice(1).join("\n").trim();
+	const hasBody = body.length > 0;
 
 	return (
 		<div className="border border-border rounded-lg bg-card">
@@ -26,11 +36,38 @@ export function RevisionHeader({ revision }: RevisionHeaderProps) {
 					<span className="text-muted-foreground ml-4">at</span>{" "}
 					<span className="text-foreground">{revision.timestamp}</span>
 				</div>
-				{revision.description && (
+				{title && (
 					<div className="mt-2 pt-2 border-t border-border">
-						<pre className="text-xs text-foreground whitespace-pre-wrap font-sans">
-							{revision.description}
-						</pre>
+						<div className="flex items-start justify-between gap-2">
+							<span className="text-sm font-semibold text-foreground font-sans">{title}</span>
+							{hasBody && (
+								<button
+									type="button"
+									onClick={() => setIsExpanded(!isExpanded)}
+									className={cn(
+										"flex items-center gap-1 text-muted-foreground hover:text-foreground",
+										"text-xs shrink-0 transition-colors",
+									)}
+								>
+									{isExpanded ? (
+										<>
+											<ChevronDownIcon className="size-3" />
+											<span>collapse</span>
+										</>
+									) : (
+										<>
+											<ChevronRightIcon className="size-3" />
+											<span>expand</span>
+										</>
+									)}
+								</button>
+							)}
+						</div>
+						{hasBody && isExpanded && (
+							<pre className="text-xs text-muted-foreground whitespace-pre-wrap font-sans mt-2">
+								{body}
+							</pre>
+						)}
 					</div>
 				)}
 			</div>

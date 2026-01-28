@@ -444,7 +444,7 @@ function AppShellWithProject() {
 					) : (
 						// Split mode: revision list + diff panel (vertical on narrow screens)
 						<ResizablePanelGroup orientation={isNarrowScreen ? "vertical" : "horizontal"}>
-							<ResizablePanel defaultSize={isNarrowScreen ? 40 : 33} minSize={20}>
+							<ResizablePanel defaultSize={isNarrowScreen ? 40 : 25} minSize={15}>
 								<section className="h-full relative" aria-label="Revision list">
 									<RevisionGraph
 										ref={revisionGraphRef}
@@ -459,7 +459,7 @@ function AppShellWithProject() {
 								</section>
 							</ResizablePanel>
 							<ResizableHandle withHandle />
-							<ResizablePanel defaultSize={isNarrowScreen ? 60 : 67} minSize={30}>
+							<ResizablePanel defaultSize={isNarrowScreen ? 60 : 75} minSize={30}>
 								<aside className="h-full" aria-label="Diff viewer">
 									<PrerenderedDiffPanel
 										repoPath={activeProject?.path ?? null}

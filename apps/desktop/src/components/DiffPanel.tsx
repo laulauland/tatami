@@ -1,13 +1,17 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
-import { useSearch } from "@tanstack/react-router";
-import { Route } from "@/routes/project.$projectId";
-import { useEffect, useRef } from "react";
-import { type DiffViewState, diffViewStateAtom } from "@/atoms";
-// Note: useEffect is kept for scroll-to-file behavior, which is acceptable
-// (DOM side effect, not state synchronization)
-import { DiffToolbar, FileDiffSection, RevisionHeader } from "@/components/diff";
-import { emptyDiffCollection, getRevisionDiffCollection } from "@/db";
+import { Columns2Icon, RowsIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { type DiffStyle, type DiffViewState, diffStyleAtom, diffViewStateAtom } from "@/atoms";
+import { FileList, RevisionHeader, SingleFileDiff } from "@/components/diff";
+import { Button } from "@/components/ui/button";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import {
+	emptyChangesCollection,
+	emptyDiffCollection,
+	getRevisionChangesCollection,
+	getRevisionDiffCollection,
+} from "@/db";
 import { useDiffPanelKeyboard } from "@/hooks/useDiffPanelKeyboard";
 import type { Revision } from "@/tauri-commands";
 
@@ -59,6 +63,29 @@ function splitMultiFileDiff(unifiedDiff: string): string[] {
 	return fileDiffs;
 }
 
+/**
+ * Parse additions and deletions from a single patch.
+ */
+function parsePatchStats(patch: string): { additions: number; deletions: number } {
+	let additions = 0;
+	let deletions = 0;
+	const lines = patch.split("\n");
+
+	for (const line of lines) {
+		// Skip header lines
+		if (line.startsWith("---") || line.startsWith("+++") || line.startsWith("@@")) {
+			continue;
+		}
+		if (line.startsWith("+") && !line.startsWith("++")) {
+			additions++;
+		} else if (line.startsWith("-") && !line.startsWith("--")) {
+			deletions++;
+		}
+	}
+
+	return { additions, deletions };
+}
+
 export function PrerenderedDiffPanel({
 	repoPath,
 	revisions,
@@ -75,11 +102,7 @@ export function PrerenderedDiffPanel({
  * Get the current diff view state, resetting if the changeId has changed.
  * This is a pure derivation - no useEffect needed for state sync.
  */
-function getDiffViewState(
-	currentState: DiffViewState,
-	changeId: string | null,
-	firstFilePath: string | null,
-): DiffViewState {
+function getDiffViewState(currentState: DiffViewState, changeId: string | null): DiffViewState {
 	// If changeId matches, return current state as-is
 	if (currentState.forChangeId === changeId) {
 		return currentState;
@@ -87,76 +110,98 @@ function getDiffViewState(
 	// ChangeId changed - return reset state
 	return {
 		forChangeId: changeId,
-		expandedFiles: firstFilePath ? new Set([firstFilePath]) : new Set(),
+		expandedFiles: new Set(),
 		styleOverrides: new Map(),
 	};
 }
 
 export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
-	const search = useSearch({ from: Route.fullPath });
-	const { file: selectedFilePath } = search;
-	const fileRefsMap = useRef<Map<string, React.RefObject<HTMLDivElement | null>>>(new Map());
-	const [diffViewState, setDiffViewState] = useAtom(diffViewStateAtom);
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
+	const [globalDiffStyle] = useAtom(diffStyleAtom);
+	const [diffViewState, setDiffViewState] = useAtom(diffViewStateAtom);
+	const [selectedFile, setSelectedFile] = useState<string | null>(null);
+	const prevChangeIdRef = useRef<string | null>(null);
+
+	// Get effective diff style for selected file
+	const effectiveDiffStyle = selectedFile
+		? (diffViewState.styleOverrides.get(selectedFile) ?? globalDiffStyle)
+		: globalDiffStyle;
+
+	function handleSetLocalStyle(style: DiffStyle) {
+		if (!selectedFile) return;
+		setDiffViewState((prev) => {
+			const next = new Map(prev.styleOverrides);
+			next.set(selectedFile, style);
+			return { ...prev, styleOverrides: next };
+		});
+	}
+
+	// Reset selected file when changeId changes
+	if (prevChangeIdRef.current !== changeId) {
+		prevChangeIdRef.current = changeId;
+		if (selectedFile !== null) {
+			setSelectedFile(null);
+		}
+	}
 
 	// Keyboard navigation
 	useDiffPanelKeyboard({ scrollContainerRef });
 
-	// Always fetch all diffs
+	// Fetch file changes (for the file list with status)
+	const changesCollection =
+		repoPath && changeId
+			? getRevisionChangesCollection(repoPath, changeId)
+			: emptyChangesCollection;
+	const { data: changedFiles = [] } = useLiveQuery(changesCollection);
+
+	// Fetch full diff (for the diff content)
 	const diffCollection =
 		repoPath && changeId ? getRevisionDiffCollection(repoPath, changeId) : emptyDiffCollection;
 	const { data: diffEntries = [], isLoading } = useLiveQuery(diffCollection);
 	const revisionDiff = diffEntries[0]?.content ?? "";
 
-	const fileDiffs = splitMultiFileDiff(revisionDiff);
-	const filePaths = fileDiffs.map(extractFilePath);
+	// Parse diff into individual file patches
+	const fileDiffs = useMemo(() => splitMultiFileDiff(revisionDiff), [revisionDiff]);
 
-	const firstFilePath = filePaths[0] ?? null;
+	// Create a map from file path to patch content
+	const patchMap = useMemo(() => {
+		const map = new Map<string, string>();
+		for (const patch of fileDiffs) {
+			const path = extractFilePath(patch);
+			map.set(path, patch);
+		}
+		return map;
+	}, [fileDiffs]);
+
+	// Calculate total stats
+	const { totalAdditions, totalDeletions } = useMemo(() => {
+		let additions = 0;
+		let deletions = 0;
+		for (const patch of fileDiffs) {
+			const stats = parsePatchStats(patch);
+			additions += stats.additions;
+			deletions += stats.deletions;
+		}
+		return { totalAdditions: additions, totalDeletions: deletions };
+	}, [fileDiffs]);
 
 	// Derive the effective state - resets automatically when changeId changes
-	const effectiveState = getDiffViewState(diffViewState, changeId, firstFilePath);
+	const effectiveState = getDiffViewState(diffViewState, changeId);
 
 	// Sync atom if state was reset (only writes when needed)
 	if (effectiveState !== diffViewState) {
 		setDiffViewState(effectiveState);
 	}
 
-	const { expandedFiles } = effectiveState;
-
-	// Get or create ref for each file
-	const getFileRef = (filePath: string): React.RefObject<HTMLDivElement | null> => {
-		if (!fileRefsMap.current.has(filePath)) {
-			fileRefsMap.current.set(filePath, { current: null });
-		}
-		// biome-ignore lint/style/noNonNullAssertion: Guaranteed to exist since we set it above
-		return fileRefsMap.current.get(filePath)!;
-	};
-
-	// Toggle all folds
-	const allExpanded = filePaths.length > 0 && filePaths.every((p) => expandedFiles.has(p));
-
-	function handleToggleAllFolds() {
-		setDiffViewState((prev) => ({
-			...prev,
-			expandedFiles: allExpanded ? new Set() : new Set(filePaths),
-		}));
-	}
-
-	// Scroll to selected file when it changes
+	// Auto-select first file when files load and none selected
 	useEffect(() => {
-		if (!selectedFilePath || fileDiffs.length === 0) return;
+		if (changedFiles.length > 0 && !selectedFile) {
+			setSelectedFile(changedFiles[0].path);
+		}
+	}, [changedFiles, selectedFile]);
 
-		// Use requestAnimationFrame to ensure DOM is updated before scrolling
-		requestAnimationFrame(() => {
-			const ref = fileRefsMap.current.get(selectedFilePath);
-			if (ref?.current) {
-				ref.current.scrollIntoView({
-					behavior: "instant",
-					block: "start",
-				});
-			}
-		});
-	}, [selectedFilePath, fileDiffs.length]);
+	// Get patch for selected file
+	const selectedPatch = selectedFile ? (patchMap.get(selectedFile) ?? null) : null;
 
 	if (!repoPath || !changeId) {
 		return (
@@ -174,7 +219,7 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 		);
 	}
 
-	if (fileDiffs.length === 0) {
+	if (changedFiles.length === 0) {
 		return (
 			<div className="flex items-center justify-center h-full text-muted-foreground text-sm">
 				No changes in this revision
@@ -183,34 +228,75 @@ export function DiffPanel({ repoPath, changeId, revision }: DiffPanelProps) {
 	}
 
 	return (
-		<div ref={scrollContainerRef} className="h-full overflow-auto bg-background outline-none">
+		<div
+			ref={scrollContainerRef}
+			className="h-full w-full flex flex-col bg-background outline-none overflow-hidden"
+		>
+			{/* Revision header */}
 			{revision && (
-				<div className="px-4 pt-6 pb-2">
+				<div className="px-4 pt-4 pb-2 shrink-0">
 					<RevisionHeader revision={revision} />
 				</div>
 			)}
-			<DiffToolbar
-				fileCount={fileDiffs.length}
-				allExpanded={allExpanded}
-				onToggleAllFolds={handleToggleAllFolds}
-			/>
-			{/* File diffs */}
-			<div className="p-4 space-y-4">
-				{fileDiffs.map((patch) => {
-					const filePath = extractFilePath(patch);
-					const fileRef = getFileRef(filePath);
-					const isSelected = selectedFilePath === filePath;
 
-					return (
-						<FileDiffSection
-							key={filePath}
-							patch={patch}
-							filePath={filePath}
-							isSelected={isSelected}
-							fileRef={fileRef}
-						/>
-					);
-				})}
+			{/* Toolbar spanning both columns */}
+			<div className="flex items-center justify-between px-3 py-2 border-b border-border bg-background shrink-0 min-w-0">
+				<code className="font-mono text-xs text-foreground truncate min-w-0">
+					{selectedFile ?? "No file selected"}
+				</code>
+				<div className="flex items-center gap-0.5 shrink-0 ml-2">
+					<Button
+						variant={effectiveDiffStyle === "unified" ? "secondary" : "ghost"}
+						size="icon-xs"
+						onClick={() => handleSetLocalStyle("unified")}
+						title="Unified diff view"
+						className="h-6 w-6"
+						disabled={!selectedFile}
+					>
+						<RowsIcon className="size-3" />
+					</Button>
+					<Button
+						variant={effectiveDiffStyle === "split" ? "secondary" : "ghost"}
+						size="icon-xs"
+						onClick={() => handleSetLocalStyle("split")}
+						title="Split diff view"
+						className="h-6 w-6"
+						disabled={!selectedFile}
+					>
+						<Columns2Icon className="size-3" />
+					</Button>
+				</div>
+			</div>
+
+			{/* Two-column layout wrapper */}
+			<div className="relative flex-1 min-h-0 min-w-0">
+				<ResizablePanelGroup
+					id="diff-panel-layout"
+					orientation="horizontal"
+					className="absolute inset-0"
+				>
+					{/* File list panel */}
+					<ResizablePanel id="diff-file-list" defaultSize="30%" minSize="15%" maxSize="50%">
+						<div className="h-full w-full min-w-0">
+							<FileList
+								files={changedFiles}
+								selectedFile={selectedFile}
+								onSelectFile={setSelectedFile}
+								totalAdditions={totalAdditions}
+								totalDeletions={totalDeletions}
+							/>
+						</div>
+					</ResizablePanel>
+
+					<ResizableHandle withHandle />
+
+					{/* Diff content panel */}
+					<ResizablePanel id="diff-content" defaultSize="70%">
+						<div className="h-full w-full min-w-0">
+							<SingleFileDiff patch={selectedPatch} filePath={selectedFile} />
+						</div>
+					</ResizablePanel>
+				</ResizablePanelGroup>
 			</div>
 		</div>
 	);

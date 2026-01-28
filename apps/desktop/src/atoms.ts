@@ -8,14 +8,17 @@ export const inlineJumpQueryAtom = Atom.make<string | null>(null);
 // View mode: 1 = overview (only revisions), 2 = split (revisions + diff panel)
 export type ViewMode = 1 | 2;
 export const viewModeAtom = Atom.make<ViewMode>(1);
-// Panel focus tracking for split view (viewMode=2)
-// "revisions" = left panel (revision graph), "diff" = right panel (diff viewer)
-export type FocusPanel = "revisions" | "diff";
-export const focusPanelAtom = Atom.make<FocusPanel>("revisions");
 // Tracks which revision stacks are expanded (by stack ID)
 export const expandedStacksAtom = Atom.make(new Set<string>());
 // Tracks which stack is currently hovered (for coordinated edge highlighting)
 export const hoveredStackIdAtom = Atom.make<string | null>(null);
+
+// Bookmark drag state - tracks which bookmark is being dragged and from which revision
+export type DraggingBookmark = {
+	bookmark: string;
+	fromChangeId: string;
+} | null;
+export const draggingBookmarkAtom = Atom.make<DraggingBookmark>(null);
 
 // DEBUG STATE
 /** Debug overlay visibility (Ctrl+Shift+D) */

@@ -5,7 +5,7 @@
 	"identifier": "com.tatami.desktop",
 	"build": {
 		"beforeDevCommand": "bun run dev",
-		"devUrl": "http://localhost:5173",
+		"devUrl": "http://localhost:4545",
 		"beforeBuildCommand": "bun run build",
 		"frontendDist": "../dist"
 	},
@@ -21,7 +21,8 @@
 				"height": 800,
 				"resizable": true,
 				"fullscreen": false,
-				"zoomHotkeysEnabled": true
+				"zoomHotkeysEnabled": true,
+				"dragDropEnabled": false
 			}
 		],
 		"security": {

@@ -1,11 +1,13 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useRef, useState } from "react";
 import { Route } from "@/routes/project.$projectId";
 import { draggingBookmarkAtom, viewModeAtom } from "@/atoms";
 import { ChangedFilesList } from "@/components/ChangedFilesList";
 import { emptyChangesCollection, getRevisionChangesCollection } from "@/db";
 import type { Revision } from "@/tauri-commands";
+import { BookmarkTag } from "./BookmarkTag";
 import { ROW_HEIGHT, LANE_PADDING, LANE_WIDTH, NODE_RADIUS, laneToX, laneColor } from "./constants";
 import { GraphNode } from "./GraphNode";
 
@@ -25,6 +27,7 @@ interface RevisionRowProps {
 	jumpModeActive: boolean;
 	jumpQuery: string;
 	jumpHint: string | null;
+	onMoveBookmark?: (bookmark: string, fromChangeId: string, toChangeId: string) => void;
 }
 
 /**
@@ -47,9 +50,15 @@ export function RevisionRow({
 	jumpModeActive,
 	jumpQuery,
 	jumpHint,
+	onMoveBookmark,
 }: RevisionRowProps) {
 	const firstLine = revision.description.split("\n")[0] || "(no description)";
 	const fullDescription = revision.description || "(no description)";
+	const [isDragOver, setIsDragOver] = useState(false);
+	const [showDropPlaceholder, setShowDropPlaceholder] = useState(false);
+	const dragOverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const dragEnterCountRef = useRef(0);
+	const [draggingBookmark] = useAtom(draggingBookmarkAtom);
 
 	// Calculate the node position area - leaves space for graph edges on the left
 	const nodeAreaWidth = LANE_PADDING + (maxLaneOnRow + 1) * LANE_WIDTH;
@@ -112,6 +121,62 @@ export function RevisionRow({
 					onSelect(revision.change_id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
 				}
 			}}
+			onDragEnter={(e) => {
+				if (e.dataTransfer.types.includes("application/x-bookmark")) {
+					e.preventDefault();
+					dragEnterCountRef.current++;
+					if (!isDragOver) {
+						setIsDragOver(true);
+						// Start timer to show placeholder after delay
+						if (!dragOverTimerRef.current) {
+							dragOverTimerRef.current = setTimeout(() => {
+								setShowDropPlaceholder(true);
+							}, 150);
+						}
+					}
+				}
+			}}
+			onDragOver={(e) => {
+				// Check if this is a bookmark drag
+				if (e.dataTransfer.types.includes("application/x-bookmark")) {
+					e.preventDefault();
+					e.dataTransfer.dropEffect = "move";
+				}
+			}}
+			onDragLeave={(e) => {
+				if (e.dataTransfer.types.includes("application/x-bookmark")) {
+					dragEnterCountRef.current--;
+					if (dragEnterCountRef.current === 0) {
+						setIsDragOver(false);
+						setShowDropPlaceholder(false);
+						if (dragOverTimerRef.current) {
+							clearTimeout(dragOverTimerRef.current);
+							dragOverTimerRef.current = null;
+						}
+					}
+				}
+			}}
+			onDrop={(e) => {
+				e.preventDefault();
+				dragEnterCountRef.current = 0;
+				setIsDragOver(false);
+				setShowDropPlaceholder(false);
+				if (dragOverTimerRef.current) {
+					clearTimeout(dragOverTimerRef.current);
+					dragOverTimerRef.current = null;
+				}
+				const data = e.dataTransfer.getData("application/x-bookmark");
+				if (data && onMoveBookmark) {
+					try {
+						const { bookmark, changeId: fromChangeId } = JSON.parse(data);
+						if (fromChangeId !== revision.change_id) {
+							onMoveBookmark(bookmark, fromChangeId, revision.change_id);
+						}
+					} catch {
+						// Invalid drag data, ignore
+					}
+				}
+			}}
 		>
 			{/* Graph node - absolutely positioned to align with edge layer */}
 			<div
@@ -127,14 +192,19 @@ export function RevisionRow({
 			<div className="shrink-0" style={{ width: nodeAreaWidth + 8 }} />
 			{/* Content area with visual styling - full row height */}
 			<div
-				className={`relative flex-1 mr-2 min-w-0 overflow-hidden text-card-foreground flex flex-col justify-center py-1 border-b ${
-					isChecked || isFocused ? "bg-accent/40 rounded-md border-transparent" : "border-border/30"
+				className={`relative flex-1 mr-2 min-w-0 overflow-hidden text-card-foreground flex flex-col justify-center py-1 border-b transition-colors ${
+					isDragOver
+						? "bg-primary/20 border-primary/50 rounded-md"
+						: isChecked || isFocused
+							? "bg-accent/40 rounded-md border-transparent"
+							: "border-border/30"
 				}`}
 			>
 				<div className={`px-3 py-1.5 min-w-0 ${isPendingAbandon ? "blur-sm" : ""}`}>
-					<div className="flex items-center gap-2 flex-nowrap min-w-0">
+					{/* Grid: [change_id] [bookmarks] [author/date] - fixed height row */}
+					<div className="grid grid-cols-[auto_auto_1fr] items-center gap-2 min-w-0 h-5">
 						<code
-							className={`text-xs font-mono rounded px-0.5 shrink-0 ${
+							className={`text-xs font-mono rounded px-0.5 ${
 								isFlashing ? "bg-primary/40 animate-pulse" : ""
 							} text-muted-foreground`}
 						>
@@ -157,15 +227,18 @@ export function RevisionRow({
 								revision.change_id_short
 							)}
 						</code>
-						{revision.bookmarks.length > 0 && (
-							<span
-								className="text-xs text-primary font-medium truncate min-w-0 whitespace-nowrap"
-								title={revision.bookmarks.join(", ")}
-							>
-								{revision.bookmarks.join(", ")}
-							</span>
-						)}
-						<span className="text-xs text-muted-foreground truncate min-w-0 shrink-0">
+						{/* Bookmarks - middle column */}
+						<div className="flex items-center gap-1 min-w-0 overflow-hidden">
+							{revision.bookmarks.map((bookmark) => (
+								<BookmarkTag key={bookmark} bookmark={bookmark} changeId={revision.change_id} />
+							))}
+							{showDropPlaceholder && draggingBookmark && draggingBookmark.fromChangeId !== revision.change_id && (
+								<span className="text-xs text-primary/60 font-medium whitespace-nowrap px-1 rounded-sm border border-dashed border-primary/40 bg-primary/5 pointer-events-none">
+									{draggingBookmark.bookmark}
+								</span>
+							)}
+						</div>
+						<span className="text-xs text-muted-foreground truncate whitespace-nowrap">
 							{revision.author.split("@")[0]} · {revision.timestamp}
 						</span>
 					</div>

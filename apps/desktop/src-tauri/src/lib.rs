@@ -3,7 +3,7 @@ mod storage;
 mod watcher;
 
 use repo::diff;
-use repo::jj::JjRepo;
+use repo::jj::{JjRepo, MutationResult, Operation};
 use repo::log::{Revision, RevsetResult};
 use repo::status::WorkingCopyStatus;
 use serde::Serialize;
@@ -290,7 +290,7 @@ async fn jj_new(
     repo_path: String,
     parent_change_ids: Vec<String>,
     change_id: Option<String>,
-) -> Result<String, String> {
+) -> Result<MutationResult, String> {
     let path = Path::new(&repo_path);
     let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
     jj_repo
@@ -299,7 +299,7 @@ async fn jj_new(
 }
 
 #[tauri::command]
-async fn jj_edit(repo_path: String, change_id: String) -> Result<(), String> {
+async fn jj_edit(repo_path: String, change_id: String) -> Result<MutationResult, String> {
     let path = Path::new(&repo_path);
     let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
     jj_repo
@@ -308,12 +308,30 @@ async fn jj_edit(repo_path: String, change_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn jj_abandon(repo_path: String, change_id: String) -> Result<(), String> {
+async fn jj_abandon(repo_path: String, change_id: String) -> Result<MutationResult, String> {
     let path = Path::new(&repo_path);
     let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
     jj_repo
         .abandon_revision(&change_id)
         .map_err(|e| format!("Failed to abandon revision: {}", e))
+}
+
+#[tauri::command]
+async fn get_operations(repo_path: String, limit: usize) -> Result<Vec<Operation>, String> {
+    let path = Path::new(&repo_path);
+    let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .list_operations(limit)
+        .map_err(|e| format!("Failed to list operations: {}", e))
+}
+
+#[tauri::command]
+async fn undo_operation(repo_path: String, operation_id: String) -> Result<(), String> {
+    let path = Path::new(&repo_path);
+    let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .undo_operation(&operation_id)
+        .map_err(|e| format!("Failed to undo operation: {}", e))
 }
 
 /// Get recency data for commits by walking the operation log.
@@ -506,6 +524,8 @@ pub fn run() {
             jj_new,
             jj_edit,
             jj_abandon,
+            get_operations,
+            undo_operation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

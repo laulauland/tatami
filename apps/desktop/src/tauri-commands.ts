@@ -73,20 +73,47 @@ export async function generateChangeIds(repoPath: string, count: number): Promis
 	return invoke<string[]>("generate_change_ids", { repoPath, count });
 }
 
+/** Result of a mutation operation */
+export interface MutationResult {
+	operation_id: string;
+	change_id: string | null;
+}
+
 export async function jjNew(
 	repoPath: string,
 	parentChangeIds: string[],
 	changeId?: string,
-): Promise<string> {
-	return invoke<string>("jj_new", { repoPath, parentChangeIds, changeId: changeId ?? null });
+): Promise<MutationResult> {
+	return invoke<MutationResult>("jj_new", { repoPath, parentChangeIds, changeId: changeId ?? null });
 }
 
-export async function jjEdit(repoPath: string, changeId: string): Promise<void> {
-	return invoke("jj_edit", { repoPath, changeId });
+export async function jjEdit(repoPath: string, changeId: string): Promise<MutationResult> {
+	return invoke<MutationResult>("jj_edit", { repoPath, changeId });
 }
 
-export async function jjAbandon(repoPath: string, changeId: string): Promise<void> {
-	return invoke("jj_abandon", { repoPath, changeId });
+export async function jjAbandon(repoPath: string, changeId: string): Promise<MutationResult> {
+	return invoke<MutationResult>("jj_abandon", { repoPath, changeId });
+}
+
+/** An operation in the jj operation log */
+export interface Operation {
+	id: string;
+	parent_ids: string[];
+	description: string;
+	timestamp: string;
+	user: string;
+	hostname: string;
+	working_copy_change_id: string | null;
+}
+
+/** List operations from newest to oldest */
+export async function getOperations(repoPath: string, limit: number): Promise<Operation[]> {
+	return invoke<Operation[]>("get_operations", { repoPath, limit });
+}
+
+/** Undo a specific operation by reverting it */
+export async function undoOperation(repoPath: string, operationId: string): Promise<void> {
+	return invoke("undo_operation", { repoPath, operationId });
 }
 
 /** Get recency data for commits - returns commit_id (hex) -> timestamp_millis when last WC */

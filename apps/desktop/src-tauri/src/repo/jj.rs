@@ -4,14 +4,38 @@ use jj_lib::commit::Commit;
 use jj_lib::config::ConfigSource;
 use jj_lib::merged_tree::MergedTree;
 use jj_lib::object_id::{HexPrefix, ObjectId, PrefixResolution};
+use jj_lib::op_store::OperationId;
 use jj_lib::op_walk;
 use jj_lib::repo::{Repo, StoreFactories};
 use jj_lib::repo_path::RepoPath;
 use jj_lib::settings::UserSettings;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::io::AsyncReadExt;
+
+/// Result of a mutation operation, containing both the result and the operation ID for undo
+#[derive(Debug, Clone, Serialize)]
+pub struct MutationResult {
+    /// The operation ID of this mutation (hex-encoded)
+    pub operation_id: String,
+    /// For new_revision: the change ID of the new revision
+    pub change_id: Option<String>,
+}
+
+/// An operation in the jj operation log
+#[derive(Debug, Clone, Serialize)]
+pub struct Operation {
+    pub id: String,
+    pub parent_ids: Vec<String>,
+    pub description: String,
+    pub timestamp: String,
+    pub user: String,
+    pub hostname: String,
+    /// The working copy change ID after this operation (if any)
+    pub working_copy_change_id: Option<String>,
+}
 
 pub struct JjRepo {
     workspace: Workspace,
@@ -199,7 +223,7 @@ impl JjRepo {
         &mut self,
         parent_change_ids: Vec<String>,
         change_id: Option<String>,
-    ) -> Result<String> {
+    ) -> Result<MutationResult> {
         let repo = self.workspace.repo_loader().load_at_head()?;
         let mut tx = repo.start_transaction();
 
@@ -257,13 +281,16 @@ impl JjRepo {
 
         // Check out the new commit in the working copy
         self.workspace
-            .check_out(operation_id, Some(&old_tree_id), &new_commit)
+            .check_out(operation_id.clone(), Some(&old_tree_id), &new_commit)
             .context("Failed to check out new commit")?;
 
-        Ok(actual_change_id)
+        Ok(MutationResult {
+            operation_id: operation_id.hex(),
+            change_id: Some(actual_change_id),
+        })
     }
 
-    pub fn abandon_revision(&mut self, change_id: &str) -> Result<()> {
+    pub fn abandon_revision(&mut self, change_id: &str) -> Result<MutationResult> {
         let repo = self.workspace.repo_loader().load_at_head()?;
         let mut tx = repo.start_transaction();
 
@@ -286,7 +313,7 @@ impl JjRepo {
         tx.repo_mut().rebase_descendants()?;
 
         // If we abandoned the working copy, check out the parent
-        if is_abandoning_wc {
+        let final_op_id = if is_abandoning_wc {
             let parent_id = commit.parent_ids().first().cloned()
                 .context("Abandoned commit has no parent")?;
             let parent_commit = repo.store().get_commit(&parent_id)?;
@@ -304,17 +331,23 @@ impl JjRepo {
             // Check out the parent commit
             let old_tree_id = commit.tree_id().clone();
             self.workspace
-                .check_out(operation_id, Some(&old_tree_id), &parent_commit)
+                .check_out(operation_id.clone(), Some(&old_tree_id), &parent_commit)
                 .context("Failed to check out parent commit")?;
+            
+            operation_id
         } else {
             // Finalize transaction
-            tx.commit("abandon")?;
-        }
+            let new_repo = tx.commit("abandon")?;
+            new_repo.operation().id().clone()
+        };
 
-        Ok(())
+        Ok(MutationResult {
+            operation_id: final_op_id.hex(),
+            change_id: None,
+        })
     }
 
-    pub fn edit_revision(&mut self, change_id: String) -> Result<()> {
+    pub fn edit_revision(&mut self, change_id: String) -> Result<MutationResult> {
         let repo = self.workspace.repo_loader().load_at_head()?;
         let mut tx = repo.start_transaction();
 
@@ -343,10 +376,13 @@ impl JjRepo {
 
         // Check out the commit in the working copy
         self.workspace
-            .check_out(operation_id, Some(&old_tree_id), &commit)
+            .check_out(operation_id.clone(), Some(&old_tree_id), &commit)
             .context("Failed to check out commit")?;
 
-        Ok(())
+        Ok(MutationResult {
+            operation_id: operation_id.hex(),
+            change_id: None,
+        })
     }
 
     /// Walk the operation log to find when each commit was last the working copy.
@@ -383,5 +419,114 @@ impl JjRepo {
         }
 
         Ok(recency)
+    }
+
+    /// List operations from newest to oldest
+    pub fn list_operations(&self, limit: usize) -> Result<Vec<Operation>> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let current_op = repo.operation();
+        let workspace_name = self.workspace.workspace_name();
+
+        let mut operations = Vec::new();
+
+        let op_iter = op_walk::walk_ancestors(std::slice::from_ref(current_op));
+
+        for (idx, op_result) in op_iter.enumerate() {
+            if idx >= limit {
+                break;
+            }
+
+            let op = op_result.context("Failed to load operation")?;
+            let metadata = op.metadata();
+
+            // Get parent operation IDs
+            let parent_ids: Vec<String> = op.parent_ids().iter().map(|id| id.hex()).collect();
+
+            // Get the working copy change ID from this operation's view
+            let working_copy_change_id = op.view().ok().and_then(|view| {
+                view.wc_commit_ids().get(workspace_name).and_then(|commit_id| {
+                    // Look up the commit to get its change ID
+                    repo.store().get_commit(commit_id).ok().map(|commit| {
+                        commit.change_id().reverse_hex()
+                    })
+                })
+            });
+
+            // Format timestamp as ISO 8601
+            let timestamp = chrono::DateTime::from_timestamp_millis(metadata.time.start.timestamp.0)
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_else(|| "unknown".to_string());
+
+            operations.push(Operation {
+                id: op.id().hex(),
+                parent_ids,
+                description: metadata.description.clone(),
+                timestamp,
+                user: metadata.username.clone(),
+                hostname: metadata.hostname.clone(),
+                working_copy_change_id,
+            });
+        }
+
+        Ok(operations)
+    }
+
+    /// Undo a specific operation by reverting it (3-way merge to invert just that op)
+    pub fn undo_operation(&mut self, op_id_hex: &str) -> Result<()> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        
+        // Parse the operation ID
+        let op_id = OperationId::try_from_hex(op_id_hex)
+            .context("Invalid operation ID format")?;
+        
+        // Load the operation to undo
+        let bad_op = repo.loader().load_operation(&op_id)
+            .context("Failed to load operation to undo")?;
+        
+        // Get the parent operation (the state before the bad op)
+        let parent_op = bad_op.parents()
+            .next()
+            .context("Operation has no parent (cannot undo root operation)")?
+            .context("Failed to load parent operation")?;
+        
+        // Start a transaction for the revert
+        let mut tx = repo.start_transaction();
+        
+        // Load repos at both states for 3-way merge
+        let repo_loader = tx.base_repo().loader();
+        let bad_repo = repo_loader.load_at(&bad_op)
+            .context("Failed to load repo at bad operation")?;
+        let parent_repo = repo_loader.load_at(&parent_op)
+            .context("Failed to load repo at parent operation")?;
+        
+        // Perform 3-way merge to revert the operation
+        tx.repo_mut().merge(&bad_repo, &parent_repo)?;
+        
+        // Get old tree for checkout (current WC)
+        let old_wc_commit_id = repo
+            .view()
+            .get_wc_commit_id(self.workspace.workspace_name())
+            .cloned();
+        let old_tree_id = old_wc_commit_id
+            .as_ref()
+            .and_then(|id| repo.store().get_commit(id).ok())
+            .map(|c| c.tree_id().clone());
+        
+        // Commit the revert
+        let new_repo = tx.commit(format!("undo operation {}", &op_id_hex[..12.min(op_id_hex.len())]))?;
+        let new_op_id = new_repo.operation().id().clone();
+        
+        // Update working copy if it changed
+        if let Some(new_wc_commit_id) = new_repo.view().get_wc_commit_id(self.workspace.workspace_name()) {
+            if old_wc_commit_id.as_ref() != Some(new_wc_commit_id) {
+                let new_wc_commit = new_repo.store().get_commit(new_wc_commit_id)
+                    .context("Failed to get new working copy commit")?;
+                self.workspace
+                    .check_out(new_op_id, old_tree_id.as_ref(), &new_wc_commit)
+                    .context("Failed to check out after undo")?;
+            }
+        }
+        
+        Ok(())
     }
 }

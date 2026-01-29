@@ -16,6 +16,7 @@ import {
 	jjEdit,
 	jjNew,
 	removeRepository,
+	undoOperation,
 	upsertRepository,
 	watchRepository,
 } from "@/tauri-commands";
@@ -282,7 +283,7 @@ export function editRevision(
 
 	// Track the mutation and fire backend
 	trackMutation(mutationId, jjEdit(repoPath, targetRevision.change_id_short))
-		.then(() => {
+		.then((_result) => {
 			// Invalidate to get fresh data from backend
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
 			toast.success(`Working copy is now ${targetRevision.change_id_short}`);
@@ -349,10 +350,10 @@ export function newRevision(
 	}).pipe(Effect.tapError((error) => Effect.logError("jjNew failed", error)));
 
 	trackMutation(mutationId, Effect.runPromise(program))
-		.then((newChangeId) => {
+		.then((result) => {
 			// Invalidate to get authoritative data (correct commit_id, short_id, etc.)
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
-			const shortId = newChangeId.slice(0, 8);
+			const shortId = result.change_id?.slice(0, 8) ?? "unknown";
 			toast.success(`Working copy is now ${shortId}`, {
 				description: "Created new revision",
 			});
@@ -384,10 +385,24 @@ export function abandonRevision(
 
 	// Track the mutation and fire backend
 	trackMutation(mutationId, jjAbandon(repoPath, revision.change_id_short))
-		.then(() => {
+		.then((result) => {
 			// Invalidate to get fresh data (especially for WC abandon which creates new WC)
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
-			toast.success(`Abandoned revision ${revision.change_id_short}`);
+			toast.success(`Abandoned revision ${revision.change_id_short}`, {
+				action: {
+					label: "Undo",
+					onClick: () => {
+						undoOperation(repoPath, result.operation_id)
+							.then(() => {
+								queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+								toast.success("Undo successful");
+							})
+							.catch((err) => {
+								toast.error(`Undo failed: ${err}`, { duration: Number.POSITIVE_INFINITY });
+							});
+					},
+				},
+			});
 		})
 		.catch((error) => {
 			// Re-add on failure (only if we deleted it)

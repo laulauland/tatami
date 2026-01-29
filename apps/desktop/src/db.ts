@@ -3,6 +3,7 @@ import { QueryClient } from "@tanstack/query-core";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
 import { listen } from "@tauri-apps/api/event";
 import { Effect } from "effect";
+import { toast } from "@/components/ui/sonner";
 import type { ChangedFile, Repository, Revision } from "@/tauri-commands";
 import {
 	generateChangeIds,
@@ -284,8 +285,9 @@ export function editRevision(
 		.then(() => {
 			// Invalidate to get fresh data from backend
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+			toast.success(`Working copy is now ${targetRevision.change_id_short}`);
 		})
-		.catch(() => {
+		.catch((error) => {
 			// Revert optimistic update
 			const revertUpdates: Revision[] = [];
 			if (
@@ -296,6 +298,7 @@ export function editRevision(
 			}
 			revertUpdates.push({ ...targetRevision, is_working_copy: false });
 			collection.utils.writeUpsert(revertUpdates);
+			toast.error(`Failed to edit revision: ${error}`, { duration: Number.POSITIVE_INFINITY });
 		});
 }
 
@@ -346,11 +349,15 @@ export function newRevision(
 	}).pipe(Effect.tapError((error) => Effect.logError("jjNew failed", error)));
 
 	trackMutation(mutationId, Effect.runPromise(program))
-		.then(() => {
+		.then((newChangeId) => {
 			// Invalidate to get authoritative data (correct commit_id, short_id, etc.)
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+			const shortId = newChangeId.slice(0, 8);
+			toast.success(`Working copy is now ${shortId}`, {
+				description: "Created new revision",
+			});
 		})
-		.catch(() => {
+		.catch((error) => {
 			// Revert optimistic update
 			if (optimisticRevision) {
 				collection.utils.writeDelete(getRevisionKey(optimisticRevision));
@@ -358,6 +365,7 @@ export function newRevision(
 					collection.utils.writeUpsert([{ ...currentWcRevision, is_working_copy: true }]);
 				}
 			}
+			toast.error(`Failed to create revision: ${error}`, { duration: Number.POSITIVE_INFINITY });
 		});
 }
 
@@ -379,12 +387,14 @@ export function abandonRevision(
 		.then(() => {
 			// Invalidate to get fresh data (especially for WC abandon which creates new WC)
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+			toast.success(`Abandoned revision ${revision.change_id_short}`);
 		})
-		.catch(() => {
+		.catch((error) => {
 			// Re-add on failure (only if we deleted it)
 			if (!revision.is_working_copy) {
 				collection.utils.writeUpsert([revision]);
 			}
+			toast.error(`Failed to abandon revision: ${error}`, { duration: Number.POSITIVE_INFINITY });
 		});
 }
 

@@ -1,7 +1,7 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Route as ProjectRoute } from "@/routes/project.$projectId";
 import { expandedStacksAtom, viewModeAtom } from "@/atoms";
 
@@ -35,11 +35,10 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import {
 	abandonRevision,
 	editRevision,
-	emptyChangesCollection,
 	emptyCommitRecencyCollection,
 	emptyRevisionsCollection,
 	getCommitRecencyCollection,
-	getRevisionChangesCollection,
+	getRevisionKey,
 	getRevisionsCollection,
 	newRevision,
 	repositoriesCollection,
@@ -109,10 +108,6 @@ function AppShellWithProject() {
 	const navigate = useNavigate({ from: ProjectRoute.fullPath });
 	const { projectId } = useParams({ from: ProjectRoute.fullPath });
 	const rev = useSearch({ from: ProjectRoute.fullPath, select: (s) => s.rev });
-	const expanded = useSearch({ from: ProjectRoute.fullPath, select: (s) => s.expanded });
-	const file = useSearch({ from: ProjectRoute.fullPath, select: (s) => s.file });
-	// Get full search object for navigation (only re-renders when expanded/file/rev change, which we need anyway)
-	const search = useSearch({ from: ProjectRoute.fullPath });
 	const [flash, setFlash] = useState<{ changeId: string; key: number } | null>(null);
 	const [viewMode, setViewMode] = useAtom(viewModeAtom);
 	const [pendingAbandon, setPendingAbandon] = useState<Revision | null>(null);
@@ -175,7 +170,8 @@ function AppShellWithProject() {
 	const selectedRevision = (() => {
 		if (revisions.length === 0) return null;
 		if (rev) {
-			const found = revisions.find((r) => r.change_id === rev);
+			// Match using revision key to handle divergent revisions (e.g., "tpuq/0")
+			const found = revisions.find((r) => getRevisionKey(r) === rev);
 			if (found) return found;
 		}
 		return revisions.find((r) => r.is_working_copy) || revisions[0];
@@ -190,7 +186,7 @@ function AppShellWithProject() {
 		navigate({
 			to: "/project/$projectId",
 			params: { projectId },
-			search: { rev: revision.change_id },
+			search: { rev: getRevisionKey(revision) },
 		});
 	}
 
@@ -320,79 +316,12 @@ function AppShellWithProject() {
 		onPress: () => setViewMode(2),
 	});
 
-	// Get changed files collection for selected revision (TanStack Query handles fetching)
-	const changesCollection =
-		expanded && activeProject?.path && selectedRevision?.change_id
-			? getRevisionChangesCollection(activeProject.path, selectedRevision.change_id)
-			: emptyChangesCollection;
-	const { data: changedFiles = [] } = useLiveQuery(changesCollection);
-
-	// File navigation when revision is expanded - uses capture phase to run before revision navigation
-	useEffect(() => {
-		if (!expanded || changedFiles.length === 0) return;
-
-		function handleFileNavigation(event: KeyboardEvent) {
-			const activeElement = document.activeElement;
-			if (activeElement?.tagName === "INPUT" || activeElement?.tagName === "TEXTAREA") {
-				return;
-			}
-
-			// Only handle j/k keys for file navigation when revision is expanded
-			if (event.key !== "j" && event.key !== "k") {
-				return;
-			}
-
-			const currentFile = file;
-			const filePaths = changedFiles.map((f) => f.path);
-
-			if (event.key === "j") {
-				event.preventDefault();
-				event.stopImmediatePropagation();
-				const currentIndex = currentFile ? filePaths.indexOf(currentFile) : -1;
-				const nextIndex = currentIndex + 1;
-
-				if (nextIndex < filePaths.length) {
-					navigate({
-						search: { ...search, file: filePaths[nextIndex], expanded: true },
-					});
-				} else if (currentIndex === -1 && filePaths.length > 0) {
-					navigate({
-						search: { ...search, file: filePaths[0], expanded: true },
-					});
-				}
-			} else if (event.key === "k") {
-				event.preventDefault();
-				event.stopImmediatePropagation();
-				const currentIndex = currentFile ? filePaths.indexOf(currentFile) : -1;
-
-				if (currentIndex > 0) {
-					const prevIndex = currentIndex - 1;
-					navigate({
-						search: { ...search, file: filePaths[prevIndex], expanded: true },
-					});
-				} else if (currentIndex === -1 && filePaths.length > 0) {
-					navigate({
-						search: {
-							...search,
-							file: filePaths[filePaths.length - 1],
-							expanded: true,
-						},
-					});
-				}
-			}
-		}
-
-		// Use capture phase to intercept before revision navigation handler
-		window.addEventListener("keydown", handleFileNavigation, true);
-		return () => window.removeEventListener("keydown", handleFileNavigation, true);
-	}, [expanded, file, search, changedFiles, navigate]);
-
 	const closestBookmark = (() => {
 		const workingCopy = revisions.find((r) => r.is_working_copy);
 		if (!workingCopy) return null;
 
 		if (workingCopy.bookmarks.length > 0) {
-			return workingCopy.bookmarks[0];
+			return workingCopy.bookmarks[0].name;
 		}
 
 		// BFS to find closest ancestor with bookmarks
@@ -413,7 +342,7 @@ function AppShellWithProject() {
 			if (!rev) continue;
 
 			if (rev.bookmarks.length > 0) {
-				return rev.bookmarks[0];
+				return rev.bookmarks[0].name;
 			}
 
 			queue.push(...rev.parent_ids);
@@ -472,7 +401,12 @@ function AppShellWithProject() {
 				<div className="flex-1 min-h-0">
 					{viewMode === 1 ? (
 						// Overview mode: only revision list
-						<section ref={revisionsPanelRef} className="h-full relative" aria-label="Revision list">
+						<section
+							ref={revisionsPanelRef}
+							tabIndex={-1}
+							className="h-full relative outline-none"
+							aria-label="Revision list"
+						>
 							<RevisionGraph
 								ref={revisionGraphRef}
 								revisions={revisions}
@@ -491,7 +425,8 @@ function AppShellWithProject() {
 							<ResizablePanel defaultSize={isNarrowScreen ? 40 : 25} minSize={15}>
 								<section
 									ref={revisionsPanelRef}
-									className="h-full relative"
+									tabIndex={-1}
+									className="h-full relative outline-none"
 									aria-label="Revision list"
 								>
 									<RevisionGraph

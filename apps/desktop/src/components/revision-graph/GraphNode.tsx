@@ -46,6 +46,17 @@ export function GraphNode({ revision, lane, isSelected, color }: GraphNodeProps)
 						fillOpacity={0.3}
 					/>
 				)}
+				{revision.has_conflict && (
+					<circle
+						cx={(size + 8) / 2}
+						cy={(size + 8) / 2}
+						r={NODE_RADIUS + 3}
+						stroke="var(--destructive)"
+						strokeWidth={2}
+						strokeDasharray="3 2"
+						fill="none"
+					/>
+				)}
 				<circle
 					cx={(size + 8) / 2}
 					cy={(size + 8) / 2}
@@ -90,6 +101,17 @@ export function GraphNode({ revision, lane, isSelected, color }: GraphNodeProps)
 						fillOpacity={0.3}
 					/>
 				)}
+				{revision.has_conflict && (
+					<circle
+						cx={(size + 8) / 2}
+						cy={(size + 8) / 2}
+						r={NODE_RADIUS + 3}
+						stroke="var(--destructive)"
+						strokeWidth={2}
+						strokeDasharray="3 2"
+						fill="none"
+					/>
+				)}
 				<rect
 					x={(size + 8) / 2 - NODE_RADIUS}
 					y={(size + 8) / 2 - NODE_RADIUS}
@@ -121,6 +143,17 @@ export function GraphNode({ revision, lane, isSelected, color }: GraphNodeProps)
 					r={selectedRingSize}
 					fill={color}
 					fillOpacity={0.3}
+				/>
+			)}
+			{revision.has_conflict && (
+				<circle
+					cx={(size + 8) / 2}
+					cy={(size + 8) / 2}
+					r={NODE_RADIUS + 3}
+					stroke="var(--destructive)"
+					strokeWidth={2}
+					strokeDasharray="3 2"
+					fill="none"
 				/>
 			)}
 			<circle cx={(size + 8) / 2} cy={(size + 8) / 2} r={NODE_RADIUS} fill={color} />

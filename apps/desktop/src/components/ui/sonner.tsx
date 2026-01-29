@@ -16,12 +16,9 @@ function Toaster({ ...props }: ToasterProps) {
 						"group-[.toast]:bg-primary group-[.toast]:text-primary-foreground group-[.toast]:text-xs group-[.toast]:font-medium group-[.toast]:rounded-md",
 					cancelButton:
 						"group-[.toast]:bg-muted group-[.toast]:text-muted-foreground group-[.toast]:text-xs group-[.toast]:rounded-md",
-					success:
-						"group-[.toaster]:border-primary/30 [&_[data-icon]]:text-primary",
-					error:
-						"group-[.toaster]:border-destructive/40 [&_[data-icon]]:text-destructive",
-					warning:
-						"group-[.toaster]:border-chart-3/40 [&_[data-icon]]:text-chart-3",
+					success: "group-[.toaster]:border-primary/30 [&_[data-icon]]:text-primary",
+					error: "group-[.toaster]:border-destructive/40 [&_[data-icon]]:text-destructive",
+					warning: "group-[.toaster]:border-chart-3/40 [&_[data-icon]]:text-chart-3",
 					info: "group-[.toaster]:border-primary/30 [&_[data-icon]]:text-primary",
 				},
 			}}

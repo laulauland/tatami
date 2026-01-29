@@ -2,10 +2,11 @@ import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { PatchDiff } from "@pierre/diffs/react";
 import { Columns2Icon, RowsIcon } from "lucide-react";
-import type { RefObject } from "react";
+import type { FocusEvent, RefObject } from "react";
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import { type DiffStyle, type DiffViewState, diffStyleAtom, diffViewStateAtom } from "@/atoms";
 import { FileList, RevisionHeader } from "@/components/diff";
+import { ImageDiff } from "@/components/diff/ImageDiff";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,8 +17,9 @@ import {
 	getRevisionDiffCollection,
 } from "@/db";
 import { useDiffPanelKeyboard } from "@/hooks/useDiffPanelKeyboard";
-import { useFocusWithin } from "@/hooks/useFocusWithin";
+import type { ChangedFileStatus } from "@/schemas";
 import type { Revision } from "@/tauri-commands";
+import { isImageFile } from "@/utils/file-types";
 
 interface DiffPanelProps {
 	repoPath: string | null;
@@ -117,10 +119,14 @@ function MultiFileDiff({
 	patches,
 	diffViewState,
 	globalDiffStyle,
+	repoPath,
+	changeId,
 }: {
-	patches: Array<{ path: string; patch: string }>;
+	patches: Array<{ path: string; patch: string; status: ChangedFileStatus }>;
 	diffViewState: DiffViewState;
 	globalDiffStyle: DiffStyle;
+	repoPath: string;
+	changeId: string;
 }) {
 	if (patches.length === 0) {
 		return (
@@ -133,7 +139,21 @@ function MultiFileDiff({
 	return (
 		<ScrollArea className="h-full w-full">
 			<div className="divide-y divide-border">
-				{patches.map(({ path, patch }) => {
+				{patches.map(({ path, patch, status }) => {
+					// Check if this is an image file
+					if (isImageFile(path)) {
+						return (
+							<div key={path} className="min-h-0">
+								<ImageDiff
+									repoPath={repoPath}
+									changeId={changeId}
+									filePath={path}
+									status={status}
+								/>
+							</div>
+						);
+					}
+
 					const effectiveStyle = diffViewState.styleOverrides.get(path) ?? globalDiffStyle;
 					return (
 						<div key={path} className="min-h-0">
@@ -182,9 +202,14 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 	const [diffViewState, setDiffViewState] = useAtom(diffViewStateAtom);
 	const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 	const prevChangeIdRef = useRef<string | null>(null);
+	const [hasFocus, setHasFocus] = useState(false);
 
-	// Use native focus tracking
-	const hasFocus = useFocusWithin(containerRef);
+	// Handler for blur events - only unfocus if focus moves outside container
+	const handleBlur = (e: FocusEvent<HTMLDivElement>) => {
+		if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+			setHasFocus(false);
+		}
+	};
 
 	// Merge refs if external ref is provided
 	const setRefs = (el: HTMLDivElement | null) => {
@@ -282,14 +307,12 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 
 	// Get patches for selected files (in order)
 	const selectedPatches = useMemo(() => {
-		const patches: Array<{ path: string; patch: string }> = [];
+		const patches: Array<{ path: string; patch: string; status: ChangedFileStatus }> = [];
 		// Maintain file order from changedFiles
 		for (const file of changedFiles) {
 			if (selectedFiles.has(file.path)) {
-				const patch = patchMap.get(file.path);
-				if (patch) {
-					patches.push({ path: file.path, patch });
-				}
+				const patch = patchMap.get(file.path) ?? "";
+				patches.push({ path: file.path, patch, status: file.status as ChangedFileStatus });
 			}
 		}
 		return patches;
@@ -297,9 +320,12 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 
 	if (!repoPath || !changeId) {
 		return (
+			// biome-ignore lint/a11y/noStaticElementInteractions: Focus tracking for keyboard navigation
 			<div
 				ref={setRefs}
 				tabIndex={-1}
+				onFocus={() => setHasFocus(true)}
+				onBlur={handleBlur}
 				className="flex items-center justify-center h-full text-muted-foreground text-sm outline-none"
 			>
 				Select a revision to view diffs
@@ -309,9 +335,12 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 
 	if (isLoading) {
 		return (
+			// biome-ignore lint/a11y/noStaticElementInteractions: Focus tracking for keyboard navigation
 			<div
 				ref={setRefs}
 				tabIndex={-1}
+				onFocus={() => setHasFocus(true)}
+				onBlur={handleBlur}
 				className="flex items-center justify-center h-full text-muted-foreground text-sm outline-none"
 			>
 				Loading diffs...
@@ -321,9 +350,12 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 
 	if (changedFiles.length === 0) {
 		return (
+			// biome-ignore lint/a11y/noStaticElementInteractions: Focus tracking for keyboard navigation
 			<div
 				ref={setRefs}
 				tabIndex={-1}
+				onFocus={() => setHasFocus(true)}
+				onBlur={handleBlur}
 				className="flex items-center justify-center h-full text-muted-foreground text-sm outline-none"
 			>
 				No changes in this revision
@@ -332,9 +364,12 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 	}
 
 	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: Focus tracking for keyboard navigation
 		<div
 			ref={setRefs}
 			tabIndex={-1}
+			onFocus={() => setHasFocus(true)}
+			onBlur={handleBlur}
 			className="h-full w-full flex flex-col bg-background outline-none overflow-hidden"
 		>
 			{/* Revision header */}
@@ -400,6 +435,8 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 								patches={selectedPatches}
 								diffViewState={diffViewState}
 								globalDiffStyle={globalDiffStyle}
+								repoPath={repoPath}
+								changeId={changeId}
 							/>
 						</div>
 					</ResizablePanel>

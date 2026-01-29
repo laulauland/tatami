@@ -140,57 +140,29 @@ export function ChangedFilesList({
 	showSelection = false,
 }: ChangedFilesListProps) {
 	if (isLoading) {
-		return (
-			<div className="flex flex-col">
-				<div className="px-3 py-2 border-b border-border">
-					<Skeleton className="h-4 w-24" />
-				</div>
-				<LoadingSkeleton />
-			</div>
-		);
+		return <LoadingSkeleton />;
 	}
 
 	if (files.length === 0) {
-		return (
-			<div className="flex flex-col">
-				<div className="px-3 py-2 border-b border-border">
-					<span className="text-xs font-semibold text-muted-foreground">0 files changed</span>
-				</div>
-				<EmptyState />
-			</div>
-		);
+		return <EmptyState />;
 	}
-
-	const filesCount = files.length;
-	const fileWord = filesCount === 1 ? "file" : "files";
-	const selectedCount = selectedFiles?.size ?? 0;
 
 	return (
 		<div>
-			<div className="px-3 py-2 border-b border-border flex items-center justify-between">
-				<span className="text-xs font-semibold text-muted-foreground">
-					{filesCount} {fileWord} changed
-				</span>
-				{showSelection && selectedCount > 0 && (
-					<span className="text-xs text-primary font-medium">{selectedCount} selected</span>
-				)}
-			</div>
-			<div>
-				{files.map((file, index) => (
-					<FileListItem
-						key={file.path}
-						file={file}
-						isFocused={selectedFile === file.path}
-						isChecked={selectedFiles?.has(file.path) ?? false}
-						onClick={() => onSelectFile(file.path)}
-						onToggleSelection={
-							onToggleFileSelection ? () => onToggleFileSelection(file.path) : undefined
-						}
-						showSelection={showSelection}
-						isOdd={index % 2 === 1}
-					/>
-				))}
-			</div>
+			{files.map((file, index) => (
+				<FileListItem
+					key={file.path}
+					file={file}
+					isFocused={selectedFile === file.path}
+					isChecked={selectedFiles?.has(file.path) ?? false}
+					onClick={() => onSelectFile(file.path)}
+					onToggleSelection={
+						onToggleFileSelection ? () => onToggleFileSelection(file.path) : undefined
+					}
+					showSelection={showSelection}
+					isOdd={index % 2 === 1}
+				/>
+			))}
 		</div>
 	);
 }

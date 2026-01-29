@@ -9,6 +9,16 @@ export const ParentEdge = Schema.Struct({
 });
 export type ParentEdge = typeof ParentEdge.Type;
 
+export const BookmarkInfo = Schema.Struct({
+	name: Schema.String,
+	is_tracked: Schema.Boolean,
+	remote: Schema.NullOr(Schema.String),
+	is_ahead: Schema.Boolean,
+	is_behind: Schema.Boolean,
+	is_conflicted: Schema.Boolean,
+});
+export type BookmarkInfo = typeof BookmarkInfo.Type;
+
 export const Revision = Schema.Struct({
 	commit_id: Schema.String,
 	change_id: Schema.String,
@@ -24,7 +34,8 @@ export const Revision = Schema.Struct({
 	is_trunk: Schema.Boolean,
 	is_divergent: Schema.Boolean,
 	divergent_index: Schema.NullOr(Schema.Number),
-	bookmarks: Schema.Array(Schema.String),
+	has_conflict: Schema.Boolean,
+	bookmarks: Schema.Array(BookmarkInfo),
 });
 export type Revision = typeof Revision.Type;
 

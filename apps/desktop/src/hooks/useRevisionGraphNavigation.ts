@@ -5,6 +5,7 @@ import { useRef } from "react";
 import { Route } from "@/routes/project.$projectId";
 import { viewModeAtom } from "@/atoms";
 import type { RevisionStack } from "@/components/revision-graph-utils";
+import { getRevisionKey } from "@/db";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import type { Revision } from "@/tauri-commands";
 
@@ -44,8 +45,6 @@ interface UseRevisionGraphNavigationParams {
 	scrollToIndex: (index: number) => void;
 	/** Handler for expanding/collapsing stacks */
 	onToggleStack: (stackId: string) => void;
-	/** Check if inline expanded for h/l behavior */
-	isSelectedExpanded?: boolean;
 	/** Whether the revisions panel has focus */
 	hasFocus: boolean;
 	/** Ref to the diff panel for focus transfer */
@@ -74,13 +73,12 @@ export function useRevisionGraphNavigation({
 	enabled,
 	scrollToIndex,
 	onToggleStack,
-	isSelectedExpanded = false,
 	hasFocus,
 	diffPanelRef,
 }: UseRevisionGraphNavigationParams) {
 	const navigate = useNavigate({ from: Route.fullPath });
 	const search = useSearch({ from: Route.fullPath });
-	const [viewMode] = useAtom(viewModeAtom);
+	const [viewMode, setViewMode] = useAtom(viewModeAtom);
 
 	// Read focused stack and selection from URL params
 	const focusedStackId = useSearch({ from: Route.fullPath, select: (s) => s.stack ?? null });
@@ -116,9 +114,9 @@ export function useRevisionGraphNavigation({
 			);
 		}
 		if (selectedRevision) {
+			const selectedKey = getRevisionKey(selectedRevision);
 			return displayRows.findIndex(
-				(row) =>
-					row.type === "revision" && row.row.revision.change_id === selectedRevision.change_id,
+				(row) => row.type === "revision" && getRevisionKey(row.row.revision) === selectedKey,
 			);
 		}
 		return -1;
@@ -135,7 +133,7 @@ export function useRevisionGraphNavigation({
 				search: {
 					...search,
 					stack: undefined,
-					rev: displayRow.row.revision.change_id,
+					rev: getRevisionKey(displayRow.row.revision),
 					selected: undefined,
 					selectionAnchor: undefined,
 				},
@@ -159,31 +157,42 @@ export function useRevisionGraphNavigation({
 
 	// Extend selection in a direction (macOS-style anchor-based selection)
 	const extendSelection = (direction: "down" | "up") => {
-		if (!selectedRevision) return;
-		const currentIndex = changeIdToIndex.get(selectedRevision.change_id);
-		if (currentIndex === undefined) return;
+		if (!selectedRevision) {
+			return;
+		}
+
+		const currentIndex = changeIdToIndex.get(getRevisionKey(selectedRevision));
+
+		if (currentIndex === undefined) {
+			return;
+		}
 
 		const step = direction === "down" ? 1 : -1;
 		const limit = direction === "down" ? displayRows.length : -1;
 
 		// Find the next revision in the given direction
-		let targetChangeId: string | null = null;
+		let targetRevisionKey: string | null = null;
 		let targetIndex: number | null = null;
 		for (let i = currentIndex + step; direction === "down" ? i < limit : i > limit; i += step) {
 			const displayRow = displayRows[i];
 			if (displayRow.type === "revision") {
-				targetChangeId = displayRow.row.revision.change_id;
+				targetRevisionKey = getRevisionKey(displayRow.row.revision);
 				targetIndex = i;
 				break;
 			}
 		}
 
-		if (!targetChangeId || targetIndex === null) return;
+		if (!targetRevisionKey || targetIndex === null) {
+			return;
+		}
 
 		// Determine anchor: use existing anchor or set it to current position
-		const anchorChangeId = selectionAnchor ?? selectedRevision.change_id;
-		const anchorIndex = changeIdToIndex.get(anchorChangeId);
-		if (anchorIndex === undefined) return;
+		const anchorKey = selectionAnchor ?? getRevisionKey(selectedRevision);
+		const anchorIndex = changeIdToIndex.get(anchorKey);
+
+		if (anchorIndex === undefined) {
+			return;
+		}
 
 		// Select all revisions between anchor and target (inclusive)
 		const startIndex = Math.min(anchorIndex, targetIndex);
@@ -192,17 +201,18 @@ export function useRevisionGraphNavigation({
 		for (let i = startIndex; i <= endIndex; i++) {
 			const displayRow = displayRows[i];
 			if (displayRow.type === "revision") {
-				newSelection.add(displayRow.row.revision.change_id);
+				newSelection.add(getRevisionKey(displayRow.row.revision));
 			}
 		}
 
 		const selected = [...newSelection].join(",");
+
 		navigate({
 			search: {
 				...search,
 				selected,
-				selectionAnchor: anchorChangeId,
-				rev: targetChangeId,
+				selectionAnchor: anchorKey,
+				rev: targetRevisionKey,
 				stack: undefined,
 			},
 			replace: true,
@@ -225,8 +235,9 @@ export function useRevisionGraphNavigation({
 		if (chainRevisions.length === 0) return;
 
 		// Find current position in chain
+		const selectedKey = getRevisionKey(selectedRevision);
 		const currentChainIndex = chainRevisions.findIndex(
-			(row) => row.row.revision.change_id === selectedRevision.change_id,
+			(row) => getRevisionKey(row.row.revision) === selectedKey,
 		);
 
 		let targetRevision: Revision | null = null;
@@ -263,7 +274,7 @@ export function useRevisionGraphNavigation({
 		}
 
 		if (targetRevision) {
-			const targetIndex = changeIdToIndex.get(targetRevision.change_id);
+			const targetIndex = changeIdToIndex.get(getRevisionKey(targetRevision));
 			if (targetIndex !== undefined) {
 				navigateToDisplayRow(targetIndex);
 			}
@@ -361,35 +372,39 @@ export function useRevisionGraphNavigation({
 		enabled: enabled && hasFocus,
 	});
 
-	// J: navigate down in working copy chain
+	// Ctrl+J: navigate down in working copy chain
 	useKeyboardShortcut({
-		key: "J",
-		modifiers: { shift: true },
+		key: "j",
+		modifiers: { ctrl: true },
 		onPress: () => navigateRelated("down"),
 		enabled: enabled && hasFocus && !!selectedRevision,
 	});
 
-	// K: navigate up in working copy chain
+	// Ctrl+K: navigate up in working copy chain
 	useKeyboardShortcut({
-		key: "K",
-		modifiers: { shift: true },
+		key: "k",
+		modifiers: { ctrl: true },
 		onPress: () => navigateRelated("up"),
 		enabled: enabled && hasFocus && !!selectedRevision,
 	});
 
-	// Shift+j: extend selection downward
+	// Shift+J: extend selection downward
 	useKeyboardShortcut({
-		key: "j",
+		key: "J",
 		modifiers: { shift: true },
-		onPress: () => extendSelection("down"),
+		onPress: () => {
+			extendSelection("down");
+		},
 		enabled: enabled && hasFocus && !!selectedRevision,
 	});
 
-	// Shift+k: extend selection upward
+	// Shift+K: extend selection upward
 	useKeyboardShortcut({
-		key: "k",
+		key: "K",
 		modifiers: { shift: true },
-		onPress: () => extendSelection("up"),
+		onPress: () => {
+			extendSelection("up");
+		},
 		enabled: enabled && hasFocus && !!selectedRevision,
 	});
 
@@ -456,20 +471,17 @@ export function useRevisionGraphNavigation({
 		enabled: enabled && hasFocus,
 	});
 
-	// l / ArrowRight: expand revision (overview) or focus diff panel (split)
+	// l / ArrowRight: switch to split mode and focus diff panel
 	useKeyboardShortcut({
 		key: "l",
 		modifiers: {},
 		onPress: () => {
-			if (viewMode === 2) {
-				diffPanelRef.current?.focus();
-				return;
-			}
 			if (!selectedRevision) return;
-			if (isSelectedExpanded) return;
-			navigate({
-				search: { ...search, expanded: true },
-			});
+			// Always switch to split mode and focus diff panel
+			if (viewMode === 1) {
+				setViewMode(2);
+			}
+			diffPanelRef.current?.focus();
 		},
 		enabled: enabled && hasFocus,
 	});
@@ -478,49 +490,12 @@ export function useRevisionGraphNavigation({
 		key: "ArrowRight",
 		modifiers: {},
 		onPress: () => {
-			if (viewMode === 2) {
-				diffPanelRef.current?.focus();
-				return;
-			}
 			if (!selectedRevision) return;
-			if (isSelectedExpanded) return;
-			navigate({
-				search: { ...search, expanded: true },
-			});
-		},
-		enabled: enabled && hasFocus,
-	});
-
-	// h / ArrowLeft: collapse revision (overview)
-	useKeyboardShortcut({
-		key: "h",
-		modifiers: {},
-		onPress: () => {
-			if (viewMode === 2) {
-				// In split mode, h in revision panel does nothing
-				return;
+			// Always switch to split mode and focus diff panel
+			if (viewMode === 1) {
+				setViewMode(2);
 			}
-			if (!selectedRevision) return;
-			if (!isSelectedExpanded) return;
-			navigate({
-				search: { ...search, expanded: undefined },
-			});
-		},
-		enabled: enabled && hasFocus,
-	});
-
-	useKeyboardShortcut({
-		key: "ArrowLeft",
-		modifiers: {},
-		onPress: () => {
-			if (viewMode === 2) {
-				return;
-			}
-			if (!selectedRevision) return;
-			if (!isSelectedExpanded) return;
-			navigate({
-				search: { ...search, expanded: undefined },
-			});
+			diffPanelRef.current?.focus();
 		},
 		enabled: enabled && hasFocus,
 	});
@@ -533,7 +508,7 @@ export function useRevisionGraphNavigation({
 			if (focusedStackId) {
 				onToggleStack(focusedStackId);
 			} else if (selectedRevision) {
-				toggleRevisionCheck(selectedRevision.change_id);
+				toggleRevisionCheck(getRevisionKey(selectedRevision));
 			}
 		},
 		enabled: enabled,

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { getRevisionKey } from "@/db";
 import type { Revision } from "@/tauri-commands";
 
 interface ScrollOptions {
@@ -61,10 +62,11 @@ export function useKeyboardNavigation({
 		sequence: "gg",
 		onTrigger: () => {
 			const revisions = orderedRevisionsRef.current;
-			const targetChangeId = revisions[0]?.change_id || null;
-			if (targetChangeId) {
-				onNavigateRef.current(targetChangeId);
-				scrollToChangeIdRef.current?.(targetChangeId, { align: "center", smooth: true });
+			const targetRev = revisions[0];
+			if (targetRev) {
+				const targetKey = getRevisionKey(targetRev);
+				onNavigateRef.current(targetKey);
+				scrollToChangeIdRef.current?.(targetKey, { align: "center", smooth: true });
 			}
 		},
 		enabled: orderedRevisions.length > 0,
@@ -78,16 +80,17 @@ export function useKeyboardNavigation({
 			}
 
 			const revisions = orderedRevisionsRef.current;
-			const changeId = selectedChangeIdRef.current;
+			const revisionKey = selectedChangeIdRef.current;
 
-			let currentIndex = revisions.findIndex((r) => r.change_id === changeId);
+			// Find current index using revision key (handles divergent revisions)
+			let currentIndex = revisions.findIndex((r) => getRevisionKey(r) === revisionKey);
 			if (currentIndex < 0) {
 				currentIndex = revisions.findIndex((r) => r.is_working_copy);
 				if (currentIndex < 0) currentIndex = 0;
 			}
 			const currentRevision = revisions[currentIndex] ?? null;
 
-			let targetChangeId: string | null = null;
+			let targetRevisionKey: string | null = null;
 			// "jump" = always scroll to center, "step" = scroll only if needed, "none" = no explicit scroll
 			let scrollMode: "jump" | "step" | "none" = "none";
 
@@ -103,7 +106,7 @@ export function useKeyboardNavigation({
 			switch (true) {
 				case (event.key === "j" || event.key === "ArrowDown") && !disableBasicNavigationRef.current:
 					if (currentIndex >= 0 && currentIndex < revisions.length - 1) {
-						targetChangeId = revisions[currentIndex + 1].change_id;
+						targetRevisionKey = getRevisionKey(revisions[currentIndex + 1]);
 						scrollMode = "step";
 					}
 					event.preventDefault();
@@ -111,7 +114,7 @@ export function useKeyboardNavigation({
 
 				case (event.key === "k" || event.key === "ArrowUp") && !disableBasicNavigationRef.current:
 					if (currentIndex > 0) {
-						targetChangeId = revisions[currentIndex - 1].change_id;
+						targetRevisionKey = getRevisionKey(revisions[currentIndex - 1]);
 						scrollMode = "step";
 					}
 					event.preventDefault();
@@ -125,7 +128,7 @@ export function useKeyboardNavigation({
 						if (parentId) {
 							const parentRevision = revisions.find((r) => r.commit_id === parentId);
 							if (parentRevision) {
-								targetChangeId = parentRevision.change_id;
+								targetRevisionKey = getRevisionKey(parentRevision);
 								scrollMode = "step";
 							}
 						}
@@ -142,24 +145,28 @@ export function useKeyboardNavigation({
 								r.parent_edges.some((e) => e.parent_id === currentRevision.commit_id),
 						);
 						if (childRevision) {
-							targetChangeId = childRevision.change_id;
+							targetRevisionKey = getRevisionKey(childRevision);
 							scrollMode = "step";
 						}
 					}
 					event.preventDefault();
 					break;
 
-				case event.key === "@":
-					targetChangeId = revisions.find((r) => r.is_working_copy)?.change_id || null;
+				case event.key === "@": {
+					const wcRevision = revisions.find((r) => r.is_working_copy);
+					targetRevisionKey = wcRevision ? getRevisionKey(wcRevision) : null;
 					scrollMode = "jump";
 					event.preventDefault();
 					break;
+				}
 
-				case event.key === "G":
-					targetChangeId = revisions[revisions.length - 1]?.change_id || null;
+				case event.key === "G": {
+					const lastRevision = revisions[revisions.length - 1];
+					targetRevisionKey = lastRevision ? getRevisionKey(lastRevision) : null;
 					scrollMode = "jump";
 					event.preventDefault();
 					break;
+				}
 
 				case event.key === "Escape":
 					onNavigateRef.current("");
@@ -167,12 +174,12 @@ export function useKeyboardNavigation({
 					break;
 			}
 
-			if (targetChangeId) {
-				onNavigateRef.current(targetChangeId);
+			if (targetRevisionKey) {
+				onNavigateRef.current(targetRevisionKey);
 				if (scrollMode === "jump") {
-					scrollToChangeIdRef.current?.(targetChangeId, { align: "center", smooth: true });
+					scrollToChangeIdRef.current?.(targetRevisionKey, { align: "center", smooth: true });
 				} else if (scrollMode === "step") {
-					scrollToChangeIdRef.current?.(targetChangeId, { align: "auto", smooth: false });
+					scrollToChangeIdRef.current?.(targetRevisionKey, { align: "auto", smooth: false });
 				}
 			}
 		}
@@ -221,8 +228,9 @@ export function useKeyboardShortcut({
 				}
 			}
 
-			const altMatch = modifiers.alt === undefined || event.altKey === modifiers.alt;
-			const shiftMatch = modifiers.shift === undefined || event.shiftKey === modifiers.shift;
+			const altMatch = modifiers.alt === undefined ? !event.altKey : event.altKey === modifiers.alt;
+			const shiftMatch =
+				modifiers.shift === undefined ? !event.shiftKey : event.shiftKey === modifiers.shift;
 
 			if (metaCtrlMatch && altMatch && shiftMatch) {
 				event.preventDefault();

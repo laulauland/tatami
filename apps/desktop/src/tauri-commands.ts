@@ -84,7 +84,11 @@ export async function jjNew(
 	parentChangeIds: string[],
 	changeId?: string,
 ): Promise<MutationResult> {
-	return invoke<MutationResult>("jj_new", { repoPath, parentChangeIds, changeId: changeId ?? null });
+	return invoke<MutationResult>("jj_new", {
+		repoPath,
+		parentChangeIds,
+		changeId: changeId ?? null,
+	});
 }
 
 export async function jjEdit(repoPath: string, changeId: string): Promise<MutationResult> {
@@ -133,4 +137,25 @@ export interface RevsetResult {
 /** Resolve a revset expression using jj-lib's full parser */
 export async function resolveRevset(repoPath: string, revset: string): Promise<RevsetResult> {
 	return invoke<RevsetResult>("resolve_revset", { repoPath, revset });
+}
+
+/** Result of fetching file content as base64 */
+export interface FileContentResult {
+	base64: string;
+	size: number;
+}
+
+/** Get file content as base64 for displaying binary files like images */
+export async function getFileContentBase64(
+	repoPath: string,
+	changeId: string,
+	filePath: string,
+	version: "current" | "parent",
+): Promise<FileContentResult> {
+	return invoke<FileContentResult>("get_file_content_base64", {
+		repoPath,
+		changeId,
+		filePath,
+		version,
+	});
 }

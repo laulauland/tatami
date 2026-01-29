@@ -10,6 +10,7 @@ import {
 	CommandItem,
 	CommandList,
 } from "@/components/ui/command";
+import { getRevisionKey } from "@/db";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import { resolveRevset, type Revision } from "@/tauri-commands";
 
@@ -178,7 +179,8 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 		const lowerSearch = debouncedSearch.toLowerCase();
 
 		if (revision.change_id.toLowerCase().startsWith(lowerSearch)) return "changeId";
-		if (revision.bookmarks.some((b) => b.toLowerCase().includes(lowerSearch))) return "bookmark";
+		if (revision.bookmarks.some((b) => b.name.toLowerCase().includes(lowerSearch)))
+			return "bookmark";
 		if (revision.description.toLowerCase().includes(lowerSearch)) return "description";
 		return null;
 	}
@@ -186,7 +188,7 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 	function getMatchingBookmark(revision: Revision): string | null {
 		if (!debouncedSearch || isRevsetMode) return null;
 		const lowerSearch = debouncedSearch.toLowerCase();
-		return revision.bookmarks.find((b) => b.toLowerCase().includes(lowerSearch)) ?? null;
+		return revision.bookmarks.find((b) => b.name.toLowerCase().includes(lowerSearch))?.name ?? null;
 	}
 
 	// Custom filter function that ranks by match type
@@ -210,7 +212,7 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 		}
 
 		// Bookmark match - medium priority
-		if (revision.bookmarks.some((b) => b.toLowerCase().includes(lowerSearch))) {
+		if (revision.bookmarks.some((b) => b.name.toLowerCase().includes(lowerSearch))) {
 			return 0.7;
 		}
 
@@ -275,13 +277,13 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 
 						return (
 							<CommandItem
-								key={revision.change_id}
+								key={getRevisionKey(revision)}
 								value={revision.change_id}
 								onSelect={() => jumpTo(revision.change_id)}
 								keywords={[
 									revision.change_id,
 									revision.change_id_short,
-									...revision.bookmarks,
+									...revision.bookmarks.map((b) => b.name),
 									revision.description,
 								]}
 								className="flex items-center gap-3 py-2.5"
@@ -303,7 +305,7 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 										{matchType === "bookmark" && matchingBookmark ? (
 											<HighlightMatch text={matchingBookmark} query={debouncedSearch} />
 										) : (
-											revision.bookmarks[0]
+											revision.bookmarks[0].name
 										)}
 										{revision.bookmarks.length > 1 && (
 											<span className="text-muted-foreground ml-1">

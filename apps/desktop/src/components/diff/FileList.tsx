@@ -136,6 +136,26 @@ function getSortedChildren(node: TreeNode): TreeNode[] {
 	});
 }
 
+// Get files in visual tree order (matches how tree is rendered)
+function getFilesInTreeOrder(node: TreeNode): ChangedFile[] {
+	const result: ChangedFile[] = [];
+
+	function traverse(n: TreeNode) {
+		const sortedChildren = getSortedChildren(n);
+		for (const child of sortedChildren) {
+			if (child.file) {
+				result.push(child.file);
+			}
+			if (child.isDirectory) {
+				traverse(child);
+			}
+		}
+	}
+
+	traverse(node);
+	return result;
+}
+
 interface TreeNodeComponentProps {
 	node: TreeNode;
 	depth: number;
@@ -145,6 +165,7 @@ interface TreeNodeComponentProps {
 	expandedDirs: Set<string>;
 	toggleDir: (path: string) => void;
 	itemRefs: React.RefObject<Map<string, HTMLButtonElement>>;
+	hasFocus: boolean;
 }
 
 // Collect all file paths under a tree node
@@ -168,6 +189,7 @@ function TreeNodeComponent({
 	expandedDirs,
 	toggleDir,
 	itemRefs,
+	hasFocus,
 }: TreeNodeComponentProps) {
 	const isExpanded = expandedDirs.has(node.path);
 	const sortedChildren = getSortedChildren(node);
@@ -213,6 +235,7 @@ function TreeNodeComponent({
 								expandedDirs={expandedDirs}
 								toggleDir={toggleDir}
 								itemRefs={itemRefs}
+								hasFocus={hasFocus}
 							/>
 						))}
 					</div>
@@ -236,7 +259,11 @@ function TreeNodeComponent({
 			onClick={(e) => onSelectFile(node.path, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey })}
 			className={cn(
 				"w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm",
-				isSelected ? "bg-accent/40 text-foreground" : "text-muted-foreground",
+				isSelected
+					? hasFocus
+						? "bg-accent/40 text-foreground"
+						: "bg-muted text-foreground"
+					: "text-muted-foreground",
 			)}
 			style={{ paddingLeft: `${fileIndent}px` }}
 		>
@@ -260,6 +287,7 @@ export function FileList({
 	const [viewMode, setViewMode] = useState<"flat" | "tree">("tree");
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
+	const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
 
 	// Filter files by search query
 	const filteredFiles = useMemo(() => {
@@ -273,6 +301,11 @@ export function FileList({
 		const rawTree = buildTree(filteredFiles);
 		return collapseSingleChildDirs(rawTree);
 	}, [filteredFiles]);
+
+	// Get files in visual tree order for navigation
+	const sortedFiles = useMemo(() => {
+		return getFilesInTreeOrder(tree);
+	}, [tree]);
 
 	// Auto-expand all directories when switching to tree view or when filter changes
 	useEffect(() => {
@@ -372,33 +405,89 @@ export function FileList({
 		[tree, selectedFiles, onSelectFiles],
 	);
 
-	// Get first selected file index for navigation
+	// Get first selected file path for scrolling
 	const firstSelectedPath = selectedFiles.size > 0 ? [...selectedFiles][0] : null;
-	const selectedIndex = firstSelectedPath
-		? filteredFiles.findIndex((f) => f.path === firstSelectedPath)
-		: -1;
+
+	// The focused index is where the cursor is (for keyboard navigation)
+	const focusedIndex =
+		lastClickedIndex ??
+		(selectedFiles.size > 0 ? sortedFiles.findIndex((f) => selectedFiles.has(f.path)) : -1);
 
 	// Navigate to next file
 	const navigateDown = useCallback(() => {
-		if (filteredFiles.length === 0) return;
-		const nextIndex = selectedIndex < filteredFiles.length - 1 ? selectedIndex + 1 : selectedIndex;
-		const nextFile = filteredFiles[nextIndex];
-		if (nextFile) {
-			onSelectFiles(new Set([nextFile.path]));
+		if (sortedFiles.length === 0) return;
+		const nextIndex = focusedIndex < sortedFiles.length - 1 ? focusedIndex + 1 : focusedIndex;
+		if (nextIndex !== focusedIndex) {
+			onSelectFiles(new Set([sortedFiles[nextIndex].path]));
 			setLastClickedIndex(nextIndex);
+			setSelectionAnchor(null); // Reset anchor on single select
 		}
-	}, [filteredFiles, selectedIndex, onSelectFiles]);
+	}, [sortedFiles, focusedIndex, onSelectFiles]);
 
 	// Navigate to previous file
 	const navigateUp = useCallback(() => {
-		if (filteredFiles.length === 0) return;
-		const prevIndex = selectedIndex > 0 ? selectedIndex - 1 : 0;
-		const prevFile = filteredFiles[prevIndex];
-		if (prevFile) {
-			onSelectFiles(new Set([prevFile.path]));
+		if (sortedFiles.length === 0) return;
+		const prevIndex = focusedIndex > 0 ? focusedIndex - 1 : 0;
+		if (prevIndex !== focusedIndex) {
+			onSelectFiles(new Set([sortedFiles[prevIndex].path]));
 			setLastClickedIndex(prevIndex);
+			setSelectionAnchor(null); // Reset anchor on single select
 		}
-	}, [filteredFiles, selectedIndex, onSelectFiles]);
+	}, [sortedFiles, focusedIndex, onSelectFiles]);
+
+	// Extend selection downward
+	const extendSelectionDown = useCallback(() => {
+		if (sortedFiles.length === 0) return;
+
+		const currentFocus = focusedIndex >= 0 ? focusedIndex : 0;
+		const nextFocus = currentFocus < sortedFiles.length - 1 ? currentFocus + 1 : currentFocus;
+
+		if (nextFocus === currentFocus) return;
+
+		// Set anchor on first shift-select (anchor stays fixed, focus moves)
+		const anchor = selectionAnchor ?? currentFocus;
+		if (selectionAnchor === null) {
+			setSelectionAnchor(currentFocus);
+		}
+
+		// Select all files between anchor and new focus (inclusive)
+		const startIdx = Math.min(anchor, nextFocus);
+		const endIdx = Math.max(anchor, nextFocus);
+		const newSelection = new Set<string>();
+		for (let i = startIdx; i <= endIdx; i++) {
+			newSelection.add(sortedFiles[i].path);
+		}
+
+		onSelectFiles(newSelection);
+		setLastClickedIndex(nextFocus);
+	}, [sortedFiles, focusedIndex, selectionAnchor, onSelectFiles]);
+
+	// Extend selection upward
+	const extendSelectionUp = useCallback(() => {
+		if (sortedFiles.length === 0) return;
+
+		const currentFocus = focusedIndex >= 0 ? focusedIndex : 0;
+		const nextFocus = currentFocus > 0 ? currentFocus - 1 : 0;
+
+		if (nextFocus === currentFocus) return;
+
+		// Set anchor on first shift-select
+		const anchor = selectionAnchor ?? currentFocus;
+		if (selectionAnchor === null) {
+			setSelectionAnchor(currentFocus);
+		}
+
+		// Select all files between anchor and new focus (inclusive)
+		const startIdx = Math.min(anchor, nextFocus);
+		const endIdx = Math.max(anchor, nextFocus);
+		const newSelection = new Set<string>();
+		for (let i = startIdx; i <= endIdx; i++) {
+			newSelection.add(sortedFiles[i].path);
+		}
+
+		onSelectFiles(newSelection);
+		setLastClickedIndex(nextFocus);
+	}, [sortedFiles, focusedIndex, selectionAnchor, onSelectFiles]);
 
 	// Keyboard navigation when diff panel is focused
 	useKeyboardShortcut({
@@ -425,6 +514,38 @@ export function FileList({
 		enabled: hasFocus,
 	});
 
+	// Shift+J: extend selection downward
+	useKeyboardShortcut({
+		key: "J",
+		modifiers: { shift: true },
+		onPress: extendSelectionDown,
+		enabled: hasFocus,
+	});
+
+	// Shift+K: extend selection upward
+	useKeyboardShortcut({
+		key: "K",
+		modifiers: { shift: true },
+		onPress: extendSelectionUp,
+		enabled: hasFocus,
+	});
+
+	// Shift+ArrowDown: extend selection downward
+	useKeyboardShortcut({
+		key: "ArrowDown",
+		modifiers: { shift: true },
+		onPress: extendSelectionDown,
+		enabled: hasFocus,
+	});
+
+	// Shift+ArrowUp: extend selection upward
+	useKeyboardShortcut({
+		key: "ArrowUp",
+		modifiers: { shift: true },
+		onPress: extendSelectionUp,
+		enabled: hasFocus,
+	});
+
 	// Scroll first selected item into view
 	useEffect(() => {
 		if (firstSelectedPath) {
@@ -434,7 +555,11 @@ export function FileList({
 	}, [firstSelectedPath]);
 
 	return (
-		<div className="flex flex-col h-full w-full overflow-hidden">
+		<div
+			ref={listRef}
+			tabIndex={-1}
+			className="flex flex-col h-full w-full overflow-hidden outline-none"
+		>
 			{/* Summary header */}
 			<div className="border-b border-border px-3 py-2 text-xs text-muted-foreground shrink-0">
 				<div className="flex items-center justify-between">
@@ -478,8 +603,8 @@ export function FileList({
 				</div>
 			</div>
 
-			<ScrollArea className="flex-1">
-				<div ref={listRef}>
+			<ScrollArea className="flex-1 min-h-0">
+				<div>
 					{viewMode === "flat"
 						? // Flat list view
 							filteredFiles.map((file, index) => {
@@ -504,7 +629,9 @@ export function FileList({
 										className={cn(
 											"w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm",
 											isSelected
-												? "bg-accent/40 text-foreground"
+												? hasFocus
+													? "bg-accent/40 text-foreground"
+													: "bg-muted text-foreground"
 												: index % 2 === 1
 													? "bg-muted/30 text-muted-foreground"
 													: "text-muted-foreground",
@@ -532,6 +659,7 @@ export function FileList({
 									expandedDirs={expandedDirs}
 									toggleDir={toggleDir}
 									itemRefs={itemRefs}
+									hasFocus={hasFocus}
 								/>
 							))}
 				</div>

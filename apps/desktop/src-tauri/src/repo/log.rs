@@ -15,6 +15,16 @@ use std::path::Path;
 use super::jj::JjRepo;
 
 #[derive(Clone, Debug, serde::Serialize)]
+pub struct BookmarkInfo {
+    pub name: String,
+    pub is_tracked: bool,
+    pub remote: Option<String>,
+    pub is_ahead: bool,
+    pub is_behind: bool,
+    pub is_conflicted: bool,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct ParentEdge {
     pub parent_id: String,
     pub edge_type: String,
@@ -36,7 +46,8 @@ pub struct Revision {
     pub is_trunk: bool,
     pub is_divergent: bool,
     pub divergent_index: Option<usize>,
-    pub bookmarks: Vec<String>,
+    pub has_conflict: bool,
+    pub bookmarks: Vec<BookmarkInfo>,
 }
 
 pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: Option<&str>) -> Result<Vec<Revision>> {
@@ -236,6 +247,8 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: O
 
         let is_trunk = trunk_ancestor_ids.contains(&commit_id);
 
+        let has_conflict = commit.has_conflict();
+
         revisions.push(Revision {
             commit_id: hex::encode(&commit_id.to_bytes()[..6]),
             change_id: full_change_id,
@@ -251,6 +264,7 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: O
             is_trunk,
             is_divergent,
             divergent_index,
+            has_conflict,
             bookmarks,
         });
     }
@@ -305,14 +319,70 @@ fn format_timestamp(
     }
 }
 
-fn get_bookmarks_for_commit(repo: &dyn Repo, commit_id: &CommitId) -> Vec<String> {
+fn get_bookmarks_for_commit(repo: &dyn Repo, commit_id: &CommitId) -> Vec<BookmarkInfo> {
+    use jj_lib::str_util::StringMatcher;
+
     let view = repo.view();
     let mut bookmarks = Vec::new();
 
-    for (name, target) in view.local_bookmarks() {
-        if target.added_ids().any(|id| id == commit_id) {
-            bookmarks.push(name.as_str().to_string());
+    for (name, local_target) in view.local_bookmarks() {
+        if !local_target.added_ids().any(|id| id == commit_id) {
+            continue;
         }
+
+        let name_str = name.as_str().to_string();
+
+        // Check all remotes for tracking status
+        let mut found_tracked_remote = false;
+        let mut tracking_remote: Option<String> = None;
+        let mut is_ahead = false;
+        let mut is_behind = false;
+        let mut is_conflicted = false;
+
+        // Iterate over all remotes to find tracked refs for this bookmark
+        let all_remotes = StringMatcher::all();
+        for (remote_name, _remote_view) in view.remote_views_matching(&all_remotes) {
+            let symbol = name.to_remote_symbol(remote_name);
+            let remote_ref = view.get_remote_bookmark(symbol);
+
+            if remote_ref.is_tracked() {
+                found_tracked_remote = true;
+                tracking_remote = Some(remote_name.as_str().to_string());
+
+                let remote_target = remote_ref.tracked_target();
+
+                // Check for conflicts (diverged bookmark)
+                if local_target.has_conflict() || remote_target.has_conflict() {
+                    is_conflicted = true;
+                }
+
+                // Compare local and remote targets to determine ahead/behind
+                // If targets are equal, neither ahead nor behind
+                // If local has commits remote doesn't have -> ahead
+                // If remote has commits local doesn't have -> behind
+                if local_target != remote_target {
+                    // Check if local has commits not in remote (ahead)
+                    let local_ids: std::collections::HashSet<_> = local_target.added_ids().collect();
+                    let remote_ids: std::collections::HashSet<_> = remote_target.added_ids().collect();
+
+                    // Local is ahead if it has commits that remote doesn't
+                    is_ahead = local_ids.iter().any(|id| !remote_ids.contains(id));
+                    // Local is behind if remote has commits that local doesn't
+                    is_behind = remote_ids.iter().any(|id| !local_ids.contains(id));
+                }
+
+                break; // Use first tracked remote found
+            }
+        }
+
+        bookmarks.push(BookmarkInfo {
+            name: name_str,
+            is_tracked: found_tracked_remote,
+            remote: tracking_remote,
+            is_ahead,
+            is_behind,
+            is_conflicted,
+        });
     }
 
     bookmarks

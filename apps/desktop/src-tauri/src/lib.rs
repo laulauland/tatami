@@ -356,6 +356,39 @@ async fn resolve_revset(repo_path: String, revset: String) -> Result<RevsetResul
     repo::log::resolve_revset(path, &revset).map_err(|e| format!("Failed to resolve revset: {}", e))
 }
 
+#[derive(Serialize)]
+struct FileContentResult {
+    base64: String,
+    size: usize,
+}
+
+/// Get file content as base64 for a specific revision version (current or parent).
+/// Used for displaying binary files like images in the diff view.
+#[tauri::command]
+async fn get_file_content_base64(
+    repo_path: String,
+    change_id: String,
+    file_path: String,
+    version: String,
+) -> Result<FileContentResult, String> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    let path = Path::new(&repo_path);
+    let jj = JjRepo::open(path).map_err(|e| e.to_string())?;
+    let commit = jj.get_commit(&change_id).map_err(|e| e.to_string())?;
+
+    let content = match version.as_str() {
+        "current" => jj.get_file_content(&commit, &file_path).unwrap_or_default(),
+        "parent" => jj.get_parent_file_content(&commit, &file_path).unwrap_or_default(),
+        _ => return Err("Invalid version: use 'current' or 'parent'".to_string()),
+    };
+
+    Ok(FileContentResult {
+        base64: STANDARD.encode(&content),
+        size: content.len(),
+    })
+}
+
 /// Handle "Open Project" menu action: show folder picker, find jj repo, save project, emit event
 fn handle_open_project(app_handle: &AppHandle) {
     let handle = app_handle.clone();
@@ -512,6 +545,7 @@ pub fn run() {
             get_revision_changes,
             get_commit_recency,
             resolve_revset,
+            get_file_content_base64,
             get_projects,
             upsert_project,
             find_project_by_path,

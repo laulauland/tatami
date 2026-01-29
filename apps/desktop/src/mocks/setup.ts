@@ -2,7 +2,19 @@
 // NOTE: tauri-stub.ts must be imported before this to set up __TAURI_INTERNALS__
 
 import { IS_TAURI } from "@/tauri-stub";
-import type { Revision, WorkingCopyStatus, Repository, ChangedFile } from "@/schemas";
+import type { Revision, WorkingCopyStatus, Repository, ChangedFile, BookmarkInfo } from "@/schemas";
+
+// Create a mock BookmarkInfo for testing purposes
+function mockBookmark(name: string, options?: Partial<Omit<BookmarkInfo, "name">>): BookmarkInfo {
+	return {
+		name,
+		is_tracked: options?.is_tracked ?? true,
+		remote: options?.remote ?? "origin",
+		is_ahead: options?.is_ahead ?? false,
+		is_behind: options?.is_behind ?? false,
+		is_conflicted: options?.is_conflicted ?? false,
+	};
+}
 
 // Generate random jj-style change ID (12 characters, k-z only)
 function generateChangeId(): string {
@@ -92,6 +104,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Main trunk commits
@@ -109,6 +122,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: true,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -125,6 +139,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: true,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -141,6 +156,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: true,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Feature branch A: Authentication (branches from main003, 4 commits - UNMERGED)
@@ -158,7 +174,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
-		bookmarks: ["feature/auth"],
+		has_conflict: false,
+		bookmarks: [mockBookmark("feature/auth")],
 	},
 	{
 		commit_id: "auth0020000000",
@@ -174,6 +191,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -190,6 +208,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -206,6 +225,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Feature branch B: Dark mode (branches from main003, 5 commits - UNMERGED)
@@ -223,7 +243,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
-		bookmarks: ["feature/dark-mode"],
+		has_conflict: false,
+		bookmarks: [mockBookmark("feature/dark-mode", { is_ahead: true })],
 	},
 	{
 		commit_id: "dark0020000000",
@@ -239,6 +260,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -255,6 +277,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -271,6 +294,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -287,6 +311,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Main trunk continues
@@ -304,6 +329,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: true,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -320,6 +346,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: true,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Feature branch C: Performance (branches from main005, 4 commits - UNMERGED)
@@ -337,7 +364,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
-		bookmarks: ["feature/performance"],
+		has_conflict: false,
+		bookmarks: [mockBookmark("feature/performance", { is_behind: true })],
 	},
 	{
 		commit_id: "perf0020000000",
@@ -353,6 +381,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -369,6 +398,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -385,6 +415,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Main trunk continues
@@ -402,6 +433,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: true,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -418,6 +450,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: true,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Feature branch D: API improvements (branches from main007, 3 commits - UNMERGED)
@@ -435,7 +468,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
-		bookmarks: ["feature/api"],
+		has_conflict: false,
+		bookmarks: [mockBookmark("feature/api")],
 	},
 	{
 		commit_id: "api0020000000",
@@ -451,6 +485,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -467,6 +502,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Feature branch E: Testing (branches from main007, 5 commits - UNMERGED)
@@ -484,7 +520,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
-		bookmarks: ["feature/testing"],
+		has_conflict: false,
+		bookmarks: [mockBookmark("feature/testing", { is_conflicted: true })],
 	},
 	{
 		commit_id: "test0020000000",
@@ -500,6 +537,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -516,6 +554,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -532,6 +571,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -548,6 +588,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Main trunk continues
@@ -565,6 +606,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: true,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Feature branch F: UI improvements (branches from main008, 4 commits - UNMERGED)
@@ -582,7 +624,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
-		bookmarks: ["feature/ui"],
+		has_conflict: false,
+		bookmarks: [mockBookmark("feature/ui", { is_tracked: false, remote: null })],
 	},
 	{
 		commit_id: "ui0020000000",
@@ -598,6 +641,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -614,6 +658,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -630,6 +675,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Feature branch G: Security (branches from main008, 3 commits - UNMERGED)
@@ -647,7 +693,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
-		bookmarks: ["feature/security"],
+		has_conflict: false,
+		bookmarks: [mockBookmark("feature/security")],
 	},
 	{
 		commit_id: "sec0020000000",
@@ -663,6 +710,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -679,6 +727,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Feature branch H: Documentation (branches from main008, 4 commits - UNMERGED)
@@ -696,7 +745,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
-		bookmarks: ["feature/docs"],
+		has_conflict: false,
+		bookmarks: [mockBookmark("feature/docs")],
 	},
 	{
 		commit_id: "doc0020000000",
@@ -712,6 +762,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -728,6 +779,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -744,6 +796,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Feature branch I: Monitoring (branches from main003, older branch - 3 commits - UNMERGED)
@@ -761,7 +814,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
-		bookmarks: ["feature/monitoring"],
+		has_conflict: false,
+		bookmarks: [mockBookmark("feature/monitoring")],
 	},
 	{
 		commit_id: "mon0020000000",
@@ -777,6 +831,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	{
@@ -793,6 +848,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Main trunk continues
@@ -810,6 +866,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: true,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 	// Current working copy (on main009) - only "main" bookmark exists here
@@ -827,7 +884,8 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: true,
 		is_divergent: false,
 		divergent_index: null,
-		bookmarks: ["main"], // Only "main" bookmark
+		has_conflict: false,
+		bookmarks: [mockBookmark("main")], // Only "main" bookmark
 	},
 	// Current working copy (on main010)
 	{
@@ -844,6 +902,7 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 		is_trunk: false,
 		is_divergent: false,
 		divergent_index: null,
+		has_conflict: false,
 		bookmarks: [],
 	},
 ];
@@ -855,6 +914,16 @@ let mockRevisions: Revision[] = calculateShortIds(mockRevisionsRaw);
 const mockChangedFiles: ChangedFile[] = [
 	{ path: "src/main.rs", status: "modified" },
 	{ path: "README.md", status: "added" },
+	{ path: "src/components/ui/buttons/PrimaryButton.tsx", status: "modified" },
+	{ path: "src/components/ui/buttons/SecondaryButton.tsx", status: "modified" },
+	{ path: "src/features/auth/hooks/useAuth.ts", status: "added" },
+	{ path: "src/features/auth/hooks/useSession.ts", status: "added" },
+	{ path: "src/features/auth/components/LoginForm.tsx", status: "modified" },
+	{ path: "packages/core/lib/utils/formatters/date.ts", status: "deleted" },
+	{ path: "packages/core/lib/utils/formatters/number.ts", status: "modified" },
+	{ path: "packages/core/lib/utils/validators/email.ts", status: "added" },
+	{ path: "tests/unit/auth/login.test.ts", status: "added" },
+	{ path: "tests/integration/api/users.test.ts", status: "modified" },
 ];
 
 type MockHandler = (args: Record<string, unknown>) => unknown;
@@ -958,6 +1027,7 @@ const handlers: Record<string, MockHandler> = {
 			is_trunk: false,
 			is_divergent: false,
 			divergent_index: null,
+			has_conflict: false,
 			bookmarks: [],
 		};
 
@@ -1027,6 +1097,7 @@ const handlers: Record<string, MockHandler> = {
 				is_trunk: false,
 				is_divergent: false,
 				divergent_index: null,
+				has_conflict: false,
 				bookmarks: [],
 			};
 

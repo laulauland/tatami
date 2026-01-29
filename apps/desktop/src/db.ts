@@ -219,7 +219,7 @@ export async function deleteRepository(collection: RepositoriesCollection, repos
 // ============================================================================
 
 // Key function that handles divergent changes (same change_id, different commits)
-function getRevisionKey(revision: Revision): string {
+export function getRevisionKey(revision: Revision): string {
 	if (revision.divergent_index != null) {
 		return `${revision.change_id}/${revision.divergent_index}`;
 	}
@@ -331,6 +331,7 @@ export function newRevision(
 			is_trunk: false,
 			is_divergent: false,
 			divergent_index: null,
+			has_conflict: false,
 			bookmarks: [],
 		};
 

@@ -9,7 +9,6 @@ import {
 	expandedStacksAtom,
 	hoveredStackIdAtom,
 	inlineJumpQueryAtom,
-	viewModeAtom,
 } from "@/atoms";
 import {
 	reorderForGraph,
@@ -17,7 +16,7 @@ import {
 	computeRevisionAncestry,
 	type RevisionStack,
 } from "@/components/revision-graph-utils";
-import { prefetchRevisionDiffs } from "@/db";
+import { getRevisionKey, prefetchRevisionDiffs } from "@/db";
 import { useFocusWithin } from "@/hooks/useFocusWithin";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import { useRevisionGraphNavigation } from "@/hooks/useRevisionGraphNavigation";
@@ -391,12 +390,10 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			rows: allRows,
 			edgeBindings,
 		} = useMemo(() => buildGraph(revisions), [revisions]);
-		const expanded = useSearch({ from: Route.fullPath, select: (s) => s.expanded });
 		const search = useSearch({ from: Route.fullPath });
 		const navigate = useNavigate({ from: Route.fullPath });
 		const [inlineJumpQuery, setInlineJumpQuery] = useAtom(inlineJumpQueryAtom);
 		const inlineJumpMode = inlineJumpQuery !== null;
-		const [viewMode] = useAtom(viewModeAtom);
 
 		// Detect collapsible stacks
 		const stacks = useMemo(() => detectStacks(revisions), [revisions]);
@@ -433,13 +430,13 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			});
 		}
 
-		// Toggle a revision's checked state
-		function toggleRevisionCheck(changeId: string) {
+		// Toggle a revision's checked state (uses revision key)
+		function toggleRevisionCheck(revisionKey: string) {
 			const next = new Set(selectedRevisions);
-			if (next.has(changeId)) {
-				next.delete(changeId);
+			if (next.has(revisionKey)) {
+				next.delete(revisionKey);
 			} else {
-				next.add(changeId);
+				next.add(revisionKey);
 			}
 			setSelectedRevisions(next);
 		}
@@ -552,8 +549,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			}
 		}
 
-		// Maps for lookups - by change_id for UI, by commit_id for graph edges
-		const revisionMapByChangeId = new Map(revisions.map((r) => [r.change_id, r]));
+		// Maps for lookups - by revision key for UI, by commit_id for graph edges
+		const revisionMapByKey = new Map(revisions.map((r) => [getRevisionKey(r), r]));
 		const revisionMapByCommitId = new Map(revisions.map((r) => [r.commit_id, r]));
 
 		// Compute related revisions for dimming logic
@@ -570,14 +567,15 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			return getRelatedRevisions(revisions, selectedRevision?.change_id ?? null);
 		}, [revisions, focusedStack, selectedRevision?.change_id]);
 
-		// Build change_id -> displayRow index map for scrolling and edge positioning
+		// Build revision key -> displayRow index map for scrolling and edge positioning
 		// IMPORTANT: Use displayRows indices (not rows) to match virtualizer positioning
+		// Uses getRevisionKey() to handle divergent revisions (same change_id, different divergent_index)
 		const changeIdToIndex = new Map<string, number>();
 		const commitToRowIndex = new Map<string, number>();
 		for (let i = 0; i < displayRows.length; i++) {
 			const displayRow = displayRows[i];
 			if (displayRow.type === "revision") {
-				changeIdToIndex.set(displayRow.row.revision.change_id, i);
+				changeIdToIndex.set(getRevisionKey(displayRow.row.revision), i);
 				commitToRowIndex.set(displayRow.row.revision.commit_id, i);
 			}
 		}
@@ -680,11 +678,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		// Ref to hold scroll function - only scrolls if item is outside visible range
 		const scrollToIndexIfNeededRef = useRef<((index: number) => void) | null>(null);
 
-		// Determine if selected revision is expanded based on URL search params
-		// Only allow inline expansion in overview mode (viewMode=1)
-		const isSelectedExpanded = viewMode === 1 && expanded === true && !!selectedRevision;
-
-		// Keyboard navigation (j/k/J/K/arrows/g/G/Home/End/h/l/Space/Enter/Escape)
+		// Keyboard navigation (j/k/J/K/arrows/g/G/Home/End/l/Space/Enter/Escape)
 		useRevisionGraphNavigation({
 			revisions,
 			displayRows,
@@ -693,7 +687,6 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			enabled: !inlineJumpMode,
 			scrollToIndex: (index) => scrollToIndexIfNeededRef.current?.(index),
 			onToggleStack: handleToggleStack,
-			isSelectedExpanded,
 			hasFocus,
 			diffPanelRef,
 		});
@@ -741,10 +734,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				if (displayRow.type === "collapsed-stack") {
 					return COLLAPSED_STACK_HEIGHT;
 				}
-				const row = displayRow.row;
-				const isExpanded =
-					isSelectedExpanded && row.revision.change_id === selectedRevision?.change_id;
-				return isExpanded ? ROW_HEIGHT * 3 : ROW_HEIGHT;
+				return ROW_HEIGHT;
 			},
 			overscan: 10,
 			debug: debugEnabled,
@@ -794,20 +784,20 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			},
 		}));
 
-		function handleSelect(changeId: string, modifiers: { shift: boolean; meta: boolean }) {
-			const revision = revisionMapByChangeId.get(changeId);
+		function handleSelect(revisionKey: string, modifiers: { shift: boolean; meta: boolean }) {
+			const revision = revisionMapByKey.get(revisionKey);
 			if (!revision) return;
 
 			// Cmd/Ctrl+click: toggle selection
 			if (modifiers.meta) {
-				toggleRevisionCheck(changeId);
+				toggleRevisionCheck(revisionKey);
 				return;
 			}
 
 			// Shift+click: range select from focused to clicked
 			if (modifiers.shift && selectedRevision) {
-				const focusedIndex = changeIdToIndex.get(selectedRevision.change_id);
-				const clickedIndex = changeIdToIndex.get(changeId);
+				const focusedIndex = changeIdToIndex.get(getRevisionKey(selectedRevision));
+				const clickedIndex = changeIdToIndex.get(revisionKey);
 				if (focusedIndex !== undefined && clickedIndex !== undefined) {
 					const startIdx = Math.min(focusedIndex, clickedIndex);
 					const endIdx = Math.max(focusedIndex, clickedIndex);
@@ -815,7 +805,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 					for (let i = startIdx; i <= endIdx; i++) {
 						const displayRow = displayRows[i];
 						if (displayRow.type === "revision") {
-							newSelection.add(displayRow.row.revision.change_id);
+							newSelection.add(getRevisionKey(displayRow.row.revision));
 						}
 					}
 					// Update selection in URL
@@ -835,7 +825,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 					selected: undefined,
 					selectionAnchor: undefined,
 					stack: undefined,
-					rev: changeId,
+					rev: revisionKey,
 				},
 				replace: true,
 			});
@@ -973,7 +963,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 					if (matches.length === 1) {
 						// Single match - jump directly
 						setInlineJumpQuery(null);
-						const revision = revisionMapByChangeId.get(matches[0].changeId);
+						// Look up revision by change_id (matchingRevisions stores change_id)
+						const revision = revisions.find((r) => r.change_id === matches[0].changeId);
 						if (revision) {
 							onSelectRevision(revision);
 						}
@@ -995,13 +986,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 			window.addEventListener("keydown", handleJumpKey);
 			return () => window.removeEventListener("keydown", handleJumpKey);
-		}, [
-			inlineJumpMode,
-			inlineJumpQuery,
-			setInlineJumpQuery,
-			revisionMapByChangeId,
-			onSelectRevision,
-		]);
+		}, [inlineJumpMode, inlineJumpQuery, setInlineJumpQuery, revisions, onSelectRevision]);
 
 		if (revisions.length === 0) {
 			return (
@@ -1016,15 +1001,24 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		}
 
 		const selectedIndex = selectedRevision
-			? changeIdToIndex.get(selectedRevision.change_id)
+			? changeIdToIndex.get(getRevisionKey(selectedRevision))
 			: undefined;
 
 		const workingCopy = revisions.find((r) => r.is_working_copy);
-		const wcIndex = workingCopy ? changeIdToIndex.get(workingCopy.change_id) : undefined;
+		const wcIndex = workingCopy ? changeIdToIndex.get(getRevisionKey(workingCopy)) : undefined;
 
 		// Calculate edge layer dimensions and row center positions
-		const getRowStart = (row: number) => rowOffsets.get(row) ?? row * ROW_HEIGHT;
-		const getRowCenter = (row: number) => getRowStart(row) + ROW_HEIGHT / 2;
+		const getRowStart = (row: number) => {
+			const offset = rowOffsets.get(row) ?? row * ROW_HEIGHT;
+			return offset;
+		};
+		const getRowCenter = (row: number) => {
+			const displayRow = displayRows[row];
+			const height = displayRow?.type === "collapsed-stack" ? COLLAPSED_STACK_HEIGHT : ROW_HEIGHT;
+			const start = getRowStart(row);
+			const center = start + height / 2;
+			return center;
+		};
 		const graphWidth = LANE_PADDING + laneCount * LANE_WIDTH + NODE_RADIUS + 2;
 
 		return (
@@ -1152,13 +1146,14 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 									!relatedRevisions.has(row.revision.change_id);
 								// Only show focus if no stack is focused
 								const isFocused =
-									!focusedStackId && selectedRevision?.change_id === row.revision.change_id;
+									!focusedStackId &&
+									!!selectedRevision &&
+									getRevisionKey(selectedRevision) === getRevisionKey(row.revision);
 								const isSelected = isFocused;
-								const isExpanded = isSelectedExpanded && isFocused;
 
 								return (
 									<div
-										key={row.revision.change_id}
+										key={getRevisionKey(row.revision)}
 										ref={rowVirtualizer.measureElement}
 										data-index={virtualRow.index}
 										className="absolute left-0 w-full"
@@ -1171,17 +1166,16 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 											lane={lane}
 											maxLaneOnRow={row.maxLaneOnRow}
 											isSelected={isSelected}
-											isChecked={selectedRevisions.has(row.revision.change_id)}
+											isChecked={selectedRevisions.has(getRevisionKey(row.revision))}
 											isFocused={isFocused}
 											onSelect={handleSelect}
 											isFlashing={isFlashing}
 											isDimmed={isDimmed}
-											isExpanded={isExpanded}
-											repoPath={repoPath}
 											isPendingAbandon={pendingAbandon?.change_id === row.revision.change_id}
 											jumpModeActive={inlineJumpMode}
 											jumpQuery={inlineJumpQuery ?? ""}
 											jumpHint={jumpHintsMap.get(row.revision.change_id) ?? null}
+											hasFocus={hasFocus}
 										/>
 									</div>
 								);

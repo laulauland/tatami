@@ -60,14 +60,24 @@ export function useDiffPanelKeyboard({
 	useKeyboardShortcut({
 		key: "h",
 		modifiers: {},
-		onPress: () => revisionsPanelRef.current?.focus(),
+		onPress: () => {
+			// Find the focusable element inside the revisions panel section
+			// The RevisionGraph has its own container with tabIndex={-1}
+			const section = revisionsPanelRef.current;
+			const target = section?.querySelector('[tabindex="-1"]') as HTMLElement | null;
+			target?.focus();
+		},
 		enabled: isEnabled,
 	});
 
 	useKeyboardShortcut({
 		key: "ArrowLeft",
 		modifiers: {},
-		onPress: () => revisionsPanelRef.current?.focus(),
+		onPress: () => {
+			const section = revisionsPanelRef.current;
+			const target = section?.querySelector('[tabindex="-1"]') as HTMLElement | null;
+			target?.focus();
+		},
 		enabled: isEnabled,
 	});
 }

@@ -1,11 +1,7 @@
 import { useAtom } from "@effect-atom/atom-react";
-import { useLiveQuery } from "@tanstack/react-db";
-import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { Route } from "@/routes/project.$projectId";
-import { draggingBookmarkAtom, viewModeAtom } from "@/atoms";
-import { ChangedFilesList } from "@/components/ChangedFilesList";
-import { emptyChangesCollection, getRevisionChangesCollection } from "@/db";
+import { draggingBookmarkAtom } from "@/atoms";
+import { getRevisionKey } from "@/db";
 import type { Revision } from "@/tauri-commands";
 import { BookmarkTag } from "./BookmarkTag";
 import { ROW_HEIGHT, LANE_PADDING, LANE_WIDTH, NODE_RADIUS, laneToX, laneColor } from "./constants";
@@ -20,14 +16,13 @@ interface RevisionRowProps {
 	onSelect: (changeId: string, modifiers: { shift: boolean; meta: boolean }) => void;
 	isFlashing: boolean;
 	isDimmed: boolean;
-	isExpanded: boolean;
 	isFocused: boolean;
-	repoPath: string | null;
 	isPendingAbandon: boolean;
 	jumpModeActive: boolean;
 	jumpQuery: string;
 	jumpHint: string | null;
 	onMoveBookmark?: (bookmark: string, fromChangeId: string, toChangeId: string) => void;
+	hasFocus: boolean;
 }
 
 /**
@@ -43,17 +38,15 @@ export function RevisionRow({
 	onSelect,
 	isFlashing,
 	isDimmed,
-	isExpanded,
 	isFocused,
-	repoPath,
 	isPendingAbandon,
 	jumpModeActive,
 	jumpQuery,
 	jumpHint,
 	onMoveBookmark,
+	hasFocus,
 }: RevisionRowProps) {
 	const firstLine = revision.description.split("\n")[0] || "(no description)";
-	const fullDescription = revision.description || "(no description)";
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [showDropPlaceholder, setShowDropPlaceholder] = useState(false);
 	const dragOverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,28 +57,6 @@ export function RevisionRow({
 	const nodeAreaWidth = LANE_PADDING + (maxLaneOnRow + 1) * LANE_WIDTH;
 	const nodeOffset = laneToX(lane);
 	const color = laneColor(lane);
-
-	const selectedFile = useSearch({ from: Route.fullPath, select: (s) => s.file ?? null });
-	const search = useSearch({ from: Route.fullPath });
-	const navigate = useNavigate({ from: Route.fullPath });
-	const [viewMode, setViewMode] = useAtom(viewModeAtom);
-
-	const changedFilesCollection =
-		isExpanded && repoPath
-			? getRevisionChangesCollection(repoPath, revision.change_id)
-			: emptyChangesCollection;
-	const changedFilesQuery = useLiveQuery(changedFilesCollection);
-
-	function handleSelectFile(filePath: string) {
-		// If in overview mode, switch to split mode
-		if (viewMode === 1) {
-			setViewMode(2);
-		}
-		// Clear expanded state and navigate to file
-		navigate({
-			search: { ...search, file: filePath, expanded: undefined },
-		});
-	}
 
 	const nodeSize = revision.is_working_copy ? NODE_RADIUS * 2 + 14 : NODE_RADIUS * 2 + 8;
 
@@ -100,13 +71,12 @@ export function RevisionRow({
 			}}
 			role="button"
 			tabIndex={0}
-			style={{ height: isExpanded ? "auto" : ROW_HEIGHT }}
+			style={{ height: ROW_HEIGHT }}
 			className={`flex relative select-none outline-none ${
 				revision.is_immutable ? "opacity-60" : ""
 			} ${isDimmed ? "opacity-40" : ""}`}
 			data-selected={isSelected || undefined}
 			data-checked={isChecked || undefined}
-			data-expanded={isExpanded || undefined}
 			data-change-id={revision.change_id}
 			onClick={(e) => {
 				// Prevent text selection on shift+click
@@ -114,11 +84,11 @@ export function RevisionRow({
 					e.preventDefault();
 					window.getSelection()?.removeAllRanges();
 				}
-				onSelect(revision.change_id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
+				onSelect(getRevisionKey(revision), { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
 			}}
 			onKeyDown={(e) => {
 				if (e.key === "Enter" || e.key === " ") {
-					onSelect(revision.change_id, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
+					onSelect(getRevisionKey(revision), { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
 				}
 			}}
 			onDragEnter={(e) => {
@@ -196,7 +166,9 @@ export function RevisionRow({
 					isDragOver
 						? "bg-primary/20 border-primary/50 rounded-md"
 						: isChecked || isFocused
-							? "bg-accent/40 rounded-md border-transparent"
+							? hasFocus
+								? "bg-accent/40 rounded-md border-transparent"
+								: "bg-muted rounded-md border-transparent"
 							: "border-border/30"
 				}`}
 			>
@@ -226,39 +198,32 @@ export function RevisionRow({
 							) : (
 								revision.change_id_short
 							)}
+							{revision.has_conflict && <span className="ml-1 text-destructive">⚠</span>}
 						</code>
 						{/* Bookmarks - middle column */}
 						<div className="flex items-center gap-1 min-w-0 overflow-hidden">
 							{revision.bookmarks.map((bookmark) => (
-								<BookmarkTag key={bookmark} bookmark={bookmark} changeId={revision.change_id} />
+								<BookmarkTag
+									key={bookmark.name}
+									bookmark={bookmark}
+									changeId={revision.change_id}
+								/>
 							))}
-							{showDropPlaceholder && draggingBookmark && draggingBookmark.fromChangeId !== revision.change_id && (
-								<span className="text-xs text-primary/60 font-medium whitespace-nowrap px-1 rounded-sm border border-dashed border-primary/40 bg-primary/5 pointer-events-none">
-									{draggingBookmark.bookmark}
-								</span>
-							)}
+							{showDropPlaceholder &&
+								draggingBookmark &&
+								draggingBookmark.fromChangeId !== revision.change_id && (
+									<span className="text-xs text-primary/60 font-medium whitespace-nowrap px-1 rounded-sm border border-dashed border-primary/40 bg-primary/5 pointer-events-none">
+										{draggingBookmark.bookmark}
+									</span>
+								)}
 						</div>
 						<span className="text-xs text-muted-foreground truncate whitespace-nowrap">
 							{revision.author.split("@")[0]} · {revision.timestamp}
 						</span>
 					</div>
-					<div className={`text-sm mt-1 ${isExpanded ? "" : "truncate"}`}>{firstLine}</div>
+					<div className="text-sm mt-1 truncate">{firstLine}</div>
 				</div>
-				{isExpanded && (
-					<div className={`px-3 pb-3 pt-0 space-y-3 ${isPendingAbandon ? "blur-sm" : ""}`}>
-						<pre className="text-xs text-muted-foreground whitespace-pre-wrap break-words font-mono bg-muted/40 border border-border/60 rounded p-2">
-							{fullDescription}
-						</pre>
-						<div className="border border-border rounded-lg overflow-hidden bg-background">
-							<ChangedFilesList
-								files={changedFilesQuery.data ?? []}
-								selectedFile={selectedFile}
-								onSelectFile={handleSelectFile}
-								isLoading={changedFilesQuery.isLoading}
-							/>
-						</div>
-					</div>
-				)}
+
 				{isPendingAbandon && (
 					<div className="absolute inset-0 flex items-center justify-center bg-destructive/10 rounded">
 						<div className="text-sm font-medium text-destructive-foreground bg-destructive/90 px-3 py-1.5 rounded">

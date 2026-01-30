@@ -162,13 +162,13 @@ export function RevisionRow({
 			<div className="shrink-0" style={{ width: nodeAreaWidth + 8 }} />
 			{/* Content area with visual styling - full row height */}
 			<div
-				className={`relative flex-1 mr-2 min-w-0 overflow-hidden text-card-foreground flex flex-col justify-center py-1 border-b transition-colors ${
+				className={`relative flex-1 mr-2 min-w-0 overflow-hidden text-card-foreground flex flex-col justify-center py-1 border-b transition-colors rounded-md ${
 					isDragOver
-						? "bg-primary/20 border-primary/50 rounded-md"
+						? "bg-primary/20 border-primary/50"
 						: isChecked || isFocused
 							? hasFocus
-								? "bg-accent/40 rounded-md border-transparent"
-								: "bg-muted rounded-md border-transparent"
+								? "bg-accent/40 border-transparent"
+								: "bg-muted border-transparent"
 							: "border-border/30"
 				}`}
 			>

@@ -1,9 +1,17 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { PatchDiff } from "@pierre/diffs/react";
-import { Columns2Icon, RowsIcon } from "lucide-react";
+import { Columns2Icon, Loader2, RowsIcon } from "lucide-react";
 import type { FocusEvent, RefObject } from "react";
-import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
+import {
+	forwardRef,
+	useCallback,
+	useDeferredValue,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { type DiffStyle, type DiffViewState, diffStyleAtom, diffViewStateAtom } from "@/atoms";
 import { FileList, RevisionHeader } from "@/components/diff";
 import { ImageDiff } from "@/components/diff/ImageDiff";
@@ -17,9 +25,11 @@ import {
 	getRevisionDiffCollection,
 } from "@/db";
 import { useDiffPanelKeyboard } from "@/hooks/useDiffPanelKeyboard";
+import { extractFilePath, parsePatchStats, splitMultiFileDiff } from "@/lib/diff-utils";
 import type { ChangedFileStatus } from "@/schemas";
 import type { Revision } from "@/tauri-commands";
 import { isImageFile } from "@/utils/file-types";
+import { cn } from "@/lib/utils";
 
 interface DiffPanelProps {
 	repoPath: string | null;
@@ -33,65 +43,6 @@ interface PrerenderedDiffPanelProps {
 	revisions: Revision[];
 	selectedChangeId: string | null;
 	revisionsPanelRef: RefObject<HTMLElement | null>;
-}
-
-/**
- * Extract file path from a unified diff patch.
- */
-function extractFilePath(patch: string): string {
-	const match = patch.match(/^\+\+\+ b\/(.+)$/m);
-	return match ? match[1] : "unknown";
-}
-
-/**
- * Split a multi-file unified diff into individual file diffs.
- */
-function splitMultiFileDiff(unifiedDiff: string): string[] {
-	if (!unifiedDiff.trim()) {
-		return [];
-	}
-
-	const fileDiffs: string[] = [];
-	const lines = unifiedDiff.split("\n");
-	let currentDiff: string[] = [];
-
-	for (const line of lines) {
-		if (line.startsWith("--- a/") && currentDiff.length > 0) {
-			fileDiffs.push(currentDiff.join("\n"));
-			currentDiff = [line];
-		} else {
-			currentDiff.push(line);
-		}
-	}
-
-	if (currentDiff.length > 0) {
-		fileDiffs.push(currentDiff.join("\n"));
-	}
-
-	return fileDiffs;
-}
-
-/**
- * Parse additions and deletions from a single patch.
- */
-function parsePatchStats(patch: string): { additions: number; deletions: number } {
-	let additions = 0;
-	let deletions = 0;
-	const lines = patch.split("\n");
-
-	for (const line of lines) {
-		// Skip header lines
-		if (line.startsWith("---") || line.startsWith("+++") || line.startsWith("@@")) {
-			continue;
-		}
-		if (line.startsWith("+") && !line.startsWith("++")) {
-			additions++;
-		} else if (line.startsWith("-") && !line.startsWith("--")) {
-			deletions++;
-		}
-	}
-
-	return { additions, deletions };
 }
 
 export const PrerenderedDiffPanel = forwardRef<HTMLDivElement, PrerenderedDiffPanelProps>(
@@ -155,6 +106,7 @@ function MultiFileDiff({
 					}
 
 					const effectiveStyle = diffViewState.styleOverrides.get(path) ?? globalDiffStyle;
+
 					return (
 						<div key={path} className="min-h-0">
 							{!patch.trim() ? (
@@ -196,12 +148,15 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 	{ repoPath, changeId, revision, revisionsPanelRef },
 	ref,
 ) {
+	// Defer changeId updates so revision selection highlight updates immediately
+	// while diff panel data fetching/rendering happens on the next frame
+	const deferredChangeId = useDeferredValue(changeId);
+
 	const containerRef = useRef<HTMLDivElement>(null);
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const [globalDiffStyle] = useAtom(diffStyleAtom);
 	const [diffViewState, setDiffViewState] = useAtom(diffViewStateAtom);
 	const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
-	const prevChangeIdRef = useRef<string | null>(null);
 	const [hasFocus, setHasFocus] = useState(false);
 
 	// Handler for blur events - only unfocus if focus moves outside container
@@ -229,41 +184,73 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 		? (diffViewState.styleOverrides.get(firstSelectedFile) ?? globalDiffStyle)
 		: globalDiffStyle;
 
-	function handleSetLocalStyle(style: DiffStyle) {
-		if (selectedFiles.size === 0) return;
-		setDiffViewState((prev) => {
-			const next = new Map(prev.styleOverrides);
-			// Apply style to all selected files
-			for (const file of selectedFiles) {
-				next.set(file, style);
-			}
-			return { ...prev, styleOverrides: next };
-		});
-	}
+	const handleSetLocalStyle = useCallback(
+		(style: DiffStyle) => {
+			if (selectedFiles.size === 0) return;
+			setDiffViewState((prev) => {
+				const next = new Map(prev.styleOverrides);
+				// Apply style to all selected files
+				for (const file of selectedFiles) {
+					next.set(file, style);
+				}
+				return { ...prev, styleOverrides: next };
+			});
+		},
+		[selectedFiles, setDiffViewState],
+	);
 
 	// Reset selected files when changeId changes
-	if (prevChangeIdRef.current !== changeId) {
-		prevChangeIdRef.current = changeId;
-		if (selectedFiles.size > 0) {
-			setSelectedFiles(new Set());
-		}
-	}
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentionally trigger on changeId change
+	useEffect(() => {
+		setSelectedFiles(new Set());
+	}, [deferredChangeId]);
 
 	// Keyboard navigation
 	useDiffPanelKeyboard({ scrollContainerRef, revisionsPanelRef, hasFocus });
 
 	// Fetch file changes (for the file list with status)
 	const changesCollection =
-		repoPath && changeId
-			? getRevisionChangesCollection(repoPath, changeId)
+		repoPath && deferredChangeId
+			? getRevisionChangesCollection(repoPath, deferredChangeId)
 			: emptyChangesCollection;
 	const { data: changedFiles = [] } = useLiveQuery(changesCollection);
 
 	// Fetch full diff (for the diff content)
 	const diffCollection =
-		repoPath && changeId ? getRevisionDiffCollection(repoPath, changeId) : emptyDiffCollection;
-	const { data: diffEntries = [], isLoading } = useLiveQuery(diffCollection);
+		repoPath && deferredChangeId
+			? getRevisionDiffCollection(repoPath, deferredChangeId)
+			: emptyDiffCollection;
+	const { data: diffEntries = [] } = useLiveQuery(diffCollection);
 	const revisionDiff = diffEntries[0]?.content ?? "";
+
+	// Timing instrumentation for cache analysis
+	console.log('[DiffPanel] selection:', changeId?.slice(0,8), 
+		'deferred:', deferredChangeId?.slice(0,8),
+		'changedFiles:', changedFiles.length, 
+		'hasDiff:', !!revisionDiff,
+		'at:', performance.now().toFixed(0));
+
+	// Track what's currently displayed - shows previous while loading
+	const [displayedState, setDisplayedState] = useState<{
+		changeId: string;
+		patches: Array<{ path: string; patch: string; status: ChangedFileStatus }>;
+	} | null>(null);
+
+	// Update displayed state only when new data arrives
+	useEffect(() => {
+		if (revisionDiff && deferredChangeId) {
+			const patches = splitMultiFileDiff(revisionDiff).map((patch) => ({
+				path: extractFilePath(patch) ?? "unknown",
+				patch,
+				status: (changedFiles.find((f) => f.path === extractFilePath(patch))?.status ??
+					"modified") as ChangedFileStatus,
+			}));
+			setDisplayedState({ changeId: deferredChangeId, patches });
+		}
+	}, [revisionDiff, deferredChangeId, changedFiles]);
+
+	// Determine if we're showing stale data
+	const isStale = displayedState !== null && displayedState.changeId !== changeId;
 
 	// Parse diff into individual file patches
 	const fileDiffs = useMemo(() => splitMultiFileDiff(revisionDiff), [revisionDiff]);
@@ -273,7 +260,9 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 		const map = new Map<string, string>();
 		for (const patch of fileDiffs) {
 			const path = extractFilePath(patch);
-			map.set(path, patch);
+			if (path) {
+				map.set(path, patch);
+			}
 		}
 		return map;
 	}, [fileDiffs]);
@@ -290,13 +279,13 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 		return { totalAdditions: additions, totalDeletions: deletions };
 	}, [fileDiffs]);
 
-	// Derive the effective state - resets automatically when changeId changes
-	const effectiveState = getDiffViewState(diffViewState, changeId);
-
-	// Sync atom if state was reset (only writes when needed)
-	if (effectiveState !== diffViewState) {
-		setDiffViewState(effectiveState);
-	}
+	// Sync diffViewState atom when changeId changes (reset to initial state)
+	useEffect(() => {
+		const effectiveState = getDiffViewState(diffViewState, deferredChangeId);
+		if (effectiveState !== diffViewState) {
+			setDiffViewState(effectiveState);
+		}
+	}, [deferredChangeId, diffViewState, setDiffViewState]);
 
 	// Auto-select first file when files load and none selected
 	useEffect(() => {
@@ -333,22 +322,8 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 		);
 	}
 
-	if (isLoading) {
-		return (
-			// biome-ignore lint/a11y/noStaticElementInteractions: Focus tracking for keyboard navigation
-			<div
-				ref={setRefs}
-				tabIndex={-1}
-				onFocus={() => setHasFocus(true)}
-				onBlur={handleBlur}
-				className="flex items-center justify-center h-full text-muted-foreground text-sm outline-none"
-			>
-				Loading diffs...
-			</div>
-		);
-	}
-
-	if (changedFiles.length === 0) {
+	// Only show "No changes" if we have no displayed state to show
+	if (changedFiles.length === 0 && !displayedState) {
 		return (
 			// biome-ignore lint/a11y/noStaticElementInteractions: Focus tracking for keyboard navigation
 			<div
@@ -362,6 +337,9 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 			</div>
 		);
 	}
+
+	// Determine which patches to show - use previous while loading
+	const patchesToRender = isStale && displayedState ? displayedState.patches : selectedPatches;
 
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: Focus tracking for keyboard navigation
@@ -430,13 +408,23 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 
 					{/* Diff content panel */}
 					<ResizablePanel id="diff-content" defaultSize="70%">
-						<div className="h-full w-full min-w-0">
+						<div
+							className={cn(
+								"h-full w-full min-w-0 relative",
+								isStale && "opacity-60 pointer-events-none",
+							)}
+						>
+							{isStale && (
+								<div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">
+									<Loader2 className="h-6 w-6 animate-spin" />
+								</div>
+							)}
 							<MultiFileDiff
-								patches={selectedPatches}
+								patches={patchesToRender}
 								diffViewState={diffViewState}
 								globalDiffStyle={globalDiffStyle}
 								repoPath={repoPath}
-								changeId={changeId}
+								changeId={displayedState?.changeId ?? changeId}
 							/>
 						</div>
 					</ResizablePanel>

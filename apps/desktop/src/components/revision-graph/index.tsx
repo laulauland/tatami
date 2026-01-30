@@ -2,7 +2,14 @@ import { useAtom } from "@effect-atom/atom-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { RefObject } from "react";
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import {
+	forwardRef,
+	useDeferredValue,
+	useEffect,
+	useImperativeHandle,
+	useMemo,
+	useRef,
+} from "react";
 import { Route } from "@/routes/project.$projectId";
 import {
 	debugOverlayEnabledAtom,
@@ -556,6 +563,10 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		// Compute related revisions for dimming logic
 		// When a stack is focused, use the stack's top and bottom as the "selected" revisions
 		const focusedStack = focusedStackId ? stackById.get(focusedStackId) : null;
+
+		// Defer the selected ID so dimming computation doesn't block selection highlight
+		const deferredSelectedChangeId = useDeferredValue(selectedRevision?.change_id ?? null);
+
 		const relatedRevisions = useMemo(() => {
 			if (focusedStack) {
 				// When stack is focused, highlight the stack endpoints and their ancestors/descendants
@@ -564,8 +575,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				// Union of both sets
 				return new Set([...topRelated, ...bottomRelated]);
 			}
-			return getRelatedRevisions(revisions, selectedRevision?.change_id ?? null);
-		}, [revisions, focusedStack, selectedRevision?.change_id]);
+			return getRelatedRevisions(revisions, deferredSelectedChangeId);
+		}, [revisions, focusedStack, deferredSelectedChangeId]);
 
 		// Build revision key -> displayRow index map for scrolling and edge positioning
 		// IMPORTANT: Use displayRows indices (not rows) to match virtualizer positioning
@@ -820,13 +831,13 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 			// Plain click: focus revision (clear selection, anchor, and stack focus)
 			navigate({
-				search: {
-					...search,
+				search: (prev) => ({
+					...prev,
 					selected: undefined,
 					selectionAnchor: undefined,
 					stack: undefined,
 					rev: revisionKey,
-				},
+				}),
 				replace: true,
 			});
 		}

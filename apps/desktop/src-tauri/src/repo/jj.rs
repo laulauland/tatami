@@ -117,43 +117,64 @@ impl JjRepo {
     }
 
     pub fn get_file_content(&self, commit: &Commit, path: &str) -> Result<Vec<u8>> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        self.get_file_content_with_repo(repo.as_ref(), commit, path)
+    }
+
+    pub fn get_parent_file_content(&self, commit: &Commit, path: &str) -> Result<Vec<u8>> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        self.get_parent_file_content_with_repo(repo.as_ref(), commit, path)
+    }
+
+    /// Get file content using an already-loaded repo (avoids redundant load_at_head)
+    pub fn get_file_content_with_repo(
+        &self,
+        repo: &dyn Repo,
+        commit: &Commit,
+        path: &str,
+    ) -> Result<Vec<u8>> {
+        use jj_lib::backend::TreeValue;
+
         let repo_path = RepoPath::from_internal_string(path).context("Invalid path")?;
         let tree = commit.tree()?;
         let file_value = tree.path_value(repo_path)?;
 
         match file_value.into_resolved() {
-            Ok(Some(value)) => {
-                use jj_lib::backend::TreeValue;
-                match value {
-                    TreeValue::File { id, .. } => {
-                        let repo = self.workspace.repo_loader().load_at_head()?;
-                        let mut reader = pollster::block_on(async {
-                            repo.store().read_file(repo_path, &id).await
-                        })?;
-                        let mut content = Vec::new();
-                        pollster::block_on(async { reader.read_to_end(&mut content).await })?;
-                        Ok(content)
-                    }
-                    _ => Ok(Vec::new()),
+            Ok(Some(value)) => match value {
+                TreeValue::File { id, .. } => {
+                    let mut reader = pollster::block_on(async {
+                        repo.store().read_file(repo_path, &id).await
+                    })?;
+                    let mut content = Vec::new();
+                    pollster::block_on(async { reader.read_to_end(&mut content).await })?;
+                    Ok(content)
                 }
-            }
-            _ => Ok(Vec::new()),
+                _ => Ok(Vec::new()),
+            },
+            Ok(None) => Ok(Vec::new()),
+            Err(_) => Ok(Vec::new()),
         }
     }
 
-    pub fn get_parent_file_content(&self, commit: &Commit, path: &str) -> Result<Vec<u8>> {
-        let repo_path = RepoPath::from_internal_string(path).context("Invalid path")?;
-        let repo = self.workspace.repo_loader().load_at_head()?;
-        let parents = commit.parents();
-        let parent = parents.into_iter().next().context("Commit has no parent")?;
-        let parent_commit = repo.store().get_commit(parent?.id())?;
-        let parent_tree = parent_commit.tree()?;
-        let file_value = parent_tree.path_value(repo_path)?;
+    /// Get parent file content using an already-loaded repo (avoids redundant load_at_head)
+    pub fn get_parent_file_content_with_repo(
+        &self,
+        repo: &dyn Repo,
+        commit: &Commit,
+        path: &str,
+    ) -> Result<Vec<u8>> {
+        use jj_lib::backend::TreeValue;
 
-        match file_value.into_resolved() {
-            Ok(Some(value)) => {
-                use jj_lib::backend::TreeValue;
-                match value {
+        let repo_path = RepoPath::from_internal_string(path).context("Invalid path")?;
+        let parent = commit.parents().next();
+
+        if let Some(parent_result) = parent {
+            let parent_commit = parent_result?;
+            let tree = parent_commit.tree()?;
+            let file_value = tree.path_value(repo_path)?;
+
+            match file_value.into_resolved() {
+                Ok(Some(value)) => match value {
                     TreeValue::File { id, .. } => {
                         let mut reader = pollster::block_on(async {
                             repo.store().read_file(repo_path, &id).await
@@ -163,9 +184,12 @@ impl JjRepo {
                         Ok(content)
                     }
                     _ => Ok(Vec::new()),
-                }
+                },
+                Ok(None) => Ok(Vec::new()),
+                Err(_) => Ok(Vec::new()),
             }
-            _ => Ok(Vec::new()),
+        } else {
+            Ok(Vec::new())
         }
     }
 

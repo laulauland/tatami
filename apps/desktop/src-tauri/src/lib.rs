@@ -101,6 +101,12 @@ async fn get_revision_diff(repo_path: String, change_id: String) -> Result<Strin
     let matcher = EverythingMatcher;
     let mut diff_iter = parent_tree.diff_stream(&commit_tree, &matcher);
 
+    // Load repo ONCE before the loop to avoid redundant load_at_head calls per file
+    let repo = jj_repo
+        .repo_loader()
+        .load_at_head()
+        .map_err(|e| format!("Failed to load repo: {}", e))?;
+
     let mut unified_diffs = Vec::new();
 
     pollster::block_on(async {
@@ -120,11 +126,11 @@ async fn get_revision_diff(repo_path: String, change_id: String) -> Result<Strin
                 | (None, Some(TreeValue::File { .. }))
                 | (Some(TreeValue::File { .. }), None) => {
                     let old_content = jj_repo
-                        .get_parent_file_content(&commit, path_str)
+                        .get_parent_file_content_with_repo(repo.as_ref(), &commit, path_str)
                         .unwrap_or_default();
 
                     let new_content = jj_repo
-                        .get_file_content(&commit, path_str)
+                        .get_file_content_with_repo(repo.as_ref(), &commit, path_str)
                         .unwrap_or_default();
 
                     let file_diff = diff::compute_file_diff(&old_content, &new_content, path_str)

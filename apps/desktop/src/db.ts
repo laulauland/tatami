@@ -72,6 +72,12 @@ async function fetchChangeIdPool(repoPath: string): Promise<ChangeIdPool> {
 
 /** Ensure the change ID pool is loaded. Call from router beforeLoad. */
 export async function ensureChangeIdPool(repoPath: string): Promise<void> {
+	// Fast path: if already cached, return immediately without async work
+	const existing = queryClient.getQueryData<ChangeIdPool>(changeIdPoolQueryKey(repoPath));
+	if (existing && existing.ids.length > 0) {
+		return;
+	}
+
 	await queryClient.ensureQueryData({
 		queryKey: changeIdPoolQueryKey(repoPath),
 		queryFn: () => fetchChangeIdPool(repoPath),
@@ -428,7 +434,12 @@ function createRevisionChangesCollection(repoPath: string, changeId: string) {
 		...queryCollectionOptions({
 			queryClient,
 			queryKey: ["revision-changes", repoPath, changeId],
-			queryFn: () => getRevisionChanges(repoPath, changeId),
+			queryFn: async () => {
+				console.log('[DB] FETCHING changes for', changeId.slice(0,8), 'at:', performance.now().toFixed(0));
+				const changes = await getRevisionChanges(repoPath, changeId);
+				console.log('[DB] FETCHED changes for', changeId.slice(0,8), 'at:', performance.now().toFixed(0));
+				return changes;
+			},
 			getKey: (file: ChangedFile) => file.path,
 		}),
 	});
@@ -476,7 +487,9 @@ function createRevisionDiffCollection(repoPath: string, changeId: string) {
 			queryClient,
 			queryKey: ["revision-diff", repoPath, changeId],
 			queryFn: async () => {
+				console.log('[DB] FETCHING diff for', changeId.slice(0,8), 'at:', performance.now().toFixed(0));
 				const diff = await getRevisionDiff(repoPath, changeId);
+				console.log('[DB] FETCHED diff for', changeId.slice(0,8), 'at:', performance.now().toFixed(0));
 				return [{ id: "diff" as const, content: diff }];
 			},
 			getKey: (entry: DiffEntry) => entry.id,
@@ -518,8 +531,8 @@ export const emptyDiffCollection = createCollection({
  * TanStack DB handles caching - subsequent calls are no-ops.
  */
 export function prefetchRevisionDiffs(repoPath: string, changeIds: string[]): void {
+	// Just trigger the data fetch for all revisions
 	for (const changeId of changeIds) {
-		// Creating the collection triggers the query if not already cached
 		getRevisionDiffCollection(repoPath, changeId);
 	}
 }

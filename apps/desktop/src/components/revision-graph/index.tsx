@@ -26,7 +26,7 @@ import {
 } from "@/components/revision-graph-utils";
 import { getRevisionKey } from "@/db";
 import { useFocusWithin } from "@/hooks/useFocusWithin";
-import { usePrefetch } from "@/hooks/useRevisionData";
+import { useLineage, usePrefetch } from "@/hooks/useRevisionData";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import { useRevisionGraphNavigation } from "@/hooks/useRevisionGraphNavigation";
 import type { Revision } from "@/tauri-commands";
@@ -188,7 +188,7 @@ function buildGraph(revisions: Revision[]): GraphData {
 		// Handle missing edges (parents outside our revset)
 		// Only show stub if we have original parents but no visible parents
 		const hasMissingParents = revision.parent_edges.some((e) => e.edge_type === "missing");
-		const hasParentsOutsideView = revision.parent_ids.length > visibleParents.length;
+		const hasParentsOutsideView = revision.parent_edges.length > visibleParents.length;
 
 		if ((hasMissingParents || hasParentsOutsideView) && parentConnections.length === 0) {
 			// All parents are outside the view - show a stub
@@ -318,79 +318,6 @@ function buildGraph(revisions: Revision[]): GraphData {
 	return { nodes, laneCount: globalMaxLane + 1, rows, edgeBindings };
 }
 
-// Compute related revisions (ancestors + descendants) of a selected revision
-function getRelatedRevisions(revisions: Revision[], selectedChangeId: string | null): Set<string> {
-	const traceId = traceStart("get-related-revisions", {
-		selectedChangeId,
-		revisionCount: revisions.length,
-	});
-
-	if (!selectedChangeId) {
-		traceEnd(traceId, { relatedCount: 0 });
-		return new Set();
-	}
-
-	const related = new Set<string>();
-	const commitIdToChangeId = new Map<string, string>();
-	const changeIdToCommitId = new Map<string, string>();
-	const childrenMap = new Map<string, string[]>(); // commit_id -> child commit_ids
-	const parentMap = new Map<string, string[]>(); // commit_id -> parent commit_ids
-
-	// Build maps
-	for (const rev of revisions) {
-		commitIdToChangeId.set(rev.commit_id, rev.change_id);
-		changeIdToCommitId.set(rev.change_id, rev.commit_id);
-		const parents: string[] = [];
-		for (const edge of rev.parent_edges) {
-			if (edge.edge_type === "missing") continue;
-			parents.push(edge.parent_id);
-			const children = childrenMap.get(edge.parent_id) ?? [];
-			children.push(rev.commit_id);
-			childrenMap.set(edge.parent_id, children);
-		}
-		parentMap.set(rev.commit_id, parents);
-	}
-
-	const selectedCommitId = changeIdToCommitId.get(selectedChangeId);
-	if (!selectedCommitId) {
-		traceEnd(traceId, { relatedCount: 0 });
-		return new Set();
-	}
-
-	// BFS to find ancestors
-	const ancestorQueue = [selectedCommitId];
-	const visited = new Set<string>();
-	while (ancestorQueue.length > 0) {
-		const id = ancestorQueue.shift();
-		if (!id || visited.has(id)) continue;
-		visited.add(id);
-		const changeId = commitIdToChangeId.get(id);
-		if (changeId) related.add(changeId);
-		const parents = parentMap.get(id) ?? [];
-		for (const parentId of parents) {
-			ancestorQueue.push(parentId);
-		}
-	}
-
-	// BFS to find descendants
-	const descendantQueue = [selectedCommitId];
-	visited.clear();
-	while (descendantQueue.length > 0) {
-		const id = descendantQueue.shift();
-		if (!id || visited.has(id)) continue;
-		visited.add(id);
-		const changeId = commitIdToChangeId.get(id);
-		if (changeId) related.add(changeId);
-		const children = childrenMap.get(id) ?? [];
-		for (const childId of children) {
-			descendantQueue.push(childId);
-		}
-	}
-
-	traceEnd(traceId, { relatedCount: related.size });
-	return related;
-}
-
 export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>(
 	function RevisionGraph(
 		{
@@ -436,7 +363,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const stacks = useMemo(() => detectStacks(stableRevisions), [stableRevisions]);
 
 		// Setup prefetch hooks for visible revision data
-		const { prefetchDiffs, prefetchChanges } = usePrefetch(repoPath ?? "");
+		const { prefetchDiffs, prefetchChanges, prefetchLineage } = usePrefetch(repoPath ?? "");
 
 		// Track which stacks are expanded (empty = all collapsed by default)
 		const [expandedStacks, setExpandedStacks] = useAtom(expandedStacksAtom);
@@ -592,19 +519,65 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		// Defer the selected ID so dimming computation doesn't block selection highlight
 		const deferredSelectedChangeId = useDeferredValue(selectedRevision?.change_id ?? null);
 
+		// Resolve stack for lineage queries
+		const focusedStack = focusedStackId ? stackById.get(focusedStackId) : null;
+
+		// Get lineage from backend - call hooks unconditionally with null when not needed
+		const topLineageChangeId = focusedStack ? focusedStack.topChangeId : null;
+		const bottomLineageChangeId = focusedStack ? focusedStack.bottomChangeId : null;
+		const primaryLineageChangeId = focusedStack ? null : deferredSelectedChangeId;
+
+		const { lineage: topLineage, isLoaded: topLoaded } = useLineage(
+			repoPath ?? "",
+			topLineageChangeId,
+		);
+		const { lineage: bottomLineage, isLoaded: bottomLoaded } = useLineage(
+			repoPath ?? "",
+			bottomLineageChangeId,
+		);
+		const { lineage: primaryLineage, isLoaded: primaryLoaded } = useLineage(
+			repoPath ?? "",
+			primaryLineageChangeId,
+		);
+
+		// Don't dim while lineage is loading - prevents flicker
+		const lineageIsLoading = focusedStack
+			? !topLoaded || !bottomLoaded
+			: deferredSelectedChangeId && !primaryLoaded;
+
 		// Compute related revisions for dimming logic
-		// Use focusedStackId (string) as dependency instead of focusedStack (object) for stability
+		// Intersect with visible revisions for display
+		// When loading, return null to disable dimming entirely
 		const relatedRevisions = useMemo(() => {
-			const focusedStack = focusedStackId ? stackById.get(focusedStackId) : null;
+			// Don't dim while loading
+			if (lineageIsLoading) return null;
+
+			const visibleIds = new Set(stableRevisions.map((r) => r.change_id));
+
 			if (focusedStack) {
 				// When stack is focused, highlight the stack endpoints and their ancestors/descendants
-				const topRelated = getRelatedRevisions(stableRevisions, focusedStack.topChangeId);
-				const bottomRelated = getRelatedRevisions(stableRevisions, focusedStack.bottomChangeId);
-				// Union of both sets
-				return new Set([...topRelated, ...bottomRelated]);
+				const combined = new Set([...topLineage, ...bottomLineage]);
+				const result = new Set([...combined].filter((id) => visibleIds.has(id)));
+				// Always include the focused stack endpoints
+				if (focusedStack.topChangeId) result.add(focusedStack.topChangeId);
+				if (focusedStack.bottomChangeId) result.add(focusedStack.bottomChangeId);
+				return result;
 			}
-			return getRelatedRevisions(stableRevisions, deferredSelectedChangeId);
-		}, [stableRevisions, stackById, focusedStackId, deferredSelectedChangeId]);
+
+			if (!deferredSelectedChangeId) return null;
+			const result = new Set([...primaryLineage].filter((id) => visibleIds.has(id)));
+			// Always include the selected revision itself
+			result.add(deferredSelectedChangeId);
+			return result;
+		}, [
+			stableRevisions,
+			focusedStack,
+			topLineage,
+			bottomLineage,
+			primaryLineage,
+			deferredSelectedChangeId,
+			lineageIsLoading,
+		]);
 
 		// Build revision key -> displayRow index map for scrolling and edge positioning
 		// IMPORTANT: Use displayRows indices (not rows) to match virtualizer positioning
@@ -943,6 +916,11 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				const uniqueIds = [...new Set(changeIds)].slice(0, 50);
 				prefetchDiffs(uniqueIds);
 				prefetchChanges(uniqueIds);
+
+				// Prefetch lineage for selected revision (for dimming related revisions)
+				if (selectedRevision) {
+					prefetchLineage([selectedRevision.change_id]);
+				}
 			}, 200);
 
 			// Cleanup on unmount or when deps change
@@ -959,6 +937,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			selectedRevision,
 			prefetchDiffs,
 			prefetchChanges,
+			prefetchLineage,
 		]);
 
 		// Compute jump hints for visible rows based on change ID prefix matching
@@ -1164,7 +1143,10 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 									const count = stack.intermediateChangeIds.length;
 
 									// Check if this stack is related to the selected revision (for dimming)
-									const isStackRelated = stack.changeIds.some((id) => relatedRevisions.has(id));
+									// Don't dim if relatedRevisions is null (still loading)
+									const isStackRelated =
+										relatedRevisions === null ||
+										stack.changeIds.some((id) => relatedRevisions.has(id));
 									const isStackDimmed = selectedRevision !== null && !isStackRelated;
 									const isStackFocused = focusedStackId === stack.id;
 
@@ -1240,7 +1222,9 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 								const { row } = displayRow;
 								const lane = changeIdToLane.get(row.revision.change_id) ?? 0;
 								const isFlashing = flash?.changeId === row.revision.change_id;
+								// Don't dim if relatedRevisions is null (still loading)
 								const isDimmed =
+									relatedRevisions !== null &&
 									(selectedRevision !== null || focusedStackId !== null) &&
 									!relatedRevisions.has(row.revision.change_id);
 								// Only show focus if no stack is focused

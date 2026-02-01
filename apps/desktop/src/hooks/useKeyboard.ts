@@ -123,8 +123,7 @@ export function useKeyboardNavigation({
 				case isMinusKey:
 					if (currentRevision) {
 						// Navigate to parent revision
-						const parentId =
-							currentRevision.parent_ids[0] || currentRevision.parent_edges[0]?.parent_id;
+						const parentId = currentRevision.parent_edges[0]?.parent_id;
 						if (parentId) {
 							const parentRevision = revisions.find((r) => r.commit_id === parentId);
 							if (parentRevision) {
@@ -138,15 +137,14 @@ export function useKeyboardNavigation({
 
 				case isPlusKey:
 					if (currentRevision) {
-						// Find child by checking if any revision has current as parent
-						const childRevision = revisions.find(
-							(r) =>
-								r.parent_ids.includes(currentRevision.commit_id) ||
-								r.parent_edges.some((e) => e.parent_id === currentRevision.commit_id),
-						);
-						if (childRevision) {
-							targetRevisionKey = getRevisionKey(childRevision);
-							scrollMode = "step";
+						// Navigate to child revision using children_ids
+						const childId = currentRevision.children_ids[0];
+						if (childId) {
+							const childRevision = revisions.find((r) => r.commit_id === childId);
+							if (childRevision) {
+								targetRevisionKey = getRevisionKey(childRevision);
+								scrollMode = "step";
+							}
 						}
 					}
 					event.preventDefault();

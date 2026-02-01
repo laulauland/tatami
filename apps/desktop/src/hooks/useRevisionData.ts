@@ -7,12 +7,21 @@
 
 import { useLiveQuery } from "@tanstack/react-db";
 import { useMemo, useRef } from "react";
-import { type ChangeRecord, changesCollection, type DiffRecord, diffsCollection } from "@/db";
+import {
+	type ChangeRecord,
+	changesCollection,
+	type DiffRecord,
+	diffsCollection,
+	type LineageRecord,
+	lineageCollection,
+} from "@/db";
 import { type BatchLoader, createBatchLoader } from "@/lib/batch-loader";
 import { traceLog } from "@/lib/trace";
 import {
 	getChangesBatchEffect,
 	getDiffsBatchEffect,
+	getLineageBatchEffect,
+	type LineageResult,
 	type RevisionChanges,
 	type RevisionDiff,
 } from "@/tauri-commands";
@@ -111,6 +120,47 @@ function createChangesLoader(repoPath: string): BatchLoader {
 	});
 }
 
+/**
+ * Creates a BatchLoader for revision lineage.
+ * The loader batches IPC calls and syncs results to the unified lineageCollection.
+ */
+function createLineageLoader(repoPath: string): BatchLoader {
+	return createBatchLoader<LineageResult>({
+		debounceMs: 50,
+		maxBatchSize: 20,
+		fetchBatch: (ids) => getLineageBatchEffect(repoPath, ids),
+		syncToCollection: (results) => {
+			// Wait for collection to be ready before writing
+			if (lineageCollection.status !== "ready") return;
+			const records: LineageRecord[] = results.map((r) => ({
+				repoPath,
+				changeId: r.change_id,
+				relatedIds: r.related_ids,
+			}));
+			lineageCollection.utils.writeUpsert(records);
+
+			// LRU eviction: keep only last 50 lineage records per repo
+			const MAX_LINEAGE = 50;
+			const allRecords = Array.from(lineageCollection.state.values()).filter(
+				(r) => r.repoPath === repoPath,
+			);
+			if (allRecords.length > MAX_LINEAGE) {
+				// Remove oldest entries (first ones in the Map iteration order)
+				const toRemove = allRecords.slice(0, allRecords.length - MAX_LINEAGE);
+				for (const record of toRemove) {
+					const key = `${record.repoPath}:${record.changeId}`;
+					lineageCollection.state.delete(key);
+				}
+			}
+		},
+		isLoaded: (id) => {
+			if (lineageCollection.status !== "ready") return false;
+			const key = `${repoPath}:${id}`;
+			return lineageCollection.state.has(key);
+		},
+	});
+}
+
 // ============================================================================
 // Loader Instance Cache
 // ============================================================================
@@ -118,6 +168,7 @@ function createChangesLoader(repoPath: string): BatchLoader {
 // Cache loaders per repoPath to avoid creating multiple instances
 const diffLoaders = new Map<string, BatchLoader>();
 const changesLoaders = new Map<string, BatchLoader>();
+const lineageLoaders = new Map<string, BatchLoader>();
 
 /**
  * Clean up loaders for repos we're no longer viewing.
@@ -132,6 +183,11 @@ function cleanupLoadersExcept(currentRepoPath: string): void {
 	for (const [path] of changesLoaders) {
 		if (path !== currentRepoPath) {
 			changesLoaders.delete(path);
+		}
+	}
+	for (const [path] of lineageLoaders) {
+		if (path !== currentRepoPath) {
+			lineageLoaders.delete(path);
 		}
 	}
 }
@@ -150,6 +206,15 @@ function getChangesLoader(repoPath: string): BatchLoader {
 	if (!loader) {
 		loader = createChangesLoader(repoPath);
 		changesLoaders.set(repoPath, loader);
+	}
+	return loader;
+}
+
+function getLineageLoader(repoPath: string): BatchLoader {
+	let loader = lineageLoaders.get(repoPath);
+	if (!loader) {
+		loader = createLineageLoader(repoPath);
+		lineageLoaders.set(repoPath, loader);
 	}
 	return loader;
 }
@@ -186,18 +251,46 @@ export function useChanges(repoPath: string, changeId: string | null): ChangeRec
 }
 
 /**
+ * Read lineage (related revision IDs) for a revision from local DB.
+ * Returns { lineage, isLoaded } to allow callers to handle loading state.
+ */
+export function useLineage(
+	repoPath: string,
+	changeId: string | null,
+): { lineage: Set<string>; isLoaded: boolean } {
+	const { data: allLineage = [] } = useLiveQuery(lineageCollection);
+
+	return useMemo(() => {
+		if (!changeId) {
+			return { lineage: new Set<string>(), isLoaded: true };
+		}
+
+		const record = allLineage.find((l) => l.repoPath === repoPath && l.changeId === changeId);
+
+		if (record) {
+			return { lineage: new Set(record.relatedIds), isLoaded: true };
+		}
+
+		return { lineage: new Set<string>(), isLoaded: false };
+	}, [allLineage, repoPath, changeId]);
+}
+
+/**
  * Prefetch hook for components that need to load data ahead of user interaction.
  * Returns functions to queue prefetch requests and flush them immediately if needed.
  */
 export function usePrefetch(repoPath: string): {
 	prefetchDiffs: (ids: string[]) => void;
 	prefetchChanges: (ids: string[]) => void;
+	prefetchLineage: (ids: string[]) => void;
 	flushDiffs: () => Promise<void>;
 	flushChanges: () => Promise<void>;
+	flushLineage: () => Promise<void>;
 } {
 	// Use refs to avoid recreating loaders on each render
 	const diffLoaderRef = useRef<BatchLoader | null>(null);
 	const changesLoaderRef = useRef<BatchLoader | null>(null);
+	const lineageLoaderRef = useRef<BatchLoader | null>(null);
 	const currentRepoPathRef = useRef<string>(repoPath);
 
 	// Reset loaders if repoPath changes
@@ -205,6 +298,7 @@ export function usePrefetch(repoPath: string): {
 		currentRepoPathRef.current = repoPath;
 		diffLoaderRef.current = null;
 		changesLoaderRef.current = null;
+		lineageLoaderRef.current = null;
 		// Clean up loaders for other repos to prevent memory leaks
 		cleanupLoadersExcept(repoPath);
 	}
@@ -224,6 +318,13 @@ export function usePrefetch(repoPath: string): {
 			return changesLoaderRef.current;
 		}
 
+		function getLineageLoaderInstance(): BatchLoader {
+			if (!lineageLoaderRef.current) {
+				lineageLoaderRef.current = getLineageLoader(repoPath);
+			}
+			return lineageLoaderRef.current;
+		}
+
 		return {
 			prefetchDiffs: (ids: string[]) => {
 				traceLog("prefetch-diffs", { count: ids.length, ids });
@@ -233,8 +334,13 @@ export function usePrefetch(repoPath: string): {
 				traceLog("prefetch-changes", { count: ids.length, ids });
 				getChangesLoaderInstance().queueMany(ids);
 			},
+			prefetchLineage: (ids: string[]) => {
+				traceLog("prefetch-lineage", { count: ids.length, ids });
+				getLineageLoaderInstance().queueMany(ids);
+			},
 			flushDiffs: () => getDiffLoaderInstance().flushPromise(),
 			flushChanges: () => getChangesLoaderInstance().flushPromise(),
+			flushLineage: () => getLineageLoaderInstance().flushPromise(),
 		};
 	}, [repoPath]);
 }

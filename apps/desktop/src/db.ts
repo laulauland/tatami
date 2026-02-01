@@ -138,6 +138,7 @@ async function setupRepoWatcher(repoPath: string): Promise<void> {
 			await queryClient.invalidateQueries({ queryKey: ["revision-changes", repoPath] });
 			await queryClient.invalidateQueries({ queryKey: ["revision-diff", repoPath] });
 			await queryClient.invalidateQueries({ queryKey: ["commit-recency", repoPath] });
+			await queryClient.invalidateQueries({ queryKey: ["lineage"] });
 		}
 	});
 
@@ -326,8 +327,8 @@ export function newRevision(
 			commit_id: `pending-${preAllocatedChangeId}`, // Temporary, will be replaced
 			change_id: preAllocatedChangeId,
 			change_id_short: preAllocatedChangeId.slice(0, 8), // Approximate short ID
-			parent_ids: [parentRevision.commit_id],
 			parent_edges: [{ parent_id: parentRevision.commit_id, edge_type: "direct" as const }],
+			children_ids: [],
 			description: "",
 			author: parentRevision.author, // Inherit from parent
 			timestamp: new Date().toISOString(),
@@ -656,3 +657,35 @@ export const changesCollection = createCollection({
 });
 
 export type ChangesCollection = typeof changesCollection;
+
+// ============================================================================
+// Unified Lineage Collection (single collection for all revision lineage data)
+// ============================================================================
+
+/**
+ * Unified lineage record - stores related revision IDs keyed by repoPath:changeId.
+ * Used for highlighting related revisions in the graph.
+ */
+export interface LineageRecord {
+	repoPath: string;
+	changeId: string;
+	relatedIds: string[];
+}
+
+function getLineageRecordKey(l: LineageRecord): string {
+	return `${l.repoPath}:${l.changeId}`;
+}
+
+const lineageQueryKey = ["lineage"] as const;
+
+export const lineageCollection = createCollection({
+	...queryCollectionOptions({
+		queryClient,
+		queryKey: lineageQueryKey,
+		queryFn: async () => [] as LineageRecord[],
+		getKey: getLineageRecordKey,
+	}),
+	startSync: true,
+});
+
+export type LineageCollection = typeof lineageCollection;

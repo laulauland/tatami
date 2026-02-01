@@ -185,6 +185,28 @@ export async function resolveRevset(repoPath: string, revset: string): Promise<R
 	return invoke<RevsetResult>("resolve_revset", { repoPath, revset });
 }
 
+/** Result of computing lineage for a revision */
+export interface LineageResult {
+	change_id: string;
+	related_ids: string[];
+}
+
+/** Fetch lineage for multiple revisions in a single IPC call */
+export function getLineageBatchEffect(
+	repoPath: string,
+	changeIds: string[],
+): Effect.Effect<LineageResult[], Error> {
+	return Effect.tryPromise({
+		try: async () => {
+			const spanId = traceStart("ipc-get-lineage-batch", { count: changeIds.length });
+			const result = await invoke<LineageResult[]>("get_lineage_batch", { repoPath, changeIds });
+			traceEnd(spanId, { count: result.length });
+			return result;
+		},
+		catch: (error) => new Error(`Failed to fetch lineage batch: ${error}`),
+	});
+}
+
 /** Result of fetching file content as base64 */
 export interface FileContentResult {
 	base64: string;

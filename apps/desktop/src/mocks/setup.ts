@@ -26,9 +26,22 @@ function generateChangeId(): string {
 	return result;
 }
 
-// Calculate shortest unique prefix for each change ID
-function calculateShortIds(revisionsRaw: Omit<Revision, "change_id_short">[]): Revision[] {
+// Calculate shortest unique prefix for each change ID and compute children_ids
+function calculateShortIds(
+	revisionsRaw: Omit<Revision, "change_id_short" | "children_ids">[],
+): Revision[] {
 	const changeIds = revisionsRaw.map((r) => r.change_id);
+
+	// Build children_ids map from parent_edges
+	const childrenMap = new Map<string, string[]>();
+	for (const revision of revisionsRaw) {
+		for (const edge of revision.parent_edges) {
+			const children = childrenMap.get(edge.parent_id) ?? [];
+			children.push(revision.commit_id);
+			childrenMap.set(edge.parent_id, children);
+		}
+	}
+
 	const result: Revision[] = [];
 
 	for (let i = 0; i < changeIds.length; i++) {
@@ -60,6 +73,7 @@ function calculateShortIds(revisionsRaw: Omit<Revision, "change_id_short">[]): R
 		result.push({
 			...revision,
 			change_id_short: changeIdShort,
+			children_ids: childrenMap.get(revision.commit_id) ?? [],
 		});
 	}
 
@@ -88,12 +102,11 @@ let mockProjects: Repository[] = [
 // Change IDs are generated randomly (jj-style: 12 chars, k-z only)
 // Short IDs are calculated as minimum unique prefixes
 // Only one "main" bookmark exists on the latest main commit
-const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
+const mockRevisionsRaw: Omit<Revision, "change_id_short" | "children_ids">[] = [
 	// Root commit
 	{
 		commit_id: "root0000000000",
 		change_id: generateChangeId(),
-		parent_ids: [],
 		parent_edges: [],
 		description: "chore: initial commit",
 		author: "alice@example.com",
@@ -111,7 +124,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "main0010000000",
 		change_id: generateChangeId(),
-		parent_ids: ["root0000000000"],
 		parent_edges: [{ parent_id: "root0000000000", edge_type: "direct" }],
 		description: "feat: initial project setup with build config",
 		author: "alice@example.com",
@@ -128,7 +140,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "main0020000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0010000000"],
 		parent_edges: [{ parent_id: "main0010000000", edge_type: "direct" }],
 		description: "feat: add basic routing infrastructure",
 		author: "alice@example.com",
@@ -145,7 +156,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "main0030000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0020000000"],
 		parent_edges: [{ parent_id: "main0020000000", edge_type: "direct" }],
 		description: "feat: implement core data models",
 		author: "bob@example.com",
@@ -163,7 +173,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "auth0010000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0030000000"],
 		parent_edges: [{ parent_id: "main0030000000", edge_type: "direct" }],
 		description: "feat: add authentication service skeleton",
 		author: "alice@example.com",
@@ -180,7 +189,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "auth0020000000",
 		change_id: generateChangeId(),
-		parent_ids: ["auth0010000000"],
 		parent_edges: [{ parent_id: "auth0010000000", edge_type: "direct" }],
 		description: "feat: implement login form component",
 		author: "alice@example.com",
@@ -197,7 +205,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "auth0030000000",
 		change_id: generateChangeId(),
-		parent_ids: ["auth0020000000"],
 		parent_edges: [{ parent_id: "auth0020000000", edge_type: "direct" }],
 		description: "feat: add JWT token handling",
 		author: "alice@example.com",
@@ -214,7 +221,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "auth0040000000",
 		change_id: generateChangeId(),
-		parent_ids: ["auth0030000000"],
 		parent_edges: [{ parent_id: "auth0030000000", edge_type: "direct" }],
 		description: "feat: add password reset flow",
 		author: "alice@example.com",
@@ -232,7 +238,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "dark0010000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0030000000"],
 		parent_edges: [{ parent_id: "main0030000000", edge_type: "direct" }],
 		description: "feat: add theme provider infrastructure",
 		author: "charlie@example.com",
@@ -249,7 +254,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "dark0020000000",
 		change_id: generateChangeId(),
-		parent_ids: ["dark0010000000"],
 		parent_edges: [{ parent_id: "dark0010000000", edge_type: "direct" }],
 		description: "feat: implement dark mode toggle component",
 		author: "charlie@example.com",
@@ -266,7 +270,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "dark0030000000",
 		change_id: generateChangeId(),
-		parent_ids: ["dark0020000000"],
 		parent_edges: [{ parent_id: "dark0020000000", edge_type: "direct" }],
 		description: "feat: add dark mode styles for all components",
 		author: "charlie@example.com",
@@ -283,7 +286,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "dark0040000000",
 		change_id: generateChangeId(),
-		parent_ids: ["dark0030000000"],
 		parent_edges: [{ parent_id: "dark0030000000", edge_type: "direct" }],
 		description: "feat: add system theme detection",
 		author: "charlie@example.com",
@@ -300,7 +302,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "dark0050000000",
 		change_id: generateChangeId(),
-		parent_ids: ["dark0040000000"],
 		parent_edges: [{ parent_id: "dark0040000000", edge_type: "direct" }],
 		description: "fix: improve contrast ratios for accessibility",
 		author: "charlie@example.com",
@@ -318,7 +319,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "main0040000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0030000000"],
 		parent_edges: [{ parent_id: "main0030000000", edge_type: "direct" }],
 		description: "fix: resolve race condition in data fetching",
 		author: "bob@example.com",
@@ -335,7 +335,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "main0050000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0040000000"],
 		parent_edges: [{ parent_id: "main0040000000", edge_type: "direct" }],
 		description: "refactor: extract shared utilities into separate module",
 		author: "bob@example.com",
@@ -353,7 +352,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "perf0010000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0050000000"],
 		parent_edges: [{ parent_id: "main0050000000", edge_type: "direct" }],
 		description: "perf: optimize database queries",
 		author: "david@example.com",
@@ -370,7 +368,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "perf0020000000",
 		change_id: generateChangeId(),
-		parent_ids: ["perf0010000000"],
 		parent_edges: [{ parent_id: "perf0010000000", edge_type: "direct" }],
 		description: "perf: add query result caching layer",
 		author: "david@example.com",
@@ -387,7 +384,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "perf0030000000",
 		change_id: generateChangeId(),
-		parent_ids: ["perf0020000000"],
 		parent_edges: [{ parent_id: "perf0020000000", edge_type: "direct" }],
 		description: "perf: implement lazy loading for large datasets",
 		author: "david@example.com",
@@ -404,7 +400,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "perf0040000000",
 		change_id: generateChangeId(),
-		parent_ids: ["perf0030000000"],
 		parent_edges: [{ parent_id: "perf0030000000", edge_type: "direct" }],
 		description: "perf: add connection pooling for database",
 		author: "david@example.com",
@@ -422,7 +417,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "main0060000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0050000000"],
 		parent_edges: [{ parent_id: "main0050000000", edge_type: "direct" }],
 		description: "docs: update API documentation",
 		author: "alice@example.com",
@@ -439,7 +433,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "main0070000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0060000000"],
 		parent_edges: [{ parent_id: "main0060000000", edge_type: "direct" }],
 		description: "chore: update dependencies",
 		author: "bob@example.com",
@@ -457,7 +450,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "api0010000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0070000000"],
 		parent_edges: [{ parent_id: "main0070000000", edge_type: "direct" }],
 		description: "feat: add REST API endpoint for user management",
 		author: "eve@example.com",
@@ -474,7 +466,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "api0020000000",
 		change_id: generateChangeId(),
-		parent_ids: ["api0010000000"],
 		parent_edges: [{ parent_id: "api0010000000", edge_type: "direct" }],
 		description: "feat: add request validation middleware",
 		author: "eve@example.com",
@@ -491,7 +482,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "api0030000000",
 		change_id: generateChangeId(),
-		parent_ids: ["api0020000000"],
 		parent_edges: [{ parent_id: "api0020000000", edge_type: "direct" }],
 		description: "feat: add pagination support for list endpoints",
 		author: "eve@example.com",
@@ -509,7 +499,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "test0010000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0070000000"],
 		parent_edges: [{ parent_id: "main0070000000", edge_type: "direct" }],
 		description: "test: add unit tests for core utilities",
 		author: "frank@example.com",
@@ -526,7 +515,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "test0020000000",
 		change_id: generateChangeId(),
-		parent_ids: ["test0010000000"],
 		parent_edges: [{ parent_id: "test0010000000", edge_type: "direct" }],
 		description: "test: add integration tests for API endpoints",
 		author: "frank@example.com",
@@ -543,7 +531,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "test0030000000",
 		change_id: generateChangeId(),
-		parent_ids: ["test0020000000"],
 		parent_edges: [{ parent_id: "test0020000000", edge_type: "direct" }],
 		description: "test: add end-to-end tests for critical flows",
 		author: "frank@example.com",
@@ -560,7 +547,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "test0040000000",
 		change_id: generateChangeId(),
-		parent_ids: ["test0030000000"],
 		parent_edges: [{ parent_id: "test0030000000", edge_type: "direct" }],
 		description: "test: add performance benchmarks",
 		author: "frank@example.com",
@@ -577,7 +563,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "test0050000000",
 		change_id: generateChangeId(),
-		parent_ids: ["test0040000000"],
 		parent_edges: [{ parent_id: "test0040000000", edge_type: "direct" }],
 		description: "test: add test coverage reporting",
 		author: "frank@example.com",
@@ -595,7 +580,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "main0080000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0070000000"],
 		parent_edges: [{ parent_id: "main0070000000", edge_type: "direct" }],
 		description: "fix: handle edge case in form validation",
 		author: "henry@example.com",
@@ -613,7 +597,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "ui0010000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0080000000"],
 		parent_edges: [{ parent_id: "main0080000000", edge_type: "direct" }],
 		description: "feat: redesign navigation component",
 		author: "grace@example.com",
@@ -630,7 +613,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "ui0020000000",
 		change_id: generateChangeId(),
-		parent_ids: ["ui0010000000"],
 		parent_edges: [{ parent_id: "ui0010000000", edge_type: "direct" }],
 		description: "feat: add responsive layout breakpoints",
 		author: "grace@example.com",
@@ -647,7 +629,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "ui0030000000",
 		change_id: generateChangeId(),
-		parent_ids: ["ui0020000000"],
 		parent_edges: [{ parent_id: "ui0020000000", edge_type: "direct" }],
 		description: "feat: add loading states and skeletons",
 		author: "grace@example.com",
@@ -664,7 +645,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "ui0040000000",
 		change_id: generateChangeId(),
-		parent_ids: ["ui0030000000"],
 		parent_edges: [{ parent_id: "ui0030000000", edge_type: "direct" }],
 		description: "feat: improve accessibility with ARIA labels",
 		author: "grace@example.com",
@@ -682,7 +662,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "sec0010000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0080000000"],
 		parent_edges: [{ parent_id: "main0080000000", edge_type: "direct" }],
 		description: "security: add input sanitization",
 		author: "iris@example.com",
@@ -699,7 +678,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "sec0020000000",
 		change_id: generateChangeId(),
-		parent_ids: ["sec0010000000"],
 		parent_edges: [{ parent_id: "sec0010000000", edge_type: "direct" }],
 		description: "security: implement rate limiting",
 		author: "iris@example.com",
@@ -716,7 +694,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "sec0030000000",
 		change_id: generateChangeId(),
-		parent_ids: ["sec0020000000"],
 		parent_edges: [{ parent_id: "sec0020000000", edge_type: "direct" }],
 		description: "security: add CSRF protection",
 		author: "iris@example.com",
@@ -734,7 +711,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "doc0010000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0080000000"],
 		parent_edges: [{ parent_id: "main0080000000", edge_type: "direct" }],
 		description: "docs: add architecture decision records",
 		author: "lisa@example.com",
@@ -751,7 +727,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "doc0020000000",
 		change_id: generateChangeId(),
-		parent_ids: ["doc0010000000"],
 		parent_edges: [{ parent_id: "doc0010000000", edge_type: "direct" }],
 		description: "docs: add API reference documentation",
 		author: "lisa@example.com",
@@ -768,7 +743,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "doc0030000000",
 		change_id: generateChangeId(),
-		parent_ids: ["doc0020000000"],
 		parent_edges: [{ parent_id: "doc0020000000", edge_type: "direct" }],
 		description: "docs: add deployment guide",
 		author: "lisa@example.com",
@@ -785,7 +759,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "doc0040000000",
 		change_id: generateChangeId(),
-		parent_ids: ["doc0030000000"],
 		parent_edges: [{ parent_id: "doc0030000000", edge_type: "direct" }],
 		description: "docs: add troubleshooting section",
 		author: "lisa@example.com",
@@ -803,7 +776,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "mon0010000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0030000000"],
 		parent_edges: [{ parent_id: "main0030000000", edge_type: "direct" }],
 		description: "feat: add application monitoring setup",
 		author: "jack@example.com",
@@ -820,7 +792,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "mon0020000000",
 		change_id: generateChangeId(),
-		parent_ids: ["mon0010000000"],
 		parent_edges: [{ parent_id: "mon0010000000", edge_type: "direct" }],
 		description: "feat: add error tracking integration",
 		author: "jack@example.com",
@@ -837,7 +808,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "mon0030000000",
 		change_id: generateChangeId(),
-		parent_ids: ["mon0020000000"],
 		parent_edges: [{ parent_id: "mon0020000000", edge_type: "direct" }],
 		description: "feat: add performance metrics dashboard",
 		author: "jack@example.com",
@@ -855,7 +825,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "main0090000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0080000000"],
 		parent_edges: [{ parent_id: "main0080000000", edge_type: "direct" }],
 		description: "fix: resolve memory leak in event handlers",
 		author: "henry@example.com",
@@ -873,7 +842,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "main0100000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0090000000"],
 		parent_edges: [{ parent_id: "main0090000000", edge_type: "direct" }],
 		description: "chore: prepare for release",
 		author: "alice@example.com",
@@ -891,7 +859,6 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short">[] = [
 	{
 		commit_id: "wc00100000000",
 		change_id: generateChangeId(),
-		parent_ids: ["main0100000000"],
 		parent_edges: [{ parent_id: "main0100000000", edge_type: "direct" }],
 		description: "",
 		author: "alice@example.com",
@@ -1034,10 +1001,9 @@ const handlers: Record<string, MockHandler> = {
 		// Use provided change ID or generate new one
 		const newChangeId = providedChangeId ?? generateChangeId();
 		const newCommitId = `new${Date.now().toString(16).slice(-10)}`;
-		const newRevision: Omit<Revision, "change_id_short"> = {
+		const newRevision: Omit<Revision, "change_id_short" | "children_ids"> = {
 			commit_id: newCommitId,
 			change_id: newChangeId,
-			parent_ids: parentCommitIds,
 			parent_edges: parentCommitIds.map((id) => ({ parent_id: id, edge_type: "direct" as const })),
 			description: "",
 			author: "alice@example.com",
@@ -1054,7 +1020,7 @@ const handlers: Record<string, MockHandler> = {
 
 		// Recalculate short IDs with new revision included
 		const allRevisionsRaw = [
-			...mockRevisions.map(({ change_id_short: _, ...r }) => r),
+			...mockRevisions.map(({ change_id_short: _, children_ids: __, ...r }) => r),
 			newRevision,
 		];
 		mockRevisions = calculateShortIds(allRevisionsRaw);
@@ -1095,17 +1061,16 @@ const handlers: Record<string, MockHandler> = {
 		if (revision.is_working_copy) {
 			// Abandoning WC creates a new WC on the parent
 			// Clear WC flag and create a new working copy
-			const parentCommitId = revision.parent_ids[0];
+			const parentCommitId = revision.parent_edges[0]?.parent_id;
 			// Remove the abandoned revision
 			mockRevisions = mockRevisions.filter((_, i) => i !== revisionIndex);
 
 			// Create new working copy on parent
 			const newChangeId = generateChangeId();
 			const newCommitId = `wc${Date.now().toString(16).slice(-10)}`;
-			const newRevision: Omit<Revision, "change_id_short"> = {
+			const newRevision: Omit<Revision, "change_id_short" | "children_ids"> = {
 				commit_id: newCommitId,
 				change_id: newChangeId,
-				parent_ids: parentCommitId ? [parentCommitId] : [],
 				parent_edges: parentCommitId
 					? [{ parent_id: parentCommitId, edge_type: "direct" as const }]
 					: [],
@@ -1124,7 +1089,7 @@ const handlers: Record<string, MockHandler> = {
 
 			// Recalculate short IDs
 			const allRevisionsRaw = [
-				...mockRevisions.map(({ change_id_short: _, ...r }) => r),
+				...mockRevisions.map(({ change_id_short: _, children_ids: __, ...r }) => r),
 				newRevision,
 			];
 			mockRevisions = calculateShortIds(allRevisionsRaw);
@@ -1132,7 +1097,9 @@ const handlers: Record<string, MockHandler> = {
 			// Just remove the revision
 			mockRevisions = mockRevisions.filter((_, i) => i !== revisionIndex);
 			// Recalculate short IDs after removal
-			const allRevisionsRaw = mockRevisions.map(({ change_id_short: _, ...r }) => r);
+			const allRevisionsRaw = mockRevisions.map(
+				({ change_id_short: _, children_ids: __, ...r }) => r,
+			);
 			mockRevisions = calculateShortIds(allRevisionsRaw);
 		}
 
@@ -1148,9 +1115,9 @@ const handlers: Record<string, MockHandler> = {
 		}
 		if (revset === "@-") {
 			const wc = mockRevisions.find((r) => r.is_working_copy);
-			if (wc && wc.parent_ids.length > 0) {
+			if (wc && wc.parent_edges.length > 0) {
 				// Find parent by commit_id
-				const parent = mockRevisions.find((r) => r.commit_id === wc.parent_ids[0]);
+				const parent = mockRevisions.find((r) => r.commit_id === wc.parent_edges[0].parent_id);
 				return { change_ids: parent ? [parent.change_id] : [], error: null };
 			}
 			return { change_ids: [], error: null };

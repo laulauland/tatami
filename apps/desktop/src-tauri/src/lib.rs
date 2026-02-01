@@ -4,7 +4,7 @@ mod watcher;
 
 use repo::diff;
 use repo::jj::{JjRepo, MutationResult, Operation};
-use repo::log::{Revision, RevsetResult};
+use repo::log::{LineageResult, Revision, RevsetResult};
 use repo::status::WorkingCopyStatus;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -559,6 +559,24 @@ async fn resolve_revset(repo_path: String, revset: String) -> Result<RevsetResul
     repo::log::resolve_revset(path, &revset).map_err(|e| format!("Failed to resolve revset: {}", e))
 }
 
+/// Get lineage (ancestors and descendants) for multiple revisions in a batch.
+#[tauri::command]
+async fn get_lineage_batch(
+    repo_path: String,
+    change_ids: Vec<String>,
+) -> Result<Vec<LineageResult>, String> {
+    let path = Path::new(&repo_path);
+
+    let results: Vec<LineageResult> = change_ids
+        .iter()
+        .filter_map(|change_id| {
+            repo::log::get_lineage(path, change_id).ok()
+        })
+        .collect();
+
+    Ok(results)
+}
+
 #[derive(Serialize)]
 struct FileContentResult {
     base64: String,
@@ -750,6 +768,7 @@ pub fn run() {
             get_changes_batch,
             get_commit_recency,
             resolve_revset,
+            get_lineage_batch,
             get_file_content_base64,
             get_projects,
             upsert_project,

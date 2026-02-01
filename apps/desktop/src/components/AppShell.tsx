@@ -332,7 +332,7 @@ function AppShellWithProject() {
 		}
 
 		const visited = new Set<string>();
-		const queue = [...workingCopy.parent_ids];
+		const queue = workingCopy.parent_edges.map((e) => e.parent_id);
 
 		while (queue.length > 0) {
 			const commitId = queue.shift();
@@ -346,7 +346,7 @@ function AppShellWithProject() {
 				return rev.bookmarks[0].name;
 			}
 
-			queue.push(...rev.parent_ids);
+			queue.push(...rev.parent_edges.map((e) => e.parent_id));
 		}
 
 		return null;

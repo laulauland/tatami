@@ -35,8 +35,8 @@ pub struct Revision {
     pub commit_id: String,
     pub change_id: String,
     pub change_id_short: String,
-    pub parent_ids: Vec<String>,
     pub parent_edges: Vec<ParentEdge>,
+    pub children_ids: Vec<String>,
     pub description: String,
     pub author: String,
     pub timestamp: String,
@@ -200,13 +200,6 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: O
 
         let bookmarks = get_bookmarks_for_commit(repo.as_ref(), &commit_id);
 
-        // Keep parent_ids for backward compatibility
-        let parent_ids: Vec<String> = commit
-            .parent_ids()
-            .iter()
-            .map(|id| hex::encode(&id.to_bytes()[..6]))
-            .collect();
-
         // Build parent_edges from graph edges with type information
         let parent_edges: Vec<ParentEdge> = edges
             .iter()
@@ -253,8 +246,8 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: O
             commit_id: hex::encode(&commit_id.to_bytes()[..6]),
             change_id: full_change_id,
             change_id_short,
-            parent_ids,
             parent_edges,
+            children_ids: Vec::new(), // Populated in second pass
             description,
             author: author_name,
             timestamp,
@@ -267,6 +260,25 @@ pub fn fetch_log(repo_path: &Path, limit: usize, revset: Option<&str>, preset: O
             has_conflict,
             bookmarks,
         });
+    }
+
+    // Second pass: compute children_ids from parent_edges
+    // Build a map of parent_id -> list of child commit_ids
+    let mut children_map: HashMap<String, Vec<String>> = HashMap::new();
+    for revision in &revisions {
+        for edge in &revision.parent_edges {
+            children_map
+                .entry(edge.parent_id.clone())
+                .or_default()
+                .push(revision.commit_id.clone());
+        }
+    }
+
+    // Populate children_ids for each revision
+    for revision in &mut revisions {
+        if let Some(children) = children_map.remove(&revision.commit_id) {
+            revision.children_ids = children;
+        }
     }
 
     Ok(revisions)
@@ -395,6 +407,13 @@ pub struct RevsetResult {
     pub error: Option<String>,
 }
 
+/// Result of computing lineage for a revision
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct LineageResult {
+    pub change_id: String,
+    pub related_ids: Vec<String>,
+}
+
 /// Resolve a revset expression and return matching change IDs
 pub fn resolve_revset(repo_path: &Path, revset_str: &str) -> Result<RevsetResult> {
     let jj_repo = JjRepo::open(repo_path)?;
@@ -496,5 +515,81 @@ pub fn resolve_revset(repo_path: &Path, revset_str: &str) -> Result<RevsetResult
     Ok(RevsetResult {
         change_ids,
         error: None,
+    })
+}
+
+/// Compute lineage (ancestors and descendants) for a revision
+pub fn get_lineage(repo_path: &Path, change_id: &str) -> Result<LineageResult> {
+    let jj_repo = JjRepo::open(repo_path)?;
+    let repo = jj_repo.repo_loader().load_at_head()?;
+
+    // Set up aliases (same as resolve_revset)
+    let mut aliases_map = RevsetAliasesMap::new();
+    let user_email = jj_repo.user_settings().user_email();
+
+    aliases_map.insert(
+        "trunk()",
+        r#"latest(
+            remote_bookmarks(exact:"main", exact:"origin") |
+            remote_bookmarks(exact:"master", exact:"origin") |
+            remote_bookmarks(exact:"trunk", exact:"origin") |
+            root()
+        )"#,
+    ).ok();
+
+    aliases_map.insert("builtin_immutable_heads()", "present(trunk()) | tags() | untracked_remote_bookmarks()").ok();
+    aliases_map.insert("immutable_heads()", "builtin_immutable_heads()").ok();
+
+    let mine_revset = format!(r#"author_email(exact-i:"{}")"#, user_email);
+    aliases_map.insert("mine()", &mine_revset).ok();
+
+    let path_converter = RepoPathUiConverter::Fs {
+        cwd: repo_path.to_path_buf(),
+        base: repo_path.to_path_buf(),
+    };
+    let workspace_name = jj_repo.workspace_name();
+    let workspace_ctx = RevsetWorkspaceContext {
+        path_converter: &path_converter,
+        workspace_name,
+    };
+
+    let context = RevsetParseContext {
+        aliases_map: &aliases_map,
+        local_variables: HashMap::new(),
+        user_email: jj_repo.user_settings().user_email(),
+        date_pattern_context: chrono::Utc::now().fixed_offset().into(),
+        default_ignored_remote: Some(git::REMOTE_NAME_FOR_LOCAL_GIT_REPO),
+        extensions: &RevsetExtensions::default(),
+        workspace: Some(workspace_ctx),
+    };
+
+    // Build revset: ancestors(X) | descendants(X)
+    let revset_str = format!("ancestors({}) | descendants({})", change_id, change_id);
+
+    let mut diagnostics = RevsetDiagnostics::new();
+    let expression = parse(&mut diagnostics, &revset_str, &context)
+        .context("Failed to parse lineage revset")?;
+
+    let symbol_resolver = SymbolResolver::new(repo.as_ref(), &([] as [&Box<dyn SymbolResolverExtension>; 0]));
+    let resolved = expression.resolve_user_expression(repo.as_ref(), &symbol_resolver)
+        .context("Failed to resolve lineage revset")?;
+
+    let revset = resolved.evaluate(repo.as_ref())
+        .context("Failed to evaluate lineage revset")?;
+
+    // Collect related change IDs (excluding the input change_id itself)
+    let mut related_ids = Vec::new();
+    for commit_id_result in revset.iter() {
+        let commit_id = commit_id_result?;
+        let commit = repo.store().get_commit(&commit_id)?;
+        let related_change_id = format_change_id(commit.change_id());
+        if related_change_id != change_id {
+            related_ids.push(related_change_id);
+        }
+    }
+
+    Ok(LineageResult {
+        change_id: change_id.to_string(),
+        related_ids,
     })
 }

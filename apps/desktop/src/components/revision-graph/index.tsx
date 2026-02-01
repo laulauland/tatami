@@ -4,7 +4,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { RefObject } from "react";
 import {
 	forwardRef,
-	useDeferredValue,
+	useCallback,
+	// DISABLED: useDeferredValue removed (lineage/dimming disabled)
 	useEffect,
 	useImperativeHandle,
 	useMemo,
@@ -17,6 +18,7 @@ import {
 	expandedStacksAtom,
 	hoveredStackIdAtom,
 	inlineJumpQueryAtom,
+	revisionGraphScrollTopAtom,
 } from "@/atoms";
 import {
 	reorderForGraph,
@@ -26,7 +28,8 @@ import {
 } from "@/components/revision-graph-utils";
 import { getRevisionKey } from "@/db";
 import { useFocusWithin } from "@/hooks/useFocusWithin";
-import { useLineage, usePrefetch } from "@/hooks/useRevisionData";
+// DISABLED: useLineage removed (lineage/dimming disabled)
+import { usePrefetch } from "@/hooks/useRevisionData";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import { useRevisionGraphNavigation } from "@/hooks/useRevisionGraphNavigation";
 import type { Revision } from "@/tauri-commands";
@@ -332,6 +335,9 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		},
 		ref,
 	) {
+		const renderCount = useRef(0);
+		console.log(`RevisionGraph Render #${++renderCount.current}`);
+
 		const parentRef = useRef<HTMLDivElement>(null);
 		const containerRef = useRef<HTMLDivElement>(null);
 		const prefetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -363,7 +369,10 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const stacks = useMemo(() => detectStacks(stableRevisions), [stableRevisions]);
 
 		// Setup prefetch hooks for visible revision data
-		const { prefetchDiffs, prefetchChanges, prefetchLineage } = usePrefetch(repoPath ?? "");
+		// DISABLED: prefetchLineage removed (lineage/dimming disabled)
+		const { prefetchDiffs, prefetchChanges, flushDiffs, flushChanges } = usePrefetch(
+			repoPath ?? "",
+		);
 
 		// Track which stacks are expanded (empty = all collapsed by default)
 		const [expandedStacks, setExpandedStacks] = useAtom(expandedStacksAtom);
@@ -491,93 +500,59 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		}
 
 		// Toggle stack expansion and focus the top of newly revealed revisions when expanding
-		function handleToggleStack(stackId: string) {
+		async function handleToggleStack(stackId: string) {
 			const stack = stackById.get(stackId);
 			const isCurrentlyExpanded = expandedStacks.has(stackId);
+			const traceId = traceStart(isCurrentlyExpanded ? "collapseStack" : "expandStack", {
+				stackId,
+				revisionCount: stack?.intermediateChangeIds.length ?? 0,
+			});
+
+			// If expanding (not currently expanded), prefetch the target diff FIRST
+			// This ensures the diff is cached before we navigate, avoiding UI freeze
+			if (!isCurrentlyExpanded && stack && stack.intermediateChangeIds.length > 0) {
+				const targetChangeId = stack.intermediateChangeIds[0];
+				prefetchDiffs([targetChangeId]);
+				prefetchChanges([targetChangeId]);
+				await Promise.all([flushDiffs(), flushChanges()]);
+			}
+
 			toggleStackExpansion(stackId);
 
 			// If expanding (not currently expanded), focus the first intermediate revision
 			// (the top of the newly revealed revisions, not the already-visible top of the stack)
 			if (!isCurrentlyExpanded && stack && stack.intermediateChangeIds.length > 0) {
+				const targetChangeId = stack.intermediateChangeIds[0];
 				navigate({
 					search: {
 						...search,
 						stack: undefined,
-						rev: stack.intermediateChangeIds[0],
+						rev: targetChangeId,
 						selected: undefined,
 						selectionAnchor: undefined,
 					},
 					replace: true,
 				});
 			}
+			traceEnd(traceId);
 		}
 
 		// Maps for lookups - by revision key for UI, by commit_id for graph edges
 		const revisionMapByKey = new Map(stableRevisions.map((r) => [getRevisionKey(r), r]));
 		const revisionMapByCommitId = new Map(stableRevisions.map((r) => [r.commit_id, r]));
 
-		// Defer the selected ID so dimming computation doesn't block selection highlight
-		const deferredSelectedChangeId = useDeferredValue(selectedRevision?.change_id ?? null);
-
-		// Resolve stack for lineage queries
-		const focusedStack = focusedStackId ? stackById.get(focusedStackId) : null;
-
-		// Get lineage from backend - call hooks unconditionally with null when not needed
-		const topLineageChangeId = focusedStack ? focusedStack.topChangeId : null;
-		const bottomLineageChangeId = focusedStack ? focusedStack.bottomChangeId : null;
-		const primaryLineageChangeId = focusedStack ? null : deferredSelectedChangeId;
-
-		const { lineage: topLineage, isLoaded: topLoaded } = useLineage(
-			repoPath ?? "",
-			topLineageChangeId,
-		);
-		const { lineage: bottomLineage, isLoaded: bottomLoaded } = useLineage(
-			repoPath ?? "",
-			bottomLineageChangeId,
-		);
-		const { lineage: primaryLineage, isLoaded: primaryLoaded } = useLineage(
-			repoPath ?? "",
-			primaryLineageChangeId,
-		);
-
-		// Don't dim while lineage is loading - prevents flicker
-		const lineageIsLoading = focusedStack
-			? !topLoaded || !bottomLoaded
-			: deferredSelectedChangeId && !primaryLoaded;
-
-		// Compute related revisions for dimming logic
-		// Intersect with visible revisions for display
-		// When loading, return null to disable dimming entirely
-		const relatedRevisions = useMemo(() => {
-			// Don't dim while loading
-			if (lineageIsLoading) return null;
-
-			const visibleIds = new Set(stableRevisions.map((r) => r.change_id));
-
-			if (focusedStack) {
-				// When stack is focused, highlight the stack endpoints and their ancestors/descendants
-				const combined = new Set([...topLineage, ...bottomLineage]);
-				const result = new Set([...combined].filter((id) => visibleIds.has(id)));
-				// Always include the focused stack endpoints
-				if (focusedStack.topChangeId) result.add(focusedStack.topChangeId);
-				if (focusedStack.bottomChangeId) result.add(focusedStack.bottomChangeId);
-				return result;
-			}
-
-			if (!deferredSelectedChangeId) return null;
-			const result = new Set([...primaryLineage].filter((id) => visibleIds.has(id)));
-			// Always include the selected revision itself
-			result.add(deferredSelectedChangeId);
-			return result;
-		}, [
-			stableRevisions,
-			focusedStack,
-			topLineage,
-			bottomLineage,
-			primaryLineage,
-			deferredSelectedChangeId,
-			lineageIsLoading,
-		]);
+		// DISABLED: Lineage/dimming calculations commented out
+		// const deferredSelectedChangeId = useDeferredValue(selectedRevision?.change_id ?? null);
+		// const focusedStack = focusedStackId ? stackById.get(focusedStackId) : null;
+		// const topLineageChangeId = focusedStack ? focusedStack.topChangeId : null;
+		// const bottomLineageChangeId = focusedStack ? focusedStack.bottomChangeId : null;
+		// const primaryLineageChangeId = focusedStack ? null : deferredSelectedChangeId;
+		// const { lineage: topLineage, isLoaded: topLoaded } = useLineage(repoPath ?? "", topLineageChangeId);
+		// const { lineage: bottomLineage, isLoaded: bottomLoaded } = useLineage(repoPath ?? "", bottomLineageChangeId);
+		// const { lineage: primaryLineage, isLoaded: primaryLoaded } = useLineage(repoPath ?? "", primaryLineageChangeId);
+		// const lineageIsLoading = focusedStack ? !topLoaded || !bottomLoaded : deferredSelectedChangeId && !primaryLoaded;
+		// DISABLED: Lineage/dimming completely removed
+		// const relatedRevisions = useMemo(() => { ... }, [...]);
 
 		// Build revision key -> displayRow index map for scrolling and edge positioning
 		// IMPORTANT: Use displayRows indices (not rows) to match virtualizer positioning
@@ -738,6 +713,17 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 		const COLLAPSED_STACK_HEIGHT = 32;
 
+		const getItemKey = useCallback(
+			(index: number) => {
+				const displayRow = displayRows[index];
+				if (displayRow.type === "collapsed-stack") {
+					return `collapsed-${displayRow.stack.id}`;
+				}
+				return `revision-${displayRow.row.revision.change_id}`;
+			},
+			[displayRows],
+		);
+
 		const rowVirtualizer = useVirtualizer({
 			count: displayRows.length,
 			getScrollElement: () => parentRef.current,
@@ -748,9 +734,40 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				}
 				return ROW_HEIGHT;
 			},
+			getItemKey,
 			overscan: 5,
 			debug: debugEnabled,
 		});
+
+		// Persist scroll position across view mode changes
+		const [savedScrollTop, setSavedScrollTop] = useAtom(revisionGraphScrollTopAtom);
+
+		// Restore scroll position on mount
+		useEffect(() => {
+			const scrollEl = parentRef.current;
+			if (!scrollEl || savedScrollTop === 0) return;
+
+			// Use requestAnimationFrame to ensure the DOM is ready
+			requestAnimationFrame(() => {
+				scrollEl.scrollTop = savedScrollTop;
+			});
+			// Only run on mount - savedScrollTop is intentionally not in deps
+			// eslint-disable-next-line react-hooks/exhaustive-deps
+		}, []);
+
+		// Save scroll position on scroll (DOM event subscription)
+		// ast-grep-ignore: no-useeffect-state-sync
+		useEffect(() => {
+			const scrollEl = parentRef.current;
+			if (!scrollEl) return;
+
+			const handleScroll = () => {
+				setSavedScrollTop(scrollEl.scrollTop);
+			};
+
+			scrollEl.addEventListener("scroll", handleScroll, { passive: true });
+			return () => scrollEl.removeEventListener("scroll", handleScroll);
+		}, [setSavedScrollTop]);
 
 		// scrollToIndexIfNeededRef is updated below after virtualItems is computed
 
@@ -917,10 +934,10 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				prefetchDiffs(uniqueIds);
 				prefetchChanges(uniqueIds);
 
-				// Prefetch lineage for selected revision (for dimming related revisions)
-				if (selectedRevision) {
-					prefetchLineage([selectedRevision.change_id]);
-				}
+				// DISABLED: Lineage prefetch removed (lineage/dimming disabled)
+				// if (selectedRevision) {
+				// 	prefetchLineage([selectedRevision.change_id]);
+				// }
 			}, 200);
 
 			// Cleanup on unmount or when deps change
@@ -937,7 +954,6 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			selectedRevision,
 			prefetchDiffs,
 			prefetchChanges,
-			prefetchLineage,
 		]);
 
 		// Compute jump hints for visible rows based on change ID prefix matching
@@ -1142,12 +1158,10 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 									const nodeAreaWidth = LANE_PADDING + (lane + 1) * LANE_WIDTH;
 									const count = stack.intermediateChangeIds.length;
 
-									// Check if this stack is related to the selected revision (for dimming)
-									// Don't dim if relatedRevisions is null (still loading)
-									const isStackRelated =
-										relatedRevisions === null ||
-										stack.changeIds.some((id) => relatedRevisions.has(id));
-									const isStackDimmed = selectedRevision !== null && !isStackRelated;
+									// DISABLED: Dimming disabled (lineage calculations removed)
+									// const isStackRelated = relatedRevisions === null || stack.changeIds.some((id) => relatedRevisions.has(id));
+									// const isStackDimmed = selectedRevision !== null && !isStackRelated;
+									const isStackDimmed = false;
 									const isStackFocused = focusedStackId === stack.id;
 
 									return (
@@ -1222,11 +1236,9 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 								const { row } = displayRow;
 								const lane = changeIdToLane.get(row.revision.change_id) ?? 0;
 								const isFlashing = flash?.changeId === row.revision.change_id;
-								// Don't dim if relatedRevisions is null (still loading)
-								const isDimmed =
-									relatedRevisions !== null &&
-									(selectedRevision !== null || focusedStackId !== null) &&
-									!relatedRevisions.has(row.revision.change_id);
+								// DISABLED: Dimming disabled (lineage calculations removed)
+								// const isDimmed = relatedRevisions !== null && (selectedRevision !== null || focusedStackId !== null) && !relatedRevisions.has(row.revision.change_id);
+								const isDimmed = false;
 								// Only show focus if no stack is focused
 								const isFocused =
 									!focusedStackId &&
@@ -1241,6 +1253,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 										className="absolute left-0 w-full"
 										style={{
 											transform: `translateY(${virtualRow.start}px)`,
+											height: ROW_HEIGHT,
 										}}
 									>
 										<RevisionRow

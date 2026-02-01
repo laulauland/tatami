@@ -70,3 +70,5 @@ The frontend supports running without Tauri via mocks in `src/mocks/`. Vite alia
 - **Tauri** (2.1) - Desktop application framework
 - **SQLx** - SQLite database access
 - **notify** - File system watching
+
+@.fp/FP_CLAUDE.md

@@ -2,6 +2,12 @@ mod repo;
 mod storage;
 mod watcher;
 
+/// Check if content appears to be binary (contains null bytes in first 8KB)
+fn is_binary_content(content: &[u8]) -> bool {
+    let check_len = content.len().min(8192);
+    content[..check_len].contains(&0)
+}
+
 use repo::diff;
 use repo::jj::{JjRepo, MutationResult, Operation};
 use repo::log::{LineageResult, Revision, RevsetResult};
@@ -231,11 +237,18 @@ async fn get_revision_changes(
 fn compute_revision_diff_inner(jj_repo: &JjRepo, change_id: &str) -> Result<String, String> {
     use jj_lib::backend::TreeValue;
     use jj_lib::matchers::EverythingMatcher;
+    use rayon::prelude::*;
+    use std::time::Instant;
 
+    let total_start = Instant::now();
+
+    let t0 = Instant::now();
     let commit = jj_repo
         .get_commit(change_id)
         .map_err(|e| format!("Failed to get commit: {}", e))?;
+    let get_commit_ms = t0.elapsed().as_millis();
 
+    let t0 = Instant::now();
     let parent_tree = {
         let parents = commit.parents();
         let parent = parents
@@ -247,20 +260,29 @@ fn compute_revision_diff_inner(jj_repo: &JjRepo, change_id: &str) -> Result<Stri
             .tree()
             .map_err(|e| format!("Failed to get parent tree: {}", e))?
     };
+    let parent_tree_ms = t0.elapsed().as_millis();
 
+    let t0 = Instant::now();
     let commit_tree = commit
         .tree()
         .map_err(|e| format!("Failed to get commit tree: {}", e))?;
+    let commit_tree_ms = t0.elapsed().as_millis();
 
     let matcher = EverythingMatcher;
     let mut diff_iter = parent_tree.diff_stream(&commit_tree, &matcher);
 
+    let t0 = Instant::now();
     let repo = jj_repo
         .repo_loader()
         .load_at_head()
         .map_err(|e| format!("Failed to load repo: {}", e))?;
+    let load_repo_ms = t0.elapsed().as_millis();
 
-    let mut unified_diffs = Vec::new();
+    // Phase 1: Collect file contents sequentially (requires JjRepo access)
+    let mut file_contents: Vec<(String, Vec<u8>, Vec<u8>)> = Vec::new();
+    let mut total_old_content_ms: u128 = 0;
+    let mut total_new_content_ms: u128 = 0;
+    let mut total_content_bytes: usize = 0;
 
     pollster::block_on(async {
         use futures::StreamExt;
@@ -278,26 +300,63 @@ fn compute_revision_diff_inner(jj_repo: &JjRepo, change_id: &str) -> Result<Stri
                 (Some(TreeValue::File { .. }), Some(TreeValue::File { .. }))
                 | (None, Some(TreeValue::File { .. }))
                 | (Some(TreeValue::File { .. }), None) => {
+                    let t0 = Instant::now();
                     let old_content = jj_repo
                         .get_parent_file_content_with_repo(repo.as_ref(), &commit, path_str)
                         .unwrap_or_default();
+                    total_old_content_ms += t0.elapsed().as_millis();
 
+                    let t0 = Instant::now();
                     let new_content = jj_repo
                         .get_file_content_with_repo(repo.as_ref(), &commit, path_str)
                         .unwrap_or_default();
+                    total_new_content_ms += t0.elapsed().as_millis();
 
-                    let file_diff = diff::compute_file_diff(&old_content, &new_content, path_str)
-                        .map_err(|e| format!("Failed to compute diff: {}", e))?;
+                    total_content_bytes += old_content.len() + new_content.len();
 
-                    if !file_diff.is_empty() {
-                        unified_diffs.push(file_diff);
+                    // Skip binary files
+                    if is_binary_content(&old_content) || is_binary_content(&new_content) {
+                        continue;
                     }
+
+                    file_contents.push((path_str.to_string(), old_content, new_content));
                 }
                 _ => continue,
             };
         }
         Ok::<(), String>(())
     })?;
+
+    let file_count = file_contents.len();
+
+    // Phase 2: Compute diffs in parallel (pure computation, no JjRepo needed)
+    let t0 = Instant::now();
+    let unified_diffs: Vec<String> = file_contents
+        .par_iter()
+        .filter_map(|(path, old, new)| diff::compute_file_diff(old, new, path).ok())
+        .filter(|d| !d.is_empty())
+        .collect();
+    let total_diff_compute_ms = t0.elapsed().as_millis();
+
+    let total_ms = total_start.elapsed().as_millis();
+
+    // Only log if total time is significant (>10ms)
+    if total_ms > 10 {
+        eprintln!(
+            "[DIFF-TRACE] change={} total={}ms | get_commit={}ms parent_tree={}ms commit_tree={}ms load_repo={}ms | files={} old_content={}ms new_content={}ms diff_compute={}ms content_kb={}",
+            &change_id[..8.min(change_id.len())],
+            total_ms,
+            get_commit_ms,
+            parent_tree_ms,
+            commit_tree_ms,
+            load_repo_ms,
+            file_count,
+            total_old_content_ms,
+            total_new_content_ms,
+            total_diff_compute_ms,
+            total_content_bytes / 1024
+        );
+    }
 
     Ok(unified_diffs.join("\n"))
 }
@@ -367,8 +426,15 @@ async fn get_diffs_batch(
     repo_path: String,
     change_ids: Vec<String>,
 ) -> Result<Vec<RevisionDiff>, String> {
+    use std::time::Instant;
+
+    let batch_start = Instant::now();
+    let batch_size = change_ids.len();
+
+    let t0 = Instant::now();
     let path = Path::new(&repo_path);
     let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    let open_repo_ms = t0.elapsed().as_millis();
 
     // Process sequentially since JjRepo is not Sync
     let results: Vec<RevisionDiff> = change_ids
@@ -383,6 +449,19 @@ async fn get_diffs_batch(
             }
         })
         .collect();
+
+    let total_ms = batch_start.elapsed().as_millis();
+
+    // Log batch summary
+    if total_ms > 10 {
+        eprintln!(
+            "[DIFF-BATCH] count={} total={}ms open_repo={}ms avg_per_diff={}ms",
+            batch_size,
+            total_ms,
+            open_repo_ms,
+            if batch_size > 0 { total_ms / batch_size as u128 } else { 0 }
+        );
+    }
 
     Ok(results)
 }

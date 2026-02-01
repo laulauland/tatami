@@ -159,11 +159,24 @@ export function createBatchLoader<T>(config: BatchLoaderConfig<T>): BatchLoader 
 
 	function queueMany(ids: string[]): void {
 		let addedAny = false;
+		let cacheHits = 0;
+		let cacheMisses = 0;
 		for (const id of ids) {
 			if (!isLoaded(id)) {
 				pending.add(id);
 				addedAny = true;
+				cacheMisses++;
+			} else {
+				cacheHits++;
 			}
+		}
+		if (ids.length > 0) {
+			traceLog("batch-queue", {
+				total: ids.length,
+				cacheHits,
+				cacheMisses,
+				alreadyPending: pending.size - cacheMisses,
+			});
 		}
 		if (addedAny) {
 			scheduleFlush();

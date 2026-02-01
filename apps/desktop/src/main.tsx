@@ -15,8 +15,10 @@ import "./styles/index.css";
 
 const workerPoolOptions = {
 	workerFactory: () =>
-		new Worker(new URL("@pierre/diffs/worker/worker.js", import.meta.url), { type: "module" }),
-	poolSize: 4,
+		new Worker(new URL("@pierre/diffs/worker/worker.js", import.meta.url), {
+			type: "module",
+		}),
+	poolSize: 8,
 };
 
 const highlighterOptions = {

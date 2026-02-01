@@ -1,9 +1,9 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { Profiler, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Profiler, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Route as ProjectRoute } from "@/routes/project.$projectId";
-import { expandedStacksAtom, viewModeAtom } from "@/atoms";
+import { debouncedChangeIdAtom, expandedStacksAtom, viewModeAtom } from "@/atoms";
 
 const NARROW_BREAKPOINT = 768;
 
@@ -46,6 +46,7 @@ import {
 import { useAddRepository } from "@/hooks/useAddRepository";
 import { useAppTitle } from "@/hooks/useAppTitle";
 import { useKeyboardNavigation, useKeyboardShortcut, useKeySequence } from "@/hooks/useKeyboard";
+import { useSelectedRevision } from "@/hooks/useSelectedRevision";
 import type { Repository, Revision } from "@/tauri-commands";
 import { onRenderCallback } from "@/lib/trace";
 
@@ -168,15 +169,31 @@ function AppShellWithProject() {
 		return orderedRevisions.filter((r) => !hiddenChangeIds.has(r.change_id));
 	}, [revisions, orderedRevisions, expandedStacks]);
 
-	const selectedRevision = (() => {
-		if (revisions.length === 0) return null;
-		if (rev) {
-			// Match using revision key to handle divergent revisions (e.g., "tpuq/0")
-			const found = revisions.find((r) => getRevisionKey(r) === rev);
-			if (found) return found;
+	const selectedRevision = useSelectedRevision(revisions, rev);
+
+	// Debounce the changeId passed to DiffPanel to avoid expensive re-renders during rapid navigation
+	// DiffPanel only updates when navigation settles (200ms without movement)
+	const selectedChangeId = selectedRevision?.change_id ?? null;
+	const [debouncedChangeId, setDebouncedChangeId] = useAtom(debouncedChangeIdAtom);
+	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+	useEffect(() => {
+		// Clear any pending debounce
+		if (debounceTimerRef.current) {
+			clearTimeout(debounceTimerRef.current);
 		}
-		return revisions.find((r) => r.is_working_copy) || revisions[0];
-	})();
+
+		// Update after 200ms of no changes
+		debounceTimerRef.current = setTimeout(() => {
+			setDebouncedChangeId(selectedChangeId);
+		}, 200);
+
+		return () => {
+			if (debounceTimerRef.current) {
+				clearTimeout(debounceTimerRef.current);
+			}
+		};
+	}, [selectedChangeId, setDebouncedChangeId]);
 
 	function handleSelectRepository(repository: Repository) {
 		navigate({ to: "/project/$projectId", params: { projectId: repository.id } });
@@ -455,7 +472,7 @@ function AppShellWithProject() {
 											ref={diffPanelRef}
 											repoPath={activeProject?.path ?? null}
 											revisions={orderedRevisions}
-											selectedChangeId={selectedRevision?.change_id ?? null}
+											selectedChangeId={debouncedChangeId}
 											revisionsPanelRef={revisionsPanelRef}
 										/>
 									</Profiler>

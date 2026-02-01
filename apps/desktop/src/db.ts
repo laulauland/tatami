@@ -138,7 +138,8 @@ async function setupRepoWatcher(repoPath: string): Promise<void> {
 			await queryClient.invalidateQueries({ queryKey: ["revision-changes", repoPath] });
 			await queryClient.invalidateQueries({ queryKey: ["revision-diff", repoPath] });
 			await queryClient.invalidateQueries({ queryKey: ["commit-recency", repoPath] });
-			await queryClient.invalidateQueries({ queryKey: ["lineage"] });
+			// DISABLED: Lineage calculations commented out
+			// await queryClient.invalidateQueries({ queryKey: ["lineage"] });
 		}
 	});
 
@@ -605,6 +606,8 @@ export interface DiffRecord {
 	repoPath: string;
 	changeId: string;
 	content: string;
+	prerenderedUnified?: string;
+	prerenderedSplit?: string;
 }
 
 function getDiffRecordKey(d: DiffRecord): string {
@@ -660,6 +663,7 @@ export type ChangesCollection = typeof changesCollection;
 
 // ============================================================================
 // Unified Lineage Collection (single collection for all revision lineage data)
+// DISABLED: Lineage calculations commented out
 // ============================================================================
 
 /**
@@ -672,20 +676,21 @@ export interface LineageRecord {
 	relatedIds: string[];
 }
 
-function getLineageRecordKey(l: LineageRecord): string {
-	return `${l.repoPath}:${l.changeId}`;
-}
-
-const lineageQueryKey = ["lineage"] as const;
-
-export const lineageCollection = createCollection({
-	...queryCollectionOptions({
-		queryClient,
-		queryKey: lineageQueryKey,
-		queryFn: async () => [] as LineageRecord[],
-		getKey: getLineageRecordKey,
-	}),
-	startSync: true,
-});
-
-export type LineageCollection = typeof lineageCollection;
+// DISABLED: Lineage calculations commented out
+// function getLineageRecordKey(l: LineageRecord): string {
+// 	return `${l.repoPath}:${l.changeId}`;
+// }
+//
+// const lineageQueryKey = ["lineage"] as const;
+//
+// export const lineageCollection = createCollection({
+// 	...queryCollectionOptions({
+// 		queryClient,
+// 		queryKey: lineageQueryKey,
+// 		queryFn: async () => [] as LineageRecord[],
+// 		getKey: getLineageRecordKey,
+// 	}),
+// 	startSync: true,
+// });
+//
+// export type LineageCollection = typeof lineageCollection;

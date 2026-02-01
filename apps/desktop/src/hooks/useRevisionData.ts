@@ -5,23 +5,25 @@
  * enabling efficient batched fetching with instant reads from local state.
  */
 
-import { useLiveQuery } from "@tanstack/react-db";
+import { and, eq, useLiveQuery, useLiveSuspenseQuery } from "@tanstack/react-db";
 import { useMemo, useRef } from "react";
 import {
 	type ChangeRecord,
 	changesCollection,
 	type DiffRecord,
 	diffsCollection,
-	type LineageRecord,
-	lineageCollection,
+	// DISABLED: Lineage calculations commented out
+	// type LineageRecord,
+	// lineageCollection,
 } from "@/db";
 import { type BatchLoader, createBatchLoader } from "@/lib/batch-loader";
 import { traceLog } from "@/lib/trace";
 import {
 	getChangesBatchEffect,
 	getDiffsBatchEffect,
-	getLineageBatchEffect,
-	type LineageResult,
+	// DISABLED: Lineage calculations commented out
+	// getLineageBatchEffect,
+	// type LineageResult,
 	type RevisionChanges,
 	type RevisionDiff,
 } from "@/tauri-commands";
@@ -120,46 +122,47 @@ function createChangesLoader(repoPath: string): BatchLoader {
 	});
 }
 
-/**
- * Creates a BatchLoader for revision lineage.
- * The loader batches IPC calls and syncs results to the unified lineageCollection.
- */
-function createLineageLoader(repoPath: string): BatchLoader {
-	return createBatchLoader<LineageResult>({
-		debounceMs: 50,
-		maxBatchSize: 20,
-		fetchBatch: (ids) => getLineageBatchEffect(repoPath, ids),
-		syncToCollection: (results) => {
-			// Wait for collection to be ready before writing
-			if (lineageCollection.status !== "ready") return;
-			const records: LineageRecord[] = results.map((r) => ({
-				repoPath,
-				changeId: r.change_id,
-				relatedIds: r.related_ids,
-			}));
-			lineageCollection.utils.writeUpsert(records);
-
-			// LRU eviction: keep only last 50 lineage records per repo
-			const MAX_LINEAGE = 50;
-			const allRecords = Array.from(lineageCollection.state.values()).filter(
-				(r) => r.repoPath === repoPath,
-			);
-			if (allRecords.length > MAX_LINEAGE) {
-				// Remove oldest entries (first ones in the Map iteration order)
-				const toRemove = allRecords.slice(0, allRecords.length - MAX_LINEAGE);
-				for (const record of toRemove) {
-					const key = `${record.repoPath}:${record.changeId}`;
-					lineageCollection.state.delete(key);
-				}
-			}
-		},
-		isLoaded: (id) => {
-			if (lineageCollection.status !== "ready") return false;
-			const key = `${repoPath}:${id}`;
-			return lineageCollection.state.has(key);
-		},
-	});
-}
+// DISABLED: Lineage calculations commented out
+// /**
+//  * Creates a BatchLoader for revision lineage.
+//  * The loader batches IPC calls and syncs results to the unified lineageCollection.
+//  */
+// function createLineageLoader(repoPath: string): BatchLoader {
+// 	return createBatchLoader<LineageResult>({
+// 		debounceMs: 50,
+// 		maxBatchSize: 20,
+// 		fetchBatch: (ids) => getLineageBatchEffect(repoPath, ids),
+// 		syncToCollection: (results) => {
+// 			// Wait for collection to be ready before writing
+// 			if (lineageCollection.status !== "ready") return;
+// 			const records: LineageRecord[] = results.map((r) => ({
+// 				repoPath,
+// 				changeId: r.change_id,
+// 				relatedIds: r.related_ids,
+// 			}));
+// 			lineageCollection.utils.writeUpsert(records);
+//
+// 			// LRU eviction: keep only last 50 lineage records per repo
+// 			const MAX_LINEAGE = 50;
+// 			const allRecords = Array.from(lineageCollection.state.values()).filter(
+// 				(r) => r.repoPath === repoPath,
+// 			);
+// 			if (allRecords.length > MAX_LINEAGE) {
+// 				// Remove oldest entries (first ones in the Map iteration order)
+// 				const toRemove = allRecords.slice(0, allRecords.length - MAX_LINEAGE);
+// 				for (const record of toRemove) {
+// 					const key = `${record.repoPath}:${record.changeId}`;
+// 					lineageCollection.state.delete(key);
+// 				}
+// 			}
+// 		},
+// 		isLoaded: (id) => {
+// 			if (lineageCollection.status !== "ready") return false;
+// 			const key = `${repoPath}:${id}`;
+// 			return lineageCollection.state.has(key);
+// 		},
+// 	});
+// }
 
 // ============================================================================
 // Loader Instance Cache
@@ -168,7 +171,8 @@ function createLineageLoader(repoPath: string): BatchLoader {
 // Cache loaders per repoPath to avoid creating multiple instances
 const diffLoaders = new Map<string, BatchLoader>();
 const changesLoaders = new Map<string, BatchLoader>();
-const lineageLoaders = new Map<string, BatchLoader>();
+// DISABLED: Lineage calculations commented out
+// const lineageLoaders = new Map<string, BatchLoader>();
 
 /**
  * Clean up loaders for repos we're no longer viewing.
@@ -185,11 +189,12 @@ function cleanupLoadersExcept(currentRepoPath: string): void {
 			changesLoaders.delete(path);
 		}
 	}
-	for (const [path] of lineageLoaders) {
-		if (path !== currentRepoPath) {
-			lineageLoaders.delete(path);
-		}
-	}
+	// DISABLED: Lineage calculations commented out
+	// for (const [path] of lineageLoaders) {
+	// 	if (path !== currentRepoPath) {
+	// 		lineageLoaders.delete(path);
+	// 	}
+	// }
 }
 
 function getDiffLoader(repoPath: string): BatchLoader {
@@ -210,14 +215,15 @@ function getChangesLoader(repoPath: string): BatchLoader {
 	return loader;
 }
 
-function getLineageLoader(repoPath: string): BatchLoader {
-	let loader = lineageLoaders.get(repoPath);
-	if (!loader) {
-		loader = createLineageLoader(repoPath);
-		lineageLoaders.set(repoPath, loader);
-	}
-	return loader;
-}
+// DISABLED: Lineage calculations commented out
+// function getLineageLoader(repoPath: string): BatchLoader {
+// 	let loader = lineageLoaders.get(repoPath);
+// 	if (!loader) {
+// 		loader = createLineageLoader(repoPath);
+// 		lineageLoaders.set(repoPath, loader);
+// 	}
+// 	return loader;
+// }
 
 // ============================================================================
 // React Hooks
@@ -228,51 +234,131 @@ function getLineageLoader(repoPath: string): BatchLoader {
  * Call prefetchDiffs to trigger loading.
  */
 export function useDiff(repoPath: string, changeId: string | null): DiffRecord | undefined {
-	const { data: allDiffs = [] } = useLiveQuery(diffsCollection);
+	// Use selective query - only re-renders when THIS specific diff changes
+	const { data } = useLiveQuery(
+		(q) =>
+			changeId
+				? q
+						.from({ diffs: diffsCollection })
+						.where(({ diffs }) => and(eq(diffs.repoPath, repoPath), eq(diffs.changeId, changeId)))
+						.findOne()
+				: null,
+		[repoPath, changeId],
+	);
 
-	return useMemo(() => {
-		if (!changeId) return undefined;
-		const key = `${repoPath}:${changeId}`;
-		return allDiffs.find((d) => `${d.repoPath}:${d.changeId}` === key);
-	}, [allDiffs, repoPath, changeId]);
+	return data;
 }
 
 /**
  * Read changes (file list) for a revision from local DB.
- * Returns empty array if not yet loaded. Call prefetchChanges to trigger loading.
+ * Returns { data, isLoaded } to distinguish between "loading" and "genuinely empty".
+ * Call prefetchChanges to trigger loading.
  */
-export function useChanges(repoPath: string, changeId: string | null): ChangeRecord[] {
-	const { data: allChanges = [] } = useLiveQuery(changesCollection);
+export function useChanges(
+	repoPath: string,
+	changeId: string | null,
+): { data: ChangeRecord[]; isLoaded: boolean } {
+	// Use selective query - only re-renders when changes for THIS revision update
+	const { data = [], isReady } = useLiveQuery(
+		(q) =>
+			changeId
+				? q
+						.from({ changes: changesCollection })
+						.where(({ changes }) =>
+							and(eq(changes.repoPath, repoPath), eq(changes.changeId, changeId)),
+						)
+				: null,
+		[repoPath, changeId],
+	);
 
-	return useMemo(() => {
-		if (!changeId) return [];
-		return allChanges.filter((c) => c.repoPath === repoPath && c.changeId === changeId);
-	}, [allChanges, repoPath, changeId]);
+	// isLoaded is true when:
+	// 1. No changeId requested (nothing to load)
+	// 2. Query is ready AND we have data (data was fetched)
+	// 3. Query is ready AND data is empty but was explicitly fetched
+	// We track "explicitly fetched" by checking if the changeId exists in the collection's loaded set
+	// For now, we use isReady as a proxy - if the query ran and returned, the data is loaded
+	const isLoaded = !changeId || isReady;
+
+	return { data, isLoaded };
+}
+
+// ============================================================================
+// Suspense-enabled Hooks
+// ============================================================================
+
+/**
+ * Read a single diff from local DB with Suspense support.
+ * Throws a promise when data isn't ready, caught by Suspense boundary.
+ * Data is guaranteed to be defined when returned.
+ *
+ * @throws Promise when data is loading (caught by Suspense boundary)
+ */
+export function useDiffSuspense(repoPath: string, changeId: string): DiffRecord | undefined {
+	const { data } = useLiveSuspenseQuery(
+		(q) =>
+			q
+				.from({ diffs: diffsCollection })
+				.where(({ diffs }) => and(eq(diffs.repoPath, repoPath), eq(diffs.changeId, changeId)))
+				.findOne(),
+		[repoPath, changeId],
+	);
+
+	traceLog("useDiffSuspense", { changeId, hasData: !!data });
+
+	return data;
+}
+
+/**
+ * Read changes (file list) for a revision from local DB with Suspense support.
+ * Throws a promise when data isn't ready, caught by Suspense boundary.
+ * Data is guaranteed to be defined when returned.
+ *
+ * @throws Promise when data is loading (caught by Suspense boundary)
+ */
+export function useChangesSuspense(repoPath: string, changeId: string): ChangeRecord[] {
+	const { data } = useLiveSuspenseQuery(
+		(q) =>
+			q
+				.from({ changes: changesCollection })
+				.where(({ changes }) =>
+					and(eq(changes.repoPath, repoPath), eq(changes.changeId, changeId)),
+				),
+		[repoPath, changeId],
+	);
+
+	traceLog("useChangesSuspense", { changeId, fileCount: data.length });
+
+	return data;
 }
 
 /**
  * Read lineage (related revision IDs) for a revision from local DB.
  * Returns { lineage, isLoaded } to allow callers to handle loading state.
+ *
+ * DISABLED: Lineage calculations commented out - always returns empty/loaded.
  */
 export function useLineage(
-	repoPath: string,
-	changeId: string | null,
+	_repoPath: string,
+	_changeId: string | null,
 ): { lineage: Set<string>; isLoaded: boolean } {
-	const { data: allLineage = [] } = useLiveQuery(lineageCollection);
+	// DISABLED: Lineage calculations commented out
+	// const { data: allLineage = [] } = useLiveQuery(lineageCollection);
+	//
+	// return useMemo(() => {
+	// 	if (!changeId) {
+	// 		return { lineage: new Set<string>(), isLoaded: true };
+	// 	}
+	//
+	// 	const record = allLineage.find((l) => l.repoPath === repoPath && l.changeId === changeId);
+	//
+	// 	if (record) {
+	// 		return { lineage: new Set(record.relatedIds), isLoaded: true };
+	// 	}
+	//
+	// 	return { lineage: new Set<string>(), isLoaded: false };
+	// }, [allLineage, repoPath, changeId]);
 
-	return useMemo(() => {
-		if (!changeId) {
-			return { lineage: new Set<string>(), isLoaded: true };
-		}
-
-		const record = allLineage.find((l) => l.repoPath === repoPath && l.changeId === changeId);
-
-		if (record) {
-			return { lineage: new Set(record.relatedIds), isLoaded: true };
-		}
-
-		return { lineage: new Set<string>(), isLoaded: false };
-	}, [allLineage, repoPath, changeId]);
+	return { lineage: new Set<string>(), isLoaded: true };
 }
 
 /**
@@ -290,7 +376,8 @@ export function usePrefetch(repoPath: string): {
 	// Use refs to avoid recreating loaders on each render
 	const diffLoaderRef = useRef<BatchLoader | null>(null);
 	const changesLoaderRef = useRef<BatchLoader | null>(null);
-	const lineageLoaderRef = useRef<BatchLoader | null>(null);
+	// DISABLED: Lineage calculations commented out
+	// const lineageLoaderRef = useRef<BatchLoader | null>(null);
 	const currentRepoPathRef = useRef<string>(repoPath);
 
 	// Reset loaders if repoPath changes
@@ -298,7 +385,8 @@ export function usePrefetch(repoPath: string): {
 		currentRepoPathRef.current = repoPath;
 		diffLoaderRef.current = null;
 		changesLoaderRef.current = null;
-		lineageLoaderRef.current = null;
+		// DISABLED: Lineage calculations commented out
+		// lineageLoaderRef.current = null;
 		// Clean up loaders for other repos to prevent memory leaks
 		cleanupLoadersExcept(repoPath);
 	}
@@ -318,12 +406,13 @@ export function usePrefetch(repoPath: string): {
 			return changesLoaderRef.current;
 		}
 
-		function getLineageLoaderInstance(): BatchLoader {
-			if (!lineageLoaderRef.current) {
-				lineageLoaderRef.current = getLineageLoader(repoPath);
-			}
-			return lineageLoaderRef.current;
-		}
+		// DISABLED: Lineage calculations commented out
+		// function getLineageLoaderInstance(): BatchLoader {
+		// 	if (!lineageLoaderRef.current) {
+		// 		lineageLoaderRef.current = getLineageLoader(repoPath);
+		// 	}
+		// 	return lineageLoaderRef.current;
+		// }
 
 		return {
 			prefetchDiffs: (ids: string[]) => {
@@ -334,13 +423,14 @@ export function usePrefetch(repoPath: string): {
 				traceLog("prefetch-changes", { count: ids.length, ids });
 				getChangesLoaderInstance().queueMany(ids);
 			},
-			prefetchLineage: (ids: string[]) => {
-				traceLog("prefetch-lineage", { count: ids.length, ids });
-				getLineageLoaderInstance().queueMany(ids);
+			// DISABLED: Lineage calculations commented out
+			prefetchLineage: (_ids: string[]) => {
+				// traceLog("prefetch-lineage", { count: ids.length, ids });
+				// getLineageLoaderInstance().queueMany(ids);
 			},
 			flushDiffs: () => getDiffLoaderInstance().flushPromise(),
 			flushChanges: () => getChangesLoaderInstance().flushPromise(),
-			flushLineage: () => getLineageLoaderInstance().flushPromise(),
+			flushLineage: () => Promise.resolve(),
 		};
 	}, [repoPath]);
 }

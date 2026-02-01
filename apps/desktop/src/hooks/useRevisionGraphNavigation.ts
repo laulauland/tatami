@@ -4,6 +4,7 @@ import type { RefObject } from "react";
 import { useRef } from "react";
 import { Route } from "@/routes/project.$projectId";
 import { viewModeAtom } from "@/atoms";
+import { traceLog } from "@/lib/trace";
 import type { RevisionStack } from "@/components/revision-graph-utils";
 import { getRevisionKey } from "@/db";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
@@ -127,6 +128,13 @@ export function useRevisionGraphNavigation({
 	const navigateToDisplayRow = (index: number) => {
 		const displayRow = displayRows[index];
 		if (!displayRow) return;
+
+		traceLog("navigateToDisplayRow", {
+			index,
+			type: displayRow.type,
+			changeId: displayRow.type === "revision" ? displayRow.row.revision.change_id : undefined,
+			stackId: displayRow.type === "collapsed-stack" ? displayRow.stack.id : undefined,
+		});
 
 		if (displayRow.type === "revision") {
 			navigate({

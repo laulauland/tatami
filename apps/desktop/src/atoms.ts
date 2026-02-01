@@ -12,6 +12,11 @@ export const viewModeAtom = Atom.make<ViewMode>(1);
 export const expandedStacksAtom = Atom.make(new Set<string>());
 // Tracks which stack is currently hovered (for coordinated edge highlighting)
 export const hoveredStackIdAtom = Atom.make<string | null>(null);
+// Persists revision graph scroll position across view mode changes
+export const revisionGraphScrollTopAtom = Atom.make<number>(0);
+// Debounced changeId for DiffPanel - updates 200ms after navigation settles
+// This prevents expensive DiffPanel re-renders during rapid j/k navigation
+export const debouncedChangeIdAtom = Atom.make<string | null>(null);
 
 // Bookmark drag state - tracks which bookmark is being dragged and from which revision
 export type DraggingBookmark = {

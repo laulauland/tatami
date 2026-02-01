@@ -1,7 +1,7 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useQuery } from "@tanstack/react-query";
 import type React from "react";
-import { useRef, useState, useMemo, useCallback, useEffect } from "react";
+import { useRef, useState, useMemo, useCallback, useDeferredValue } from "react";
 import { searchOpenAtom } from "@/atoms";
 import {
 	CommandDialog,
@@ -67,27 +67,8 @@ function isRevsetExpression(query: string): boolean {
 export function Search({ revisions, repoPath, onJump }: SearchProps) {
 	const [open, setOpenRaw] = useAtom(searchOpenAtom);
 	const [search, setSearch] = useState("");
-	// Debounce search input to prevent lag during typing
-	const [debouncedSearch, setDebouncedSearch] = useState("");
-	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-	useEffect(() => {
-		// Clear any pending debounce
-		if (debounceTimerRef.current) {
-			clearTimeout(debounceTimerRef.current);
-		}
-
-		// Update after 150ms of no changes
-		debounceTimerRef.current = setTimeout(() => {
-			setDebouncedSearch(search);
-		}, 150);
-
-		return () => {
-			if (debounceTimerRef.current) {
-				clearTimeout(debounceTimerRef.current);
-			}
-		};
-	}, [search]);
+	// Defer filtering to allow input to remain responsive during rapid typing
+	const deferredSearch = useDeferredValue(search);
 
 	// Wrap setOpen to reset state when opening
 	const setOpen = useCallback(
@@ -119,7 +100,7 @@ export function Search({ revisions, repoPath, onJump }: SearchProps) {
 	}
 
 	// Determine if current search is a revset expression
-	const isRevset = isRevsetExpression(debouncedSearch);
+	const isRevset = isRevsetExpression(deferredSearch);
 
 	// Use TanStack Query for revset resolution (async data fetching)
 	const {
@@ -127,13 +108,13 @@ export function Search({ revisions, repoPath, onJump }: SearchProps) {
 		isLoading: revsetLoading,
 		error: revsetError,
 	} = useQuery({
-		queryKey: ["revset", repoPath, debouncedSearch],
+		queryKey: ["revset", repoPath, deferredSearch],
 		queryFn: async () => {
 			if (!repoPath) throw new Error("No repo path");
-			const result = await resolveRevset(repoPath, debouncedSearch.trim());
+			const result = await resolveRevset(repoPath, deferredSearch.trim());
 			return result;
 		},
-		enabled: !!repoPath && isRevset && debouncedSearch.trim().length > 0,
+		enabled: !!repoPath && isRevset && deferredSearch.trim().length > 0,
 		staleTime: 30 * 1000, // 30 seconds
 		retry: false,
 	});
@@ -144,90 +125,76 @@ export function Search({ revisions, repoPath, onJump }: SearchProps) {
 			changeIds: revsetData?.change_ids ?? [],
 			error: revsetData?.error ?? (revsetError ? String(revsetError) : null),
 			loading: revsetLoading,
-			label: isRevset ? debouncedSearch : null,
+			label: isRevset ? deferredSearch : null,
 		}),
-		[revsetData, revsetError, revsetLoading, isRevset, debouncedSearch],
-	);
-
-	// Build lookup maps
-	const revisionByChangeId = useMemo(
-		() => new Map(revisions.map((r) => [r.change_id, r])),
-		[revisions],
+		[revsetData, revsetError, revsetLoading, isRevset, deferredSearch],
 	);
 
 	// Determine if we're in revset mode
 	const isRevsetMode =
-		isRevsetExpression(debouncedSearch) &&
+		isRevsetExpression(deferredSearch) &&
 		(revsetResult.loading || revsetResult.changeIds.length > 0 || revsetResult.error);
 	const revsetChangeIdSet = useMemo(
 		() => new Set(revsetResult.changeIds),
 		[revsetResult.changeIds],
 	);
 
-	// Determine what matched for each revision
-	function getMatchType(
-		revision: Revision,
-	): "revset" | "changeId" | "bookmark" | "description" | null {
-		if (isRevsetMode && revsetChangeIdSet.has(revision.change_id)) {
-			return "revset";
+	// Filter and sort revisions ourselves using deferred search (allows input to stay responsive)
+	// We disable cmdk's built-in filtering entirely to avoid sync filtering on every keystroke
+	const { filteredRevisions, getMatchType, getMatchingBookmark } = useMemo(() => {
+		// Helper to determine match type for a revision
+		function matchType(
+			revision: Revision,
+		): "revset" | "changeId" | "bookmark" | "description" | null {
+			if (isRevsetMode && revsetChangeIdSet.has(revision.change_id)) {
+				return "revset";
+			}
+			if (!deferredSearch || isRevsetMode) return null;
+			const lowerSearch = deferredSearch.toLowerCase();
+
+			if (revision.change_id.toLowerCase().startsWith(lowerSearch)) return "changeId";
+			if (revision.bookmarks.some((b) => b.name.toLowerCase().includes(lowerSearch)))
+				return "bookmark";
+			if (revision.description.toLowerCase().includes(lowerSearch)) return "description";
+			return null;
 		}
-		if (!debouncedSearch || isRevsetMode) return null;
-		const lowerSearch = debouncedSearch.toLowerCase();
 
-		if (revision.change_id.toLowerCase().startsWith(lowerSearch)) return "changeId";
-		if (revision.bookmarks.some((b) => b.name.toLowerCase().includes(lowerSearch)))
-			return "bookmark";
-		if (revision.description.toLowerCase().includes(lowerSearch)) return "description";
-		return null;
-	}
+		function matchingBookmark(revision: Revision): string | null {
+			if (!deferredSearch || isRevsetMode) return null;
+			const lowerSearch = deferredSearch.toLowerCase();
+			return (
+				revision.bookmarks.find((b) => b.name.toLowerCase().includes(lowerSearch))?.name ?? null
+			);
+		}
 
-	function getMatchingBookmark(revision: Revision): string | null {
-		if (!debouncedSearch || isRevsetMode) return null;
-		const lowerSearch = debouncedSearch.toLowerCase();
-		return revision.bookmarks.find((b) => b.name.toLowerCase().includes(lowerSearch))?.name ?? null;
-	}
-
-	// Custom filter function that ranks by match type
-	// Note: cmdk passes the current search query, we must use it for correct sorting
-	function customFilter(value: string, searchQuery: string): number {
-		if (!searchQuery) return 1; // Show all when no search
-
-		const revision = revisionByChangeId.get(value);
-		if (!revision) return 0;
-
-		// Revset match - highest priority (use debouncedSearch for revset mode check)
+		// Filter
+		let filtered: Revision[];
 		if (isRevsetMode) {
-			return revsetChangeIdSet.has(value) ? 1.0 : 0;
+			filtered = revisions.filter((r) => revsetChangeIdSet.has(r.change_id));
+		} else if (!deferredSearch) {
+			filtered = revisions;
+		} else {
+			filtered = revisions.filter((r) => matchType(r) !== null);
 		}
 
-		const lowerSearch = searchQuery.toLowerCase();
-
-		// Change ID match - highest priority
-		if (revision.change_id.toLowerCase().startsWith(lowerSearch)) {
-			return 1.0;
+		// Sort by match priority (changeId > bookmark > description)
+		if (deferredSearch && !isRevsetMode) {
+			const priority: Record<string, number> = { changeId: 0, bookmark: 1, description: 2 };
+			filtered.sort((a, b) => {
+				const aType = matchType(a);
+				const bType = matchType(b);
+				const aPriority = aType ? priority[aType] ?? 3 : 3;
+				const bPriority = bType ? priority[bType] ?? 3 : 3;
+				return aPriority - bPriority;
+			});
 		}
 
-		// Bookmark match - medium priority
-		if (revision.bookmarks.some((b) => b.name.toLowerCase().includes(lowerSearch))) {
-			return 0.7;
-		}
-
-		// Description match - lower priority
-		if (revision.description.toLowerCase().includes(lowerSearch)) {
-			return 0.4;
-		}
-
-		return 0;
-	}
-
-	// When in revset mode, we need to disable cmdk's text-based filter
-	// because revset expressions like "@" don't match any text
-	const shouldFilter = !isRevsetMode;
-
-	// Filter revisions when in revset mode (manually, since cmdk filter is disabled)
-	const filteredRevisions = isRevsetMode
-		? revisions.filter((r) => revsetChangeIdSet.has(r.change_id))
-		: revisions;
+		return {
+			filteredRevisions: filtered,
+			getMatchType: matchType,
+			getMatchingBookmark: matchingBookmark,
+		};
+	}, [revisions, deferredSearch, isRevsetMode, revsetChangeIdSet]);
 
 	return (
 		<CommandDialog
@@ -236,8 +203,7 @@ export function Search({ revisions, repoPath, onJump }: SearchProps) {
 			title="Jump to revision"
 			description="Search by change ID, bookmark, message, or use jj revset syntax"
 			className="max-w-3xl rounded-xl"
-			filter={shouldFilter ? customFilter : undefined}
-			shouldFilter={shouldFilter}
+			shouldFilter={false}
 		>
 			<CommandInput
 				placeholder="Search or use revset (@, @-, trunk(), mine())..."
@@ -299,7 +265,7 @@ export function Search({ revisions, repoPath, onJump }: SearchProps) {
 								{revision.bookmarks.length > 0 && (
 									<span className="text-xs text-primary font-medium shrink-0">
 										{matchType === "bookmark" && matchingBookmark ? (
-											<HighlightMatch text={matchingBookmark} query={debouncedSearch} />
+											<HighlightMatch text={matchingBookmark} query={deferredSearch} />
 										) : (
 											revision.bookmarks[0].name
 										)}
@@ -312,7 +278,7 @@ export function Search({ revisions, repoPath, onJump }: SearchProps) {
 								)}
 								<span className="text-xs text-muted-foreground truncate flex-1">
 									{matchType === "description" ? (
-										<HighlightMatch text={firstLine} query={debouncedSearch} />
+										<HighlightMatch text={firstLine} query={deferredSearch} />
 									) : (
 										firstLine
 									)}

@@ -1,0 +1,26 @@
+# Rule: Discourage useEffect for data fetching
+# Detects fetch() or invoke() calls inside useEffect callbacks
+
+id: no-useeffect-data-fetching
+language: tsx
+severity: warning
+message: "useEffect with fetch/invoke is discouraged for data fetching. Use TanStack DB (useLiveQuery) or TanStack Query instead."
+note: |
+  Anti-patterns detected:
+  - useEffect(() => { fetch(...) }, [])
+  - useEffect(() => { invoke(...) }, [])  
+  - useEffect(() => { (async () => { await fetch(...) })() }, [])
+  
+  Preferred alternatives:
+  - useLiveQuery() for reactive data from TanStack DB collections
+  - useQuery() for server state that doesn't need local caching
+  - Batch loader pattern in db.ts for IPC calls
+
+rule:
+  pattern: useEffect($CALLBACK, $$$DEPS)
+  has:
+    stopBy: end
+    kind: call_expression
+    has:
+      kind: identifier
+      regex: "^(fetch|invoke)$"

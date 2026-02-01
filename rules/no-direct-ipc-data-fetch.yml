@@ -1,0 +1,42 @@
+# Rule: Data fetching IPC commands should only be called from db.ts
+# All data fetching should go through the batch loader + unified collections pattern.
+# Components should use useLiveQuery hooks, never invoke IPC directly.
+
+id: no-direct-ipc-data-fetch
+language: tsx
+severity: error
+message: "Direct import of data fetching function from tauri-commands is restricted. Use hooks from '@/db' (useDiff, useChanges, usePrefetch) instead."
+note: |
+  Data Flow Architecture:
+  
+  Components → useLiveQuery (instant) → TanStack DB Collections
+                                              ↑
+                                       Batch Loader (debounced)
+                                              ↑
+                                       Tauri IPC (batched)
+  
+  Restricted functions and their replacements:
+  - getRevisionDiff → useDiff() hook
+  - getRevisionChanges → useChanges() hook
+  - getDiffsBatch → internal to batch loader (db.ts only)
+  - getChangesBatch → internal to batch loader (db.ts only)
+  
+  For prefetching, use usePrefetch() hook which queues IDs for batch loading.
+
+files:
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+  - "!src/db.ts"
+  - "!src/tauri-commands.ts"
+  - "!src/lib/batch-loader.ts"
+
+rule:
+  all:
+    - kind: import_specifier
+    - regex: "^(getRevisionDiff|getRevisionChanges|getDiffsBatch|getChangesBatch)$"
+    - inside:
+        stopBy: end
+        kind: import_statement
+        has:
+          kind: string
+          regex: "tauri-commands"

@@ -1,0 +1,45 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-hardcoded-colors
+language: tsx
+severity: error
+message: "Use semantic color tokens instead of hardcoded Tailwind colors"
+
+rule:
+  kind: string_fragment
+  regex: "(text|bg|border)-(white|black|gray|neutral|zinc|slate|stone|red|green|blue|yellow|orange|amber|indigo|violet|purple|pink|emerald|teal|cyan|sky|lime|rose|fuchsia)(-\\d+)?(/\\d+)?"
+
+note: |
+  Use semantic color tokens from shadcn/ui theme instead of hardcoded colors.
+  This ensures consistency and proper dark/light mode support.
+
+  Semantic tokens (from Tailwind config / CSS variables):
+  - foreground, muted-foreground - text colors
+  - background, muted, card - background colors  
+  - primary, secondary, accent - brand colors
+  - destructive - error/danger
+  - border, input, ring - UI chrome
+
+  Opacity modifiers on semantic tokens ARE allowed:
+  - text-foreground/80, bg-primary/20, bg-accent/40, etc.
+
+  Example:
+  ```tsx
+  // ❌ Bad
+  <div className="text-white bg-gray-800 border-gray-600">
+  <div className="text-red-500">Error</div>
+
+  // ✅ Good
+  <div className="text-foreground bg-background border-border">
+  <div className="text-destructive">Error</div>
+
+  // ✅ Good - opacity on semantic tokens
+  <div className="bg-accent/40 text-muted-foreground/80">
+  ```
+
+files:
+  - "src/**/*.tsx"
+
+ignores:
+  - "**/node_modules/**"
+  - "**/styles/**"

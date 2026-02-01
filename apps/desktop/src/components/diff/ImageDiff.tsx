@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { ChangedFileStatus } from "@/schemas";
 import { getFileContentBase64 } from "@/tauri-commands";
 import { getMimeType } from "@/utils/file-types";
@@ -10,41 +10,56 @@ interface ImageDiffProps {
 	status: ChangedFileStatus;
 }
 
+async function loadImageSrc(
+	repoPath: string,
+	changeId: string,
+	filePath: string,
+	version: "current" | "parent",
+): Promise<string> {
+	const mimeType = getMimeType(filePath);
+	const result = await getFileContentBase64(repoPath, changeId, filePath, version);
+	return `data:${mimeType};base64,${result.base64}`;
+}
+
 export function ImageDiff({ repoPath, changeId, filePath, status }: ImageDiffProps) {
-	const [currentSrc, setCurrentSrc] = useState<string | null>(null);
-	const [parentSrc, setParentSrc] = useState<string | null>(null);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	// Fetch current image (skip if deleted)
+	const {
+		data: currentSrc,
+		isLoading: currentLoading,
+		error: currentError,
+	} = useQuery({
+		queryKey: ["image", repoPath, changeId, filePath, "current"],
+		queryFn: () => loadImageSrc(repoPath, changeId, filePath, "current"),
+		enabled: status !== "deleted",
+		staleTime: 5 * 60 * 1000, // 5 minutes
+	});
 
-	useEffect(() => {
-		async function loadImages() {
-			setLoading(true);
-			setError(null);
-			const mimeType = getMimeType(filePath);
+	// Fetch parent image (skip if added)
+	const {
+		data: parentSrc,
+		isLoading: parentLoading,
+		error: parentError,
+	} = useQuery({
+		queryKey: ["image", repoPath, changeId, filePath, "parent"],
+		queryFn: () => loadImageSrc(repoPath, changeId, filePath, "parent"),
+		enabled: status !== "added",
+		staleTime: 5 * 60 * 1000, // 5 minutes
+	});
 
-			try {
-				if (status !== "deleted") {
-					const result = await getFileContentBase64(repoPath, changeId, filePath, "current");
-					setCurrentSrc(`data:${mimeType};base64,${result.base64}`);
-				}
-				if (status !== "added") {
-					const result = await getFileContentBase64(repoPath, changeId, filePath, "parent");
-					setParentSrc(`data:${mimeType};base64,${result.base64}`);
-				}
-			} catch (e) {
-				setError(e instanceof Error ? e.message : "Failed to load image");
-			}
-			setLoading(false);
-		}
-		loadImages();
-	}, [repoPath, changeId, filePath, status]);
+	const loading =
+		(status !== "deleted" && currentLoading) || (status !== "added" && parentLoading);
+	const error = currentError || parentError;
 
 	if (loading) {
 		return <div className="p-4 text-muted-foreground">Loading image...</div>;
 	}
 
 	if (error) {
-		return <div className="p-4 text-destructive">Error: {error}</div>;
+		return (
+			<div className="p-4 text-destructive">
+				Error: {error instanceof Error ? error.message : "Failed to load image"}
+			</div>
+		);
 	}
 
 	if (status === "added" && currentSrc) {

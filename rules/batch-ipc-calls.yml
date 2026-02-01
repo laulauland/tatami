@@ -1,0 +1,37 @@
+# Rule: IPC calls for data should be batched, not individual
+# Each IPC call costs 50-200ms. Batch multiple IDs into single calls.
+
+id: batch-ipc-calls
+language: tsx  
+severity: error
+message: "IPC data fetching in a loop is inefficient. Use batch APIs (getDiffsBatch, getChangesBatch) instead."
+note: |
+  WRONG (N IPC calls):
+    for (const id of changeIds) {
+      await getRevisionDiff(repoPath, id);  // 200ms × N = slow!
+    }
+  
+  RIGHT (1 IPC call):
+    const diffs = await getDiffsBatch(repoPath, changeIds);  // 200ms once
+  
+  Even better - use the batch loader which handles debouncing:
+    const { prefetchDiffs } = usePrefetch(repoPath);
+    prefetchDiffs(changeIds);  // Queued, debounced, batched automatically
+
+files:
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+
+rule:
+  all:
+    - any:
+        - pattern: getRevisionDiff($$$)
+        - pattern: getRevisionChanges($$$)
+    - inside:
+        stopBy: end
+        any:
+          - kind: for_statement
+          - kind: for_in_statement
+          - pattern: for ($ID of $ITER) { $$$BODY }
+          - pattern: $ARR.forEach($$$)
+          - pattern: $ARR.map($$$)

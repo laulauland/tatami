@@ -307,22 +307,41 @@ export function FileList({
 		return getFilesInTreeOrder(tree);
 	}, [tree]);
 
-	// Auto-expand all directories when switching to tree view or when filter changes
-	useEffect(() => {
-		if (viewMode === "tree") {
-			const allDirs = new Set<string>();
-			const collectDirs = (node: TreeNode) => {
-				if (node.isDirectory && node.path) {
-					allDirs.add(node.path);
-				}
-				for (const child of node.children.values()) {
-					collectDirs(child);
-				}
-			};
-			collectDirs(tree);
-			setExpandedDirs(allDirs);
+	// Compute all directory paths in tree (for auto-expand)
+	const allDirsInTree = useMemo(() => {
+		const allDirs = new Set<string>();
+		const collectDirs = (node: TreeNode) => {
+			if (node.isDirectory && node.path) {
+				allDirs.add(node.path);
+			}
+			for (const child of node.children.values()) {
+				collectDirs(child);
+			}
+		};
+		collectDirs(tree);
+		return allDirs;
+	}, [tree]);
+
+	// Track tree identity for auto-expand reset
+	const [lastTreeForAutoExpand, setLastTreeForAutoExpand] = useState<TreeNode | null>(null);
+
+	// Derive effective expanded dirs - auto-expand all when tree changes (in tree view)
+	const effectiveExpandedDirs = useMemo(() => {
+		if (viewMode !== "tree") return expandedDirs;
+		// If tree changed, expand all directories
+		if (tree !== lastTreeForAutoExpand) {
+			return allDirsInTree;
 		}
-	}, [viewMode, tree]);
+		return expandedDirs;
+	}, [viewMode, tree, lastTreeForAutoExpand, expandedDirs, allDirsInTree]);
+
+	// Sync expanded dirs state when tree changes (schedule to avoid setState during render)
+	if (viewMode === "tree" && tree !== lastTreeForAutoExpand) {
+		queueMicrotask(() => {
+			setExpandedDirs(allDirsInTree);
+			setLastTreeForAutoExpand(tree);
+		});
+	}
 
 	const toggleDir = useCallback((path: string) => {
 		setExpandedDirs((prev) => {
@@ -656,7 +675,7 @@ export function FileList({
 									selectedFiles={selectedFiles}
 									onSelectFile={handleSelectFile}
 									onSelectFolder={handleSelectFolder}
-									expandedDirs={expandedDirs}
+									expandedDirs={effectiveExpandedDirs}
 									toggleDir={toggleDir}
 									itemRefs={itemRefs}
 									hasFocus={hasFocus}

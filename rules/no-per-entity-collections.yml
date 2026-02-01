@@ -1,0 +1,42 @@
+# Rule: Do not create per-entity TanStack DB collections
+# All data should live in unified collections (one per data type, not one per entity).
+# Per-entity collections cause GC issues and prevent effective prefetching.
+
+id: no-per-entity-collections
+language: tsx
+severity: error
+message: "Creating per-entity collections is forbidden. Use unified collections (diffsCollection, changesCollection) instead."
+note: |
+  WRONG (per-entity collections - causes GC issues):
+    const collection = createCollection({
+      queryKey: ["revision-diff", repoPath, changeId],  // Per-changeId!
+      ...
+    });
+  
+  RIGHT (unified collection with local filtering):
+    // One collection for ALL diffs
+    const diffsCollection = createCollection({
+      queryKey: ["diffs", repoPath],
+      getKey: (d) => d.changeId,
+      ...
+    });
+    
+    // Query locally
+    useLiveQuery(diffsCollection, q => q.where('changeId', '==', selectedId));
+  
+  Why: Per-entity collections get garbage collected before use.
+  Unified collections persist and allow instant local reads.
+
+files:
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+  - "!src/db.ts"
+
+rule:
+  all:
+    - pattern: createCollection($$$ARGS)
+    - inside:
+        stopBy: end
+        kind: function_declaration
+        any:
+          - regex: "create.*Collection"

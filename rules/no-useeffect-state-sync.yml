@@ -1,0 +1,44 @@
+# Rule: Discourage useEffect for state synchronization
+# State derived from other state should use derived atoms, selectors, or reducers
+# instead of useEffect + setState patterns
+
+id: no-useeffect-state-sync
+language: tsx
+severity: warning
+message: "useEffect that calls setState is often an anti-pattern. Consider derived state, useMemo, TanStack Query, or event callbacks instead."
+note: |
+  Common anti-patterns this catches:
+  
+  1. Syncing derived state:
+     useEffect(() => { setDerived(compute(source)) }, [source])
+     → Use useMemo or derived atoms
+  
+  2. Data fetching:
+     useEffect(() => { fetch().then(setData) }, [])
+     → Use TanStack Query or TanStack DB
+  
+  3. Resetting state on prop change:
+     useEffect(() => { setState(initial) }, [id])
+     → Use key prop: <Component key={id} />
+  
+  Legitimate useEffect + setState (suppress with biome-ignore):
+  - DOM event subscriptions (resize, keydown, etc.)
+  - External library callbacks
+  - Imperative animations
+
+rule:
+  kind: call_expression
+  all:
+    - has:
+        kind: identifier
+        regex: "^useEffect$"
+    - has:
+        kind: arguments
+        has:
+          kind: arrow_function
+          has:
+            stopBy: end
+            kind: call_expression
+            has:
+              kind: identifier
+              regex: "^set[A-Z]"

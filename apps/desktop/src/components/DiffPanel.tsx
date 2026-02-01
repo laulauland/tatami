@@ -7,7 +7,6 @@ import {
 	forwardRef,
 	useCallback,
 	useDeferredValue,
-	useEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -156,8 +155,31 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 	const scrollContainerRef = useRef<HTMLDivElement>(null);
 	const [globalDiffStyle] = useAtom(diffStyleAtom);
 	const [diffViewState, setDiffViewState] = useAtom(diffViewStateAtom);
-	const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
 	const [hasFocus, setHasFocus] = useState(false);
+
+	// Track selected files with the changeId they belong to
+	// When changeId changes, we reset selection during render (no useEffect needed)
+	const [selectedFilesState, setSelectedFilesState] = useState<{
+		forChangeId: string | null;
+		files: Set<string>;
+	}>({ forChangeId: null, files: new Set() });
+
+	// Derive effective selected files - reset if changeId changed
+	const selectedFiles =
+		selectedFilesState.forChangeId === deferredChangeId
+			? selectedFilesState.files
+			: new Set<string>();
+
+	// Wrapper to update selected files with changeId tracking
+	const setSelectedFiles = useCallback(
+		(files: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+			setSelectedFilesState((prev) => {
+				const newFiles = typeof files === "function" ? files(prev.files) : files;
+				return { forChangeId: deferredChangeId, files: newFiles };
+			});
+		},
+		[deferredChangeId],
+	);
 
 	// Handler for blur events - only unfocus if focus moves outside container
 	const handleBlur = (e: FocusEvent<HTMLDivElement>) => {
@@ -175,35 +197,6 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 			ref.current = el;
 		}
 	};
-
-	// Get first selected file for style override display
-	const firstSelectedFile = selectedFiles.size > 0 ? [...selectedFiles][0] : null;
-
-	// Get effective diff style for first selected file
-	const effectiveDiffStyle = firstSelectedFile
-		? (diffViewState.styleOverrides.get(firstSelectedFile) ?? globalDiffStyle)
-		: globalDiffStyle;
-
-	const handleSetLocalStyle = useCallback(
-		(style: DiffStyle) => {
-			if (selectedFiles.size === 0) return;
-			setDiffViewState((prev) => {
-				const next = new Map(prev.styleOverrides);
-				// Apply style to all selected files
-				for (const file of selectedFiles) {
-					next.set(file, style);
-				}
-				return { ...prev, styleOverrides: next };
-			});
-		},
-		[selectedFiles, setDiffViewState],
-	);
-
-	// Reset selected files when changeId changes
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentionally trigger on changeId change
-	useEffect(() => {
-		setSelectedFiles(new Set());
-	}, [deferredChangeId]);
 
 	// Keyboard navigation
 	useDiffPanelKeyboard({ scrollContainerRef, revisionsPanelRef, hasFocus });
@@ -224,30 +217,89 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 	const revisionDiff = diffEntries[0]?.content ?? "";
 
 	// Timing instrumentation for cache analysis
-	console.log('[DiffPanel] selection:', changeId?.slice(0,8), 
-		'deferred:', deferredChangeId?.slice(0,8),
-		'changedFiles:', changedFiles.length, 
-		'hasDiff:', !!revisionDiff,
-		'at:', performance.now().toFixed(0));
+	console.log(
+		"[DiffPanel] selection:",
+		changeId?.slice(0, 8),
+		"deferred:",
+		deferredChangeId?.slice(0, 8),
+		"changedFiles:",
+		changedFiles.length,
+		"hasDiff:",
+		!!revisionDiff,
+		"at:",
+		performance.now().toFixed(0),
+	);
 
-	// Track what's currently displayed - shows previous while loading
-	const [displayedState, setDisplayedState] = useState<{
+	// Derive effective diffViewState - reset when changeId changes (no useEffect needed)
+	const effectiveDiffViewState = getDiffViewState(diffViewState, deferredChangeId);
+
+	// Sync atom if it needs reset (one-time sync, not a loop)
+	if (effectiveDiffViewState !== diffViewState) {
+		// Schedule update for next microtask to avoid setState during render
+		queueMicrotask(() => setDiffViewState(effectiveDiffViewState));
+	}
+
+	// Derive effective selected files with auto-select first file
+	const effectiveSelectedFiles = useMemo(() => {
+		// If we have selected files for this changeId, use them
+		if (selectedFiles.size > 0) return selectedFiles;
+		// Auto-select first file when files load and none selected
+		if (changedFiles.length > 0) {
+			return new Set([changedFiles[0].path]);
+		}
+		return selectedFiles;
+	}, [selectedFiles, changedFiles]);
+
+	// Get first selected file for style override display
+	const firstSelectedFile =
+		effectiveSelectedFiles.size > 0 ? [...effectiveSelectedFiles][0] : null;
+
+	// Get effective diff style for first selected file
+	const effectiveDiffStyle = firstSelectedFile
+		? (effectiveDiffViewState.styleOverrides.get(firstSelectedFile) ?? globalDiffStyle)
+		: globalDiffStyle;
+
+	const handleSetLocalStyle = useCallback(
+		(style: DiffStyle) => {
+			if (effectiveSelectedFiles.size === 0) return;
+			setDiffViewState((prev) => {
+				const next = new Map(prev.styleOverrides);
+				// Apply style to all selected files
+				for (const file of effectiveSelectedFiles) {
+					next.set(file, style);
+				}
+				return { ...prev, styleOverrides: next };
+			});
+		},
+		[effectiveSelectedFiles, setDiffViewState],
+	);
+
+	// Track last valid displayed state using a ref (avoids useEffect for caching)
+	const lastValidStateRef = useRef<{
 		changeId: string;
 		patches: Array<{ path: string; patch: string; status: ChangedFileStatus }>;
 	} | null>(null);
 
-	// Update displayed state only when new data arrives
-	useEffect(() => {
-		if (revisionDiff && deferredChangeId) {
-			const patches = splitMultiFileDiff(revisionDiff).map((patch) => ({
-				path: extractFilePath(patch) ?? "unknown",
-				patch,
-				status: (changedFiles.find((f) => f.path === extractFilePath(patch))?.status ??
-					"modified") as ChangedFileStatus,
-			}));
-			setDisplayedState({ changeId: deferredChangeId, patches });
-		}
+	// Compute current patches when data is available
+	const currentPatches = useMemo(() => {
+		if (!revisionDiff || !deferredChangeId) return null;
+		return splitMultiFileDiff(revisionDiff).map((patch) => ({
+			path: extractFilePath(patch) ?? "unknown",
+			patch,
+			status: (changedFiles.find((f) => f.path === extractFilePath(patch))?.status ??
+				"modified") as ChangedFileStatus,
+		}));
 	}, [revisionDiff, deferredChangeId, changedFiles]);
+
+	// Update ref when we have valid data (side effect during render is fine for refs)
+	if (currentPatches && deferredChangeId) {
+		lastValidStateRef.current = { changeId: deferredChangeId, patches: currentPatches };
+	}
+
+	// Use current data if available, otherwise fall back to last valid state
+	const displayedState = currentPatches
+		? { changeId: deferredChangeId!, patches: currentPatches }
+		: lastValidStateRef.current;
 
 	// Determine if we're showing stale data
 	const isStale = displayedState !== null && displayedState.changeId !== changeId;
@@ -279,33 +331,18 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 		return { totalAdditions: additions, totalDeletions: deletions };
 	}, [fileDiffs]);
 
-	// Sync diffViewState atom when changeId changes (reset to initial state)
-	useEffect(() => {
-		const effectiveState = getDiffViewState(diffViewState, deferredChangeId);
-		if (effectiveState !== diffViewState) {
-			setDiffViewState(effectiveState);
-		}
-	}, [deferredChangeId, diffViewState, setDiffViewState]);
-
-	// Auto-select first file when files load and none selected
-	useEffect(() => {
-		if (changedFiles.length > 0 && selectedFiles.size === 0) {
-			setSelectedFiles(new Set([changedFiles[0].path]));
-		}
-	}, [changedFiles, selectedFiles.size]);
-
 	// Get patches for selected files (in order)
 	const selectedPatches = useMemo(() => {
 		const patches: Array<{ path: string; patch: string; status: ChangedFileStatus }> = [];
 		// Maintain file order from changedFiles
 		for (const file of changedFiles) {
-			if (selectedFiles.has(file.path)) {
+			if (effectiveSelectedFiles.has(file.path)) {
 				const patch = patchMap.get(file.path) ?? "";
 				patches.push({ path: file.path, patch, status: file.status as ChangedFileStatus });
 			}
 		}
 		return patches;
-	}, [changedFiles, selectedFiles, patchMap]);
+	}, [changedFiles, effectiveSelectedFiles, patchMap]);
 
 	if (!repoPath || !changeId) {
 		return (
@@ -366,7 +403,7 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 						onClick={() => handleSetLocalStyle("unified")}
 						title="Unified diff view"
 						className="h-6 w-6"
-						disabled={selectedFiles.size === 0}
+						disabled={effectiveSelectedFiles.size === 0}
 					>
 						<RowsIcon className="size-3" />
 					</Button>
@@ -376,7 +413,7 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 						onClick={() => handleSetLocalStyle("split")}
 						title="Split diff view"
 						className="h-6 w-6"
-						disabled={selectedFiles.size === 0}
+						disabled={effectiveSelectedFiles.size === 0}
 					>
 						<Columns2Icon className="size-3" />
 					</Button>
@@ -395,7 +432,7 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 						<div className="h-full w-full min-w-0">
 							<FileList
 								files={changedFiles}
-								selectedFiles={selectedFiles}
+								selectedFiles={effectiveSelectedFiles}
 								onSelectFiles={setSelectedFiles}
 								totalAdditions={totalAdditions}
 								totalDeletions={totalDeletions}

@@ -1,6 +1,7 @@
 import { useAtom } from "@effect-atom/atom-react";
+import { useQuery } from "@tanstack/react-query";
 import type React from "react";
-import { useRef, useState, useEffect, useMemo, useCallback, useDeferredValue } from "react";
+import { useRef, useState, useMemo, useCallback, useDeferredValue } from "react";
 import { aceJumpOpenAtom } from "@/atoms";
 import {
 	CommandDialog,
@@ -63,29 +64,18 @@ function isRevsetExpression(query: string): boolean {
 	return false;
 }
 
-// Initial revset result state
-const initialRevsetResult = {
-	changeIds: [] as string[],
-	error: null as string | null,
-	loading: false,
-	label: null as string | null,
-};
-
 export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 	const [open, setOpenRaw] = useAtom(aceJumpOpenAtom);
 	const [search, setSearch] = useState("");
-	// Use React's useDeferredValue for filtering debounce - no useEffect needed
+	// Use React's useDeferredValue for debouncing - defers updates during typing
 	const debouncedSearch = useDeferredValue(search);
-
-	const [revsetResult, setRevsetResult] = useState(initialRevsetResult);
 
 	// Wrap setOpen to reset state when opening
 	const setOpen = useCallback(
 		(nextOpen: boolean) => {
 			if (nextOpen) {
-				// Reset state when opening - no useEffect needed
+				// Reset state when opening
 				setSearch("");
-				setRevsetResult(initialRevsetResult);
 			}
 			setOpenRaw(nextOpen);
 		},
@@ -109,49 +99,36 @@ export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
 		});
 	}
 
-	// Debounced revset resolution
-	const resolveRevsetDebounced = useCallback(
-		async (query: string) => {
-			if (!repoPath || !query.trim()) {
-				setRevsetResult({ changeIds: [], error: null, loading: false, label: null });
-				return;
-			}
+	// Determine if current search is a revset expression
+	const isRevset = isRevsetExpression(debouncedSearch);
 
-			if (!isRevsetExpression(query)) {
-				setRevsetResult({ changeIds: [], error: null, loading: false, label: null });
-				return;
-			}
-
-			setRevsetResult((prev) => ({ ...prev, loading: true, label: query }));
-
-			try {
-				const result = await resolveRevset(repoPath, query.trim());
-				setRevsetResult({
-					changeIds: result.change_ids,
-					error: result.error,
-					loading: false,
-					label: query,
-				});
-			} catch (err) {
-				setRevsetResult({
-					changeIds: [],
-					error: String(err),
-					loading: false,
-					label: query,
-				});
-			}
+	// Use TanStack Query for revset resolution (async data fetching)
+	const {
+		data: revsetData,
+		isLoading: revsetLoading,
+		error: revsetError,
+	} = useQuery({
+		queryKey: ["revset", repoPath, debouncedSearch],
+		queryFn: async () => {
+			if (!repoPath) throw new Error("No repo path");
+			const result = await resolveRevset(repoPath, debouncedSearch.trim());
+			return result;
 		},
-		[repoPath],
+		enabled: !!repoPath && isRevset && debouncedSearch.trim().length > 0,
+		staleTime: 30 * 1000, // 30 seconds
+		retry: false,
+	});
+
+	// Derive revset result from query state
+	const revsetResult = useMemo(
+		() => ({
+			changeIds: revsetData?.change_ids ?? [],
+			error: revsetData?.error ?? (revsetError ? String(revsetError) : null),
+			loading: revsetLoading,
+			label: isRevset ? debouncedSearch : null,
+		}),
+		[revsetData, revsetError, revsetLoading, isRevset, debouncedSearch],
 	);
-
-	// Debounce the revset resolution (async API call - acceptable use of useEffect)
-	useEffect(() => {
-		const timeout = setTimeout(() => {
-			resolveRevsetDebounced(search);
-		}, 150); // 150ms debounce
-
-		return () => clearTimeout(timeout);
-	}, [search, resolveRevsetDebounced]);
 
 	// Build lookup maps
 	const revisionByChangeId = useMemo(

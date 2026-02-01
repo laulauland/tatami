@@ -932,7 +932,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const matchingRevisionsRef = useRef(matchingRevisions);
 		matchingRevisionsRef.current = matchingRevisions;
 
-		// Handle jump hint letter key presses
+		// Handle jump hint letter key presses (DOM event subscription - legitimate useEffect)
+		// biome-ignore lint/correctness/useExhaustiveDependencies: keyboard event handler pattern
 		useEffect(() => {
 			if (!inlineJumpMode) return;
 

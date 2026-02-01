@@ -1,0 +1,43 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-foreach
+language: tsx
+severity: error
+message: "Prefer for...of over forEach for better performance and debuggability"
+
+rule:
+  pattern: $ARRAY.forEach($$$ARGS)
+
+note: |
+  Use `for...of` loops instead of `forEach` for:
+  - Better performance (no function call overhead)
+  - Easier debugging (can use break/continue)
+  - Works with async/await naturally
+
+  Example:
+  ```typescript
+  // ❌ Bad
+  items.forEach(item => process(item));
+
+  // ✅ Good
+  for (const item of items) {
+    process(item);
+  }
+
+  // ❌ Bad - async in forEach doesn't wait
+  items.forEach(async item => await process(item));
+
+  // ✅ Good - proper async iteration
+  for (const item of items) {
+    await process(item);
+  }
+  ```
+
+files:
+  - "src/**/*.ts"
+  - "src/**/*.tsx"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/node_modules/**"

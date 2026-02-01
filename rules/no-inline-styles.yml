@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-inline-styles
+language: tsx
+severity: warning
+message: "Prefer Tailwind classes over inline styles"
+
+rule:
+  pattern: style={{ $$$PROPS }}
+
+note: |
+  Use Tailwind CSS classes instead of inline styles for consistency
+  and better performance (styles are compiled at build time).
+
+  Exceptions (use ignore comment):
+  - Dynamic values that can't be expressed in Tailwind (e.g., calculated positions)
+  - CSS custom properties / variables
+
+  Example:
+  ```tsx
+  // ❌ Bad
+  <div style={{ padding: '16px', backgroundColor: 'red' }}>
+
+  // ✅ Good
+  <div className="p-4 bg-destructive">
+
+  // ✅ OK - dynamic value (add ignore comment)
+  // ast-grep-ignore: no-inline-styles
+  <div style={{ transform: `translateX(${offset}px)` }}>
+
+  // ✅ OK - CSS variables
+  // ast-grep-ignore: no-inline-styles
+  <div style={{ '--lane-color': color } as React.CSSProperties}>
+  ```
+
+files:
+  - "src/**/*.tsx"
+
+ignores:
+  - "**/node_modules/**"

@@ -435,9 +435,19 @@ function createRevisionChangesCollection(repoPath: string, changeId: string) {
 			queryClient,
 			queryKey: ["revision-changes", repoPath, changeId],
 			queryFn: async () => {
-				console.log('[DB] FETCHING changes for', changeId.slice(0,8), 'at:', performance.now().toFixed(0));
+				console.log(
+					"[DB] FETCHING changes for",
+					changeId.slice(0, 8),
+					"at:",
+					performance.now().toFixed(0),
+				);
 				const changes = await getRevisionChanges(repoPath, changeId);
-				console.log('[DB] FETCHED changes for', changeId.slice(0,8), 'at:', performance.now().toFixed(0));
+				console.log(
+					"[DB] FETCHED changes for",
+					changeId.slice(0, 8),
+					"at:",
+					performance.now().toFixed(0),
+				);
 				return changes;
 			},
 			getKey: (file: ChangedFile) => file.path,
@@ -487,9 +497,19 @@ function createRevisionDiffCollection(repoPath: string, changeId: string) {
 			queryClient,
 			queryKey: ["revision-diff", repoPath, changeId],
 			queryFn: async () => {
-				console.log('[DB] FETCHING diff for', changeId.slice(0,8), 'at:', performance.now().toFixed(0));
+				console.log(
+					"[DB] FETCHING diff for",
+					changeId.slice(0, 8),
+					"at:",
+					performance.now().toFixed(0),
+				);
 				const diff = await getRevisionDiff(repoPath, changeId);
-				console.log('[DB] FETCHED diff for', changeId.slice(0,8), 'at:', performance.now().toFixed(0));
+				console.log(
+					"[DB] FETCHED diff for",
+					changeId.slice(0, 8),
+					"at:",
+					performance.now().toFixed(0),
+				);
 				return [{ id: "diff" as const, content: diff }];
 			},
 			getKey: (entry: DiffEntry) => entry.id,

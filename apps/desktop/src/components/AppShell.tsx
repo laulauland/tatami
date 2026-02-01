@@ -21,7 +21,7 @@ function useIsNarrowScreen() {
 	return useSyncExternalStore(subscribeToMediaQuery, getIsNarrowScreen, () => false);
 }
 
-import { AceJump } from "@/components/AceJump";
+import { Search } from "@/components/Search";
 import { AppHeader } from "@/components/AppHeader";
 import { CommandPalette } from "@/components/CommandPalette";
 import { PrerenderedDiffPanel } from "@/components/DiffPanel";
@@ -76,7 +76,7 @@ function AppShellEmpty() {
 
 	return (
 		<>
-			<AceJump revisions={[]} repoPath={null} onJump={() => {}} />
+			<Search revisions={[]} repoPath={null} onJump={() => {}} />
 			<CommandPalette
 				onOpenRepo={handleAddRepository}
 				onOpenProjects={() => navigate({ to: "/repositories" })}
@@ -378,8 +378,8 @@ function AppShellWithProject() {
 	}
 
 	function handleOpenSearch() {
-		// Focus the AceJump / revision search
-		// The "/" key already triggers this via AceJump
+		// Focus the revision search dialog
+		// The "/" key already triggers this via Search component
 		window.dispatchEvent(new KeyboardEvent("keydown", { key: "/" }));
 	}
 
@@ -397,7 +397,7 @@ function AppShellWithProject() {
 				onOpenSettings={() => navigate({ to: "/settings" })}
 			/>
 			<KeyboardShortcutsHelp />
-			<AceJump
+			<Search
 				revisions={orderedRevisions}
 				repoPath={activeProject?.path ?? null}
 				onJump={(changeId) => {

@@ -1,8 +1,8 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useQuery } from "@tanstack/react-query";
 import type React from "react";
-import { useRef, useState, useMemo, useCallback, useDeferredValue } from "react";
-import { aceJumpOpenAtom } from "@/atoms";
+import { useRef, useState, useMemo, useCallback, useEffect } from "react";
+import { searchOpenAtom } from "@/atoms";
 import {
 	CommandDialog,
 	CommandEmpty,
@@ -15,7 +15,7 @@ import { getRevisionKey } from "@/db";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import { resolveRevset, type Revision } from "@/tauri-commands";
 
-interface AceJumpProps {
+interface SearchProps {
 	revisions: Revision[];
 	repoPath: string | null;
 	onJump: (changeId: string) => void;
@@ -64,11 +64,30 @@ function isRevsetExpression(query: string): boolean {
 	return false;
 }
 
-export function AceJump({ revisions, repoPath, onJump }: AceJumpProps) {
-	const [open, setOpenRaw] = useAtom(aceJumpOpenAtom);
+export function Search({ revisions, repoPath, onJump }: SearchProps) {
+	const [open, setOpenRaw] = useAtom(searchOpenAtom);
 	const [search, setSearch] = useState("");
-	// Use React's useDeferredValue for debouncing - defers updates during typing
-	const debouncedSearch = useDeferredValue(search);
+	// Debounce search input to prevent lag during typing
+	const [debouncedSearch, setDebouncedSearch] = useState("");
+	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+	useEffect(() => {
+		// Clear any pending debounce
+		if (debounceTimerRef.current) {
+			clearTimeout(debounceTimerRef.current);
+		}
+
+		// Update after 150ms of no changes
+		debounceTimerRef.current = setTimeout(() => {
+			setDebouncedSearch(search);
+		}, 150);
+
+		return () => {
+			if (debounceTimerRef.current) {
+				clearTimeout(debounceTimerRef.current);
+			}
+		};
+	}, [search]);
 
 	// Wrap setOpen to reset state when opening
 	const setOpen = useCallback(

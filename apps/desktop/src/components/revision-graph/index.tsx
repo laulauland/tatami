@@ -17,7 +17,7 @@ import {
 	debugOverlayEnabledAtom,
 	expandedStacksAtom,
 	hoveredStackIdAtom,
-	inlineJumpQueryAtom,
+	aceJumpQueryAtom,
 	revisionGraphScrollTopAtom,
 } from "@/atoms";
 import {
@@ -362,8 +362,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		} = useMemo(() => buildGraph(stableRevisions), [stableRevisions]);
 		const search = useSearch({ from: Route.fullPath });
 		const navigate = useNavigate({ from: Route.fullPath });
-		const [inlineJumpQuery, setInlineJumpQuery] = useAtom(inlineJumpQueryAtom);
-		const inlineJumpMode = inlineJumpQuery !== null;
+		const [aceJumpQuery, setAceJumpQuery] = useAtom(aceJumpQueryAtom);
+		const aceJumpMode = aceJumpQuery !== null;
 
 		// Detect collapsible stacks
 		const stacks = useMemo(() => detectStacks(stableRevisions), [stableRevisions]);
@@ -671,7 +671,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			displayRows,
 			changeIdToIndex,
 			selectedRevision,
-			enabled: !inlineJumpMode,
+			enabled: !aceJumpMode,
 			scrollToIndex: (index) => scrollToIndexIfNeededRef.current?.(index),
 			onToggleStack: handleToggleStack,
 			hasFocus,
@@ -688,27 +688,27 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		// Track if we just activated jump mode to ignore the same 'f' keypress
 		const justActivatedRef = useRef(false);
 
-		// Activate inline jump mode with 'f' key
+		// Activate AceJump mode with 'f' key
 		useKeyboardShortcut({
 			key: "f",
 			modifiers: {},
 			onPress: () => {
 				justActivatedRef.current = true;
-				setInlineJumpQuery("");
+				setAceJumpQuery("");
 				// Clear the flag after a short delay (same event loop tick protection)
 				requestAnimationFrame(() => {
 					justActivatedRef.current = false;
 				});
 			},
-			enabled: !inlineJumpMode,
+			enabled: !aceJumpMode,
 		});
 
-		// Cancel inline jump mode with Escape
+		// Cancel AceJump mode with Escape
 		useKeyboardShortcut({
 			key: "Escape",
 			modifiers: {},
-			onPress: () => setInlineJumpQuery(null),
-			enabled: inlineJumpMode,
+			onPress: () => setAceJumpQuery(null),
+			enabled: aceJumpMode,
 		});
 
 		const COLLAPSED_STACK_HEIGHT = 32;
@@ -961,8 +961,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			const hints = new Map<string, string>();
 			const matches: Array<{ changeId: string; shortId: string }> = [];
 
-			if (inlineJumpMode && revisions.length > 0) {
-				const query = inlineJumpQuery ?? "";
+			if (aceJumpMode && revisions.length > 0) {
+				const query = aceJumpQuery ?? "";
 
 				// First, collect all visible revisions that match the current query
 				for (const item of virtualItems) {
@@ -1010,15 +1010,15 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			}
 
 			return { jumpHintsMap: hints, matchingRevisions: matches };
-		}, [inlineJumpMode, inlineJumpQuery, revisions.length, virtualItems, rows]);
+		}, [aceJumpMode, aceJumpQuery, revisions.length, virtualItems, rows]);
 
 		// Store matching revisions in a ref for use in the effect
 		const matchingRevisionsRef = useRef(matchingRevisions);
 		matchingRevisionsRef.current = matchingRevisions;
 
-		// Handle jump hint letter key presses (DOM event subscription)
+		// Handle AceJump letter key presses (DOM event subscription)
 		useEffect(() => {
-			if (!inlineJumpMode) return;
+			if (!aceJumpMode) return;
 
 			function handleJumpKey(event: KeyboardEvent) {
 				const activeElement = document.activeElement;
@@ -1036,11 +1036,11 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				// Handle backspace to remove last character
 				if (event.key === "Backspace") {
 					event.preventDefault();
-					const currentQuery = inlineJumpQuery ?? "";
+					const currentQuery = aceJumpQuery ?? "";
 					if (currentQuery.length > 0) {
-						setInlineJumpQuery(currentQuery.slice(0, -1));
+						setAceJumpQuery(currentQuery.slice(0, -1));
 					} else {
-						setInlineJumpQuery(null); // Cancel if already empty
+						setAceJumpQuery(null); // Cancel if already empty
 					}
 					return;
 				}
@@ -1048,7 +1048,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				// Only accept alphanumeric characters for the query
 				if (/^[a-z0-9]$/i.test(key)) {
 					event.preventDefault();
-					const newQuery = (inlineJumpQuery ?? "") + key;
+					const newQuery = (aceJumpQuery ?? "") + key;
 
 					// Find matching revisions with the new query
 					const matches = matchingRevisionsRef.current.filter(({ shortId }) =>
@@ -1057,7 +1057,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 					if (matches.length === 1) {
 						// Single match - jump directly
-						setInlineJumpQuery(null);
+						setAceJumpQuery(null);
 						// Look up revision by change_id (matchingRevisions stores change_id)
 						const revision = revisions.find((r) => r.change_id === matches[0].changeId);
 						if (revision) {
@@ -1065,23 +1065,23 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 						}
 					} else if (matches.length === 0) {
 						// No matches - cancel
-						setInlineJumpQuery(null);
+						setAceJumpQuery(null);
 					} else {
 						// Multiple matches - update query to filter
-						setInlineJumpQuery(newQuery);
+						setAceJumpQuery(newQuery);
 					}
 					return;
 				}
 
 				// Any other non-modifier key cancels jump mode
 				if (!["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(event.key)) {
-					setInlineJumpQuery(null);
+					setAceJumpQuery(null);
 				}
 			}
 
 			window.addEventListener("keydown", handleJumpKey);
 			return () => window.removeEventListener("keydown", handleJumpKey);
-		}, [inlineJumpMode, inlineJumpQuery, setInlineJumpQuery, revisions, onSelectRevision]);
+		}, [aceJumpMode, aceJumpQuery, setAceJumpQuery, revisions, onSelectRevision]);
 
 		if (revisions.length === 0) {
 			return (
@@ -1267,8 +1267,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 											isFlashing={isFlashing}
 											isDimmed={isDimmed}
 											isPendingAbandon={pendingAbandon?.change_id === row.revision.change_id}
-											jumpModeActive={inlineJumpMode}
-											jumpQuery={inlineJumpQuery ?? ""}
+											jumpModeActive={aceJumpMode}
+											jumpQuery={aceJumpQuery ?? ""}
 											jumpHint={jumpHintsMap.get(row.revision.change_id) ?? null}
 											hasFocus={hasFocus}
 										/>

@@ -1,10 +1,11 @@
 import { Atom } from "@effect-atom/atom";
 
 export const shortcutsHelpOpenAtom = Atom.make(false);
-export const aceJumpOpenAtom = Atom.make(false);
-// Inline jump mode: when active, shows jump hints on visible revision change IDs
+// Search dialog open state (/ key)
+export const searchOpenAtom = Atom.make(false);
+// AceJump mode: when active, shows jump hints on visible revision change IDs
 // Stores the typed query prefix (empty string = initial state showing first letters)
-export const inlineJumpQueryAtom = Atom.make<string | null>(null);
+export const aceJumpQueryAtom = Atom.make<string | null>(null);
 // View mode: 1 = overview (only revisions), 2 = split (revisions + diff panel)
 export type ViewMode = 1 | 2;
 export const viewModeAtom = Atom.make<ViewMode>(1);

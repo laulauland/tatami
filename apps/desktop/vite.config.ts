@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import agentation from "vite-plugin-agentation";
 import { consoleForwardPlugin } from "./dev/vite-plugin-console-forward";
+import { devtools as tanstackDevtools } from "@tanstack/devtools-vite";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -16,9 +17,12 @@ export default defineConfig({
 				plugins: [["babel-plugin-react-compiler", reactCompilerConfig]],
 			},
 		}),
+		tanstackDevtools({
+			consolePiping: { enabled: true },
+		}),
 		tailwindcss(),
 		agentation(),
-		consoleForwardPlugin()
+		// consoleForwardPlugin()
 	],
 	resolve: {
 		alias: {
@@ -32,10 +36,10 @@ export default defineConfig({
 		host: host || false,
 		hmr: host
 			? {
-					protocol: "ws",
-					host,
-					port: 4545,
-				}
+				protocol: "ws",
+				host,
+				port: 4545,
+			}
 			: undefined,
 		watch: {
 			ignored: ["**/src-tauri/**"],

@@ -21,6 +21,18 @@ pub struct ChangedFile {
     pub status: String,
 }
 
+#[derive(Serialize)]
+pub struct RevisionDiff {
+    pub change_id: String,
+    pub diff: String,
+}
+
+#[derive(Serialize)]
+pub struct RevisionChanges {
+    pub change_id: String,
+    pub files: Vec<ChangedFile>,
+}
+
 #[tauri::command]
 fn find_repository(start_path: String) -> Option<String> {
     let path = PathBuf::from(&start_path);
@@ -213,6 +225,191 @@ async fn get_revision_changes(
     })?;
 
     Ok(files)
+}
+
+/// Compute diff for a single revision (helper function for batch processing)
+fn compute_revision_diff_inner(jj_repo: &JjRepo, change_id: &str) -> Result<String, String> {
+    use jj_lib::backend::TreeValue;
+    use jj_lib::matchers::EverythingMatcher;
+
+    let commit = jj_repo
+        .get_commit(change_id)
+        .map_err(|e| format!("Failed to get commit: {}", e))?;
+
+    let parent_tree = {
+        let parents = commit.parents();
+        let parent = parents
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Commit has no parent".to_string())?;
+        parent
+            .map_err(|e| format!("Failed to get parent: {}", e))?
+            .tree()
+            .map_err(|e| format!("Failed to get parent tree: {}", e))?
+    };
+
+    let commit_tree = commit
+        .tree()
+        .map_err(|e| format!("Failed to get commit tree: {}", e))?;
+
+    let matcher = EverythingMatcher;
+    let mut diff_iter = parent_tree.diff_stream(&commit_tree, &matcher);
+
+    let repo = jj_repo
+        .repo_loader()
+        .load_at_head()
+        .map_err(|e| format!("Failed to load repo: {}", e))?;
+
+    let mut unified_diffs = Vec::new();
+
+    pollster::block_on(async {
+        use futures::StreamExt;
+        while let Some(entry) = diff_iter.next().await {
+            let path = entry.path;
+            let path_str = path.as_internal_file_string();
+
+            let diff_values = entry
+                .values
+                .map_err(|e| format!("Failed to get diff values: {}", e))?;
+            let before = diff_values.before.removes().next().and_then(|v| v.as_ref());
+            let after = diff_values.after.adds().next().and_then(|v| v.as_ref());
+
+            match (before, after) {
+                (Some(TreeValue::File { .. }), Some(TreeValue::File { .. }))
+                | (None, Some(TreeValue::File { .. }))
+                | (Some(TreeValue::File { .. }), None) => {
+                    let old_content = jj_repo
+                        .get_parent_file_content_with_repo(repo.as_ref(), &commit, path_str)
+                        .unwrap_or_default();
+
+                    let new_content = jj_repo
+                        .get_file_content_with_repo(repo.as_ref(), &commit, path_str)
+                        .unwrap_or_default();
+
+                    let file_diff = diff::compute_file_diff(&old_content, &new_content, path_str)
+                        .map_err(|e| format!("Failed to compute diff: {}", e))?;
+
+                    if !file_diff.is_empty() {
+                        unified_diffs.push(file_diff);
+                    }
+                }
+                _ => continue,
+            };
+        }
+        Ok::<(), String>(())
+    })?;
+
+    Ok(unified_diffs.join("\n"))
+}
+
+/// Compute changed files for a single revision (helper function for batch processing)
+fn compute_revision_changes_inner(jj_repo: &JjRepo, change_id: &str) -> Result<Vec<ChangedFile>, String> {
+    use jj_lib::backend::TreeValue;
+    use jj_lib::matchers::EverythingMatcher;
+
+    let commit = jj_repo
+        .get_commit(change_id)
+        .map_err(|e| format!("Failed to get commit: {}", e))?;
+
+    let parent_tree = {
+        let parents = commit.parents();
+        let parent = parents
+            .into_iter()
+            .next()
+            .ok_or_else(|| "Commit has no parent".to_string())?;
+        parent
+            .map_err(|e| format!("Failed to get parent: {}", e))?
+            .tree()
+            .map_err(|e| format!("Failed to get parent tree: {}", e))?
+    };
+
+    let commit_tree = commit
+        .tree()
+        .map_err(|e| format!("Failed to get commit tree: {}", e))?;
+
+    let matcher = EverythingMatcher;
+    let mut diff_iter = parent_tree.diff_stream(&commit_tree, &matcher);
+
+    let mut files = Vec::new();
+
+    pollster::block_on(async {
+        use futures::StreamExt;
+        while let Some(entry) = diff_iter.next().await {
+            let path = entry.path;
+            let path_str = path.as_internal_file_string();
+
+            let diff_values = entry
+                .values
+                .map_err(|e| format!("Failed to get diff values: {}", e))?;
+            let before = diff_values.before.removes().next().and_then(|v| v.as_ref());
+            let after = diff_values.after.adds().next().and_then(|v| v.as_ref());
+
+            let status = match (before, after) {
+                (Some(TreeValue::File { .. }), Some(TreeValue::File { .. })) => "modified",
+                (None, Some(_)) => "added",
+                (Some(_), None) => "deleted",
+                _ => continue,
+            };
+
+            files.push(ChangedFile {
+                path: path_str.to_string(),
+                status: status.to_string(),
+            });
+        }
+        Ok::<(), String>(())
+    })?;
+
+    Ok(files)
+}
+
+#[tauri::command]
+async fn get_diffs_batch(
+    repo_path: String,
+    change_ids: Vec<String>,
+) -> Result<Vec<RevisionDiff>, String> {
+    let path = Path::new(&repo_path);
+    let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+
+    // Process sequentially since JjRepo is not Sync
+    let results: Vec<RevisionDiff> = change_ids
+        .iter()
+        .filter_map(|change_id| {
+            match compute_revision_diff_inner(&jj_repo, change_id) {
+                Ok(diff) => Some(RevisionDiff {
+                    change_id: change_id.clone(),
+                    diff,
+                }),
+                Err(_) => None,
+            }
+        })
+        .collect();
+
+    Ok(results)
+}
+
+#[tauri::command]
+async fn get_changes_batch(
+    repo_path: String,
+    change_ids: Vec<String>,
+) -> Result<Vec<RevisionChanges>, String> {
+    let path = Path::new(&repo_path);
+    let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+
+    // Process sequentially since JjRepo is not Sync
+    let results: Vec<RevisionChanges> = change_ids
+        .iter()
+        .filter_map(|change_id| {
+            match compute_revision_changes_inner(&jj_repo, change_id) {
+                Ok(files) => Some(RevisionChanges {
+                    change_id: change_id.clone(),
+                    files,
+                }),
+                Err(_) => None,
+            }
+        })
+        .collect();
+
+    Ok(results)
 }
 
 #[tauri::command]
@@ -549,6 +746,8 @@ pub fn run() {
             get_file_diff,
             get_revision_diff,
             get_revision_changes,
+            get_diffs_batch,
+            get_changes_batch,
             get_commit_recency,
             resolve_revset,
             get_file_content_base64,
@@ -569,4 +768,278 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jj_lib::repo::Repo;
+    use std::fs;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Creates a test jj repository using the jj CLI.
+    /// Returns the temp directory (which must be kept alive) and the repo path.
+    fn create_test_repo() -> (TempDir, PathBuf) {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory");
+        let repo_path = temp_dir.path().to_path_buf();
+
+        // Initialize jj repo using CLI with git backend (most reliable method)
+        let status = Command::new("jj")
+            .args(["git", "init"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("Failed to run jj git init - is jj installed?");
+
+        assert!(status.success(), "jj git init failed");
+
+        (temp_dir, repo_path)
+    }
+
+    /// Snapshot the working copy to capture file changes using jj CLI.
+    fn snapshot_working_copy(repo_path: &Path) {
+        // jj status triggers a snapshot
+        let status = Command::new("jj")
+            .args(["status"])
+            .current_dir(repo_path)
+            .status()
+            .expect("Failed to run jj status");
+
+        assert!(status.success(), "jj status failed");
+    }
+
+    /// Get the working copy change ID.
+    fn get_wc_change_id(repo_path: &Path) -> String {
+        let jj_repo = JjRepo::open(repo_path).expect("Failed to open repo");
+        let repo = jj_repo.repo_loader().load_at_head().expect("Failed to load repo");
+        let wc_commit_id = repo
+            .view()
+            .get_wc_commit_id(jj_repo.workspace_name())
+            .expect("No working copy");
+        let wc_commit = repo.store().get_commit(wc_commit_id).expect("Failed to get commit");
+        wc_commit.change_id().reverse_hex()
+    }
+
+    #[test]
+    fn test_compute_revision_diff_inner_with_changes() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        // Create a file in the working copy
+        let file_path = repo_path.join("test.txt");
+        fs::write(&file_path, "Hello, world!\n").expect("Failed to write file");
+
+        // Snapshot to capture the change
+        snapshot_working_copy(&repo_path);
+
+        // Open repo and get the working copy change ID
+        let change_id = get_wc_change_id(&repo_path);
+        let jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        // Compute diff
+        let result = compute_revision_diff_inner(&jj_repo, &change_id);
+        assert!(result.is_ok(), "compute_revision_diff_inner should succeed");
+
+        let diff = result.unwrap();
+        // The diff should show the new file
+        assert!(diff.contains("test.txt"), "Diff should contain the filename");
+        assert!(diff.contains("Hello, world!"), "Diff should contain the file content");
+
+        drop(temp_dir); // Cleanup
+    }
+
+    #[test]
+    fn test_compute_revision_diff_inner_empty_commit() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        // Open repo and get the working copy change ID (no changes yet)
+        let change_id = get_wc_change_id(&repo_path);
+        let jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        // Compute diff for empty commit
+        let result = compute_revision_diff_inner(&jj_repo, &change_id);
+        assert!(result.is_ok(), "compute_revision_diff_inner should succeed for empty commit");
+
+        let diff = result.unwrap();
+        assert!(diff.is_empty(), "Diff should be empty for commit with no changes");
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_compute_revision_changes_inner_with_added_file() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        // Create a file
+        let file_path = repo_path.join("added.txt");
+        fs::write(&file_path, "New file content\n").expect("Failed to write file");
+
+        // Snapshot to capture the change
+        snapshot_working_copy(&repo_path);
+
+        // Open repo and get the working copy change ID
+        let change_id = get_wc_change_id(&repo_path);
+        let jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        // Compute changes
+        let result = compute_revision_changes_inner(&jj_repo, &change_id);
+        assert!(result.is_ok(), "compute_revision_changes_inner should succeed");
+
+        let files = result.unwrap();
+        assert_eq!(files.len(), 1, "Should have exactly one changed file");
+        assert_eq!(files[0].path, "added.txt");
+        assert_eq!(files[0].status, "added");
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_compute_revision_changes_inner_empty_commit() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        // Open repo and get the working copy change ID (no changes)
+        let change_id = get_wc_change_id(&repo_path);
+        let jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        // Compute changes for empty commit
+        let result = compute_revision_changes_inner(&jj_repo, &change_id);
+        assert!(result.is_ok(), "compute_revision_changes_inner should succeed for empty commit");
+
+        let files = result.unwrap();
+        assert!(files.is_empty(), "Should have no changed files for empty commit");
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_batch_chunking_multiple_revisions() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        // Create multiple files to have changes in the working copy
+        for i in 0..5 {
+            let file_path = repo_path.join(format!("file{}.txt", i));
+            fs::write(&file_path, format!("Content {}\n", i)).expect("Failed to write file");
+        }
+
+        // Snapshot to capture the changes
+        snapshot_working_copy(&repo_path);
+
+        // Get the working copy change ID
+        let change_id = get_wc_change_id(&repo_path);
+
+        // Test batch processing with the single valid change_id
+        let change_ids: Vec<String> = vec![change_id.clone()];
+
+        // Test get_diffs_batch logic using rayon parallel processing
+        use rayon::prelude::*;
+        let repo_path_ref = &repo_path;
+        let results: Vec<RevisionDiff> = change_ids
+            .par_iter()
+            .filter_map(|cid| {
+                let path = Path::new(repo_path_ref);
+                let jj = JjRepo::open(path).ok()?;
+                match compute_revision_diff_inner(&jj, cid) {
+                    Ok(diff) => Some(RevisionDiff {
+                        change_id: cid.clone(),
+                        diff,
+                    }),
+                    Err(_) => None,
+                }
+            })
+            .collect();
+
+        assert_eq!(results.len(), 1, "Should have one result");
+        assert_eq!(results[0].change_id, change_id);
+        // Diff should contain all the files
+        for i in 0..5 {
+            assert!(
+                results[0].diff.contains(&format!("file{}.txt", i)),
+                "Diff should contain file{}.txt",
+                i
+            );
+        }
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_batch_with_invalid_change_id() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        // Get the working copy change ID
+        let valid_change_id = get_wc_change_id(&repo_path);
+
+        // Mix valid and invalid change IDs
+        let change_ids: Vec<String> = vec![
+            valid_change_id.clone(),
+            "invalid_change_id_12345".to_string(),
+            "zzzzzzzz".to_string(), // Another invalid one
+        ];
+
+        // Test batch processing - invalid IDs should be filtered out
+        use rayon::prelude::*;
+        let repo_path_ref = &repo_path;
+        let results: Vec<RevisionDiff> = change_ids
+            .par_iter()
+            .filter_map(|cid| {
+                let path = Path::new(repo_path_ref);
+                let jj = JjRepo::open(path).ok()?;
+                match compute_revision_diff_inner(&jj, cid) {
+                    Ok(diff) => Some(RevisionDiff {
+                        change_id: cid.clone(),
+                        diff,
+                    }),
+                    Err(_) => None,
+                }
+            })
+            .collect();
+
+        // Only the valid change ID should produce a result
+        assert_eq!(results.len(), 1, "Should have only one valid result");
+        assert_eq!(results[0].change_id, valid_change_id);
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_batch_changes_parallel_processing() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        // Create a file
+        let file_path = repo_path.join("parallel_test.txt");
+        fs::write(&file_path, "Parallel test content\n").expect("Failed to write file");
+
+        // Snapshot to capture the change
+        snapshot_working_copy(&repo_path);
+
+        // Get the working copy change ID
+        let change_id = get_wc_change_id(&repo_path);
+
+        // Test get_changes_batch logic with parallel processing
+        let change_ids: Vec<String> = vec![change_id.clone()];
+
+        use rayon::prelude::*;
+        let repo_path_ref = &repo_path;
+        let results: Vec<RevisionChanges> = change_ids
+            .par_iter()
+            .filter_map(|cid| {
+                let path = Path::new(repo_path_ref);
+                let jj = JjRepo::open(path).ok()?;
+                match compute_revision_changes_inner(&jj, cid) {
+                    Ok(files) => Some(RevisionChanges {
+                        change_id: cid.clone(),
+                        files,
+                    }),
+                    Err(_) => None,
+                }
+            })
+            .collect();
+
+        assert_eq!(results.len(), 1, "Should have one result");
+        assert_eq!(results[0].change_id, change_id);
+        assert_eq!(results[0].files.len(), 1);
+        assert_eq!(results[0].files[0].path, "parallel_test.txt");
+        assert_eq!(results[0].files[0].status, "added");
+
+        drop(temp_dir);
+    }
 }

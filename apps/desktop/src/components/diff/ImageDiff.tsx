@@ -46,8 +46,7 @@ export function ImageDiff({ repoPath, changeId, filePath, status }: ImageDiffPro
 		staleTime: 5 * 60 * 1000, // 5 minutes
 	});
 
-	const loading =
-		(status !== "deleted" && currentLoading) || (status !== "added" && parentLoading);
+	const loading = (status !== "deleted" && currentLoading) || (status !== "added" && parentLoading);
 	const error = currentError || parentError;
 
 	if (loading) {

@@ -1,7 +1,7 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Profiler, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Route as ProjectRoute } from "@/routes/project.$projectId";
 import { expandedStacksAtom, viewModeAtom } from "@/atoms";
 
@@ -47,6 +47,7 @@ import { useAddRepository } from "@/hooks/useAddRepository";
 import { useAppTitle } from "@/hooks/useAppTitle";
 import { useKeyboardNavigation, useKeyboardShortcut, useKeySequence } from "@/hooks/useKeyboard";
 import type { Repository, Revision } from "@/tauri-commands";
+import { onRenderCallback } from "@/lib/trace";
 
 // Wrapper component that handles the case when no project is selected
 export function AppShell() {
@@ -407,17 +408,19 @@ function AppShellWithProject() {
 							className="h-full relative outline-none"
 							aria-label="Revision list"
 						>
-							<RevisionGraph
-								ref={revisionGraphRef}
-								revisions={revisions}
-								selectedRevision={selectedRevision}
-								onSelectRevision={handleSelectRevision}
-								isLoading={isLoading}
-								flash={flash}
-								repoPath={activeProject?.path ?? null}
-								pendingAbandon={pendingAbandon}
-								diffPanelRef={diffPanelRef}
-							/>
+							<Profiler id="RevisionGraph" onRender={onRenderCallback}>
+								<RevisionGraph
+									ref={revisionGraphRef}
+									revisions={revisions}
+									selectedRevision={selectedRevision}
+									onSelectRevision={handleSelectRevision}
+									isLoading={isLoading}
+									flash={flash}
+									repoPath={activeProject?.path ?? null}
+									pendingAbandon={pendingAbandon}
+									diffPanelRef={diffPanelRef}
+								/>
+							</Profiler>
 						</section>
 					) : (
 						// Split mode: revision list + diff panel (vertical on narrow screens)
@@ -429,29 +432,33 @@ function AppShellWithProject() {
 									className="h-full relative outline-none"
 									aria-label="Revision list"
 								>
-									<RevisionGraph
-										ref={revisionGraphRef}
-										revisions={revisions}
-										selectedRevision={selectedRevision}
-										onSelectRevision={handleSelectRevision}
-										isLoading={isLoading}
-										flash={flash}
-										repoPath={activeProject?.path ?? null}
-										pendingAbandon={pendingAbandon}
-										diffPanelRef={diffPanelRef}
-									/>
+									<Profiler id="RevisionGraph" onRender={onRenderCallback}>
+										<RevisionGraph
+											ref={revisionGraphRef}
+											revisions={revisions}
+											selectedRevision={selectedRevision}
+											onSelectRevision={handleSelectRevision}
+											isLoading={isLoading}
+											flash={flash}
+											repoPath={activeProject?.path ?? null}
+											pendingAbandon={pendingAbandon}
+											diffPanelRef={diffPanelRef}
+										/>
+									</Profiler>
 								</section>
 							</ResizablePanel>
 							<ResizableHandle withHandle />
 							<ResizablePanel defaultSize={isNarrowScreen ? 60 : 75} minSize={30}>
 								<aside className="h-full" aria-label="Diff viewer">
-									<PrerenderedDiffPanel
-										ref={diffPanelRef}
-										repoPath={activeProject?.path ?? null}
-										revisions={orderedRevisions}
-										selectedChangeId={selectedRevision?.change_id ?? null}
-										revisionsPanelRef={revisionsPanelRef}
-									/>
+									<Profiler id="DiffPanel" onRender={onRenderCallback}>
+										<PrerenderedDiffPanel
+											ref={diffPanelRef}
+											repoPath={activeProject?.path ?? null}
+											revisions={orderedRevisions}
+											selectedChangeId={selectedRevision?.change_id ?? null}
+											revisionsPanelRef={revisionsPanelRef}
+										/>
+									</Profiler>
 								</aside>
 							</ResizablePanel>
 						</ResizablePanelGroup>

@@ -1,5 +1,4 @@
 import { useAtom } from "@effect-atom/atom-react";
-import { useLiveQuery } from "@tanstack/react-db";
 import { PatchDiff } from "@pierre/diffs/react";
 import { Columns2Icon, Loader2, RowsIcon } from "lucide-react";
 import type { FocusEvent, RefObject } from "react";
@@ -7,6 +6,7 @@ import {
 	forwardRef,
 	useCallback,
 	useDeferredValue,
+	useEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -17,18 +17,14 @@ import { ImageDiff } from "@/components/diff/ImageDiff";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-	emptyChangesCollection,
-	emptyDiffCollection,
-	getRevisionChangesCollection,
-	getRevisionDiffCollection,
-} from "@/db";
 import { useDiffPanelKeyboard } from "@/hooks/useDiffPanelKeyboard";
+import { useChanges, useDiff, usePrefetch } from "@/hooks/useRevisionData";
 import { extractFilePath, parsePatchStats, splitMultiFileDiff } from "@/lib/diff-utils";
+import { traceLog } from "@/lib/trace";
+import { cn } from "@/lib/utils";
 import type { ChangedFileStatus } from "@/schemas";
 import type { Revision } from "@/tauri-commands";
 import { isImageFile } from "@/utils/file-types";
-import { cn } from "@/lib/utils";
 
 interface DiffPanelProps {
 	repoPath: string | null;
@@ -201,34 +197,41 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 	// Keyboard navigation
 	useDiffPanelKeyboard({ scrollContainerRef, revisionsPanelRef, hasFocus });
 
-	// Fetch file changes (for the file list with status)
-	const changesCollection =
-		repoPath && deferredChangeId
-			? getRevisionChangesCollection(repoPath, deferredChangeId)
-			: emptyChangesCollection;
-	const { data: changedFiles = [] } = useLiveQuery(changesCollection);
+	// Prefetch hook for triggering data load
+	const { prefetchDiffs, prefetchChanges } = usePrefetch(repoPath ?? "");
 
-	// Fetch full diff (for the diff content)
-	const diffCollection =
-		repoPath && deferredChangeId
-			? getRevisionDiffCollection(repoPath, deferredChangeId)
-			: emptyDiffCollection;
-	const { data: diffEntries = [] } = useLiveQuery(diffCollection);
-	const revisionDiff = diffEntries[0]?.content ?? "";
+	// Trigger prefetch when selection changes
+	useEffect(() => {
+		if (repoPath && deferredChangeId) {
+			traceLog("selection-change", { changeId: deferredChangeId });
+			prefetchDiffs([deferredChangeId]);
+			prefetchChanges([deferredChangeId]);
+		}
+	}, [repoPath, deferredChangeId, prefetchDiffs, prefetchChanges]);
 
-	// Timing instrumentation for cache analysis
-	console.log(
-		"[DiffPanel] selection:",
-		changeId?.slice(0, 8),
-		"deferred:",
-		deferredChangeId?.slice(0, 8),
-		"changedFiles:",
-		changedFiles.length,
-		"hasDiff:",
-		!!revisionDiff,
-		"at:",
-		performance.now().toFixed(0),
+	// Read file changes from unified collection
+	const changesRecords = useChanges(repoPath ?? "", deferredChangeId);
+	const changedFiles = useMemo(
+		() => changesRecords.map((c) => ({ path: c.path, status: c.status })),
+		[changesRecords],
 	);
+
+	// Read diff from unified collection
+	const diffRecord = useDiff(repoPath ?? "", deferredChangeId);
+	const revisionDiff = diffRecord?.content ?? "";
+
+	// Log when data appears (only on actual changes)
+	useEffect(() => {
+		if (changedFiles.length > 0 && deferredChangeId) {
+			traceLog("changes-loaded", { changeId: deferredChangeId, fileCount: changedFiles.length });
+		}
+	}, [changedFiles.length, deferredChangeId]);
+
+	useEffect(() => {
+		if (diffRecord && deferredChangeId) {
+			traceLog("diff-loaded", { changeId: deferredChangeId, size: revisionDiff.length });
+		}
+	}, [diffRecord, deferredChangeId, revisionDiff.length]);
 
 	// Derive effective diffViewState - reset when changeId changes (no useEffect needed)
 	const effectiveDiffViewState = getDiffViewState(diffViewState, deferredChangeId);
@@ -251,8 +254,7 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 	}, [selectedFiles, changedFiles]);
 
 	// Get first selected file for style override display
-	const firstSelectedFile =
-		effectiveSelectedFiles.size > 0 ? [...effectiveSelectedFiles][0] : null;
+	const firstSelectedFile = effectiveSelectedFiles.size > 0 ? [...effectiveSelectedFiles][0] : null;
 
 	// Get effective diff style for first selected file
 	const effectiveDiffStyle = firstSelectedFile
@@ -297,9 +299,10 @@ export const DiffPanel = forwardRef<HTMLDivElement, DiffPanelProps>(function Dif
 	}
 
 	// Use current data if available, otherwise fall back to last valid state
-	const displayedState = currentPatches
-		? { changeId: deferredChangeId!, patches: currentPatches }
-		: lastValidStateRef.current;
+	const displayedState =
+		currentPatches && deferredChangeId
+			? { changeId: deferredChangeId, patches: currentPatches }
+			: lastValidStateRef.current;
 
 	// Determine if we're showing stale data
 	const isStale = displayedState !== null && displayedState.changeId !== changeId;

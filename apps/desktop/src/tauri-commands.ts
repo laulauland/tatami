@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { Effect } from "effect";
+import { traceEnd, traceStart } from "@/lib/trace";
 
 export type {
 	ChangedFile,
@@ -43,6 +45,50 @@ export async function getRevisionChanges(
 	changeId: string,
 ): Promise<ChangedFile[]> {
 	return invoke<ChangedFile[]>("get_revision_changes", { repoPath, changeId });
+}
+
+/** Result of fetching diff for a single revision in a batch */
+export interface RevisionDiff {
+	change_id: string;
+	diff: string;
+}
+
+/** Result of fetching changed files for a single revision in a batch */
+export interface RevisionChanges {
+	change_id: string;
+	files: ChangedFile[];
+}
+
+/** Fetch diffs for multiple revisions in a single IPC call */
+export function getDiffsBatchEffect(
+	repoPath: string,
+	changeIds: string[],
+): Effect.Effect<RevisionDiff[], Error> {
+	return Effect.tryPromise({
+		try: async () => {
+			const spanId = traceStart("ipc-get-diffs-batch", { count: changeIds.length });
+			const result = await invoke<RevisionDiff[]>("get_diffs_batch", { repoPath, changeIds });
+			traceEnd(spanId, { count: result.length });
+			return result;
+		},
+		catch: (error) => new Error(`Failed to fetch diffs batch: ${error}`),
+	});
+}
+
+/** Fetch changed files for multiple revisions in a single IPC call */
+export function getChangesBatchEffect(
+	repoPath: string,
+	changeIds: string[],
+): Effect.Effect<RevisionChanges[], Error> {
+	return Effect.tryPromise({
+		try: async () => {
+			const spanId = traceStart("ipc-get-changes-batch", { count: changeIds.length });
+			const result = await invoke<RevisionChanges[]>("get_changes_batch", { repoPath, changeIds });
+			traceEnd(spanId, { count: result.length });
+			return result;
+		},
+		catch: (error) => new Error(`Failed to fetch changes batch: ${error}`),
+	});
 }
 
 export async function getRepositories(): Promise<Repository[]> {

@@ -11,6 +11,7 @@ import {
 	useRef,
 } from "react";
 import { Route } from "@/routes/project.$projectId";
+import { traceEnd, traceLog, traceStart } from "@/lib/trace";
 import {
 	debugOverlayEnabledAtom,
 	expandedStacksAtom,
@@ -23,8 +24,9 @@ import {
 	computeRevisionAncestry,
 	type RevisionStack,
 } from "@/components/revision-graph-utils";
-import { getRevisionKey, prefetchRevisionDiffs } from "@/db";
+import { getRevisionKey } from "@/db";
 import { useFocusWithin } from "@/hooks/useFocusWithin";
+import { usePrefetch } from "@/hooks/useRevisionData";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 import { useRevisionGraphNavigation } from "@/hooks/useRevisionGraphNavigation";
 import type { Revision } from "@/tauri-commands";
@@ -92,7 +94,11 @@ function getWorkingCopyChain(revisions: Revision[]): Set<string> {
 }
 
 function buildGraph(revisions: Revision[]): GraphData {
-	if (revisions.length === 0) return { nodes: [], laneCount: 1, rows: [], edgeBindings: [] };
+	const traceId = traceStart("build-graph", { revisionCount: revisions.length });
+	if (revisions.length === 0) {
+		traceEnd(traceId, { rowCount: 0, edgeCount: 0 });
+		return { nodes: [], laneCount: 1, rows: [], edgeBindings: [] };
+	}
 
 	// Map commit_id -> Revision for ancestry lookups
 	const commitMap = new Map(revisions.map((r) => [r.commit_id, r]));
@@ -308,12 +314,21 @@ function buildGraph(revisions: Revision[]): GraphData {
 		}
 	}
 
+	traceEnd(traceId, { rowCount: rows.length, edgeCount: edgeBindings.length });
 	return { nodes, laneCount: globalMaxLane + 1, rows, edgeBindings };
 }
 
 // Compute related revisions (ancestors + descendants) of a selected revision
 function getRelatedRevisions(revisions: Revision[], selectedChangeId: string | null): Set<string> {
-	if (!selectedChangeId) return new Set();
+	const traceId = traceStart("get-related-revisions", {
+		selectedChangeId,
+		revisionCount: revisions.length,
+	});
+
+	if (!selectedChangeId) {
+		traceEnd(traceId, { relatedCount: 0 });
+		return new Set();
+	}
 
 	const related = new Set<string>();
 	const commitIdToChangeId = new Map<string, string>();
@@ -337,7 +352,10 @@ function getRelatedRevisions(revisions: Revision[], selectedChangeId: string | n
 	}
 
 	const selectedCommitId = changeIdToCommitId.get(selectedChangeId);
-	if (!selectedCommitId) return new Set();
+	if (!selectedCommitId) {
+		traceEnd(traceId, { relatedCount: 0 });
+		return new Set();
+	}
 
 	// BFS to find ancestors
 	const ancestorQueue = [selectedCommitId];
@@ -369,6 +387,7 @@ function getRelatedRevisions(revisions: Revision[], selectedChangeId: string | n
 		}
 	}
 
+	traceEnd(traceId, { relatedCount: related.size });
 	return related;
 }
 
@@ -388,6 +407,17 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 	) {
 		const parentRef = useRef<HTMLDivElement>(null);
 		const containerRef = useRef<HTMLDivElement>(null);
+		const prefetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+		// Stabilize revisions array - only update ref when content changes (by length + endpoints)
+		const stableRevisionsRef = useRef(revisions);
+		if (
+			revisions.length !== stableRevisionsRef.current.length ||
+			revisions[0]?.change_id !== stableRevisionsRef.current[0]?.change_id
+		) {
+			stableRevisionsRef.current = revisions;
+		}
+		const stableRevisions = stableRevisionsRef.current;
 
 		// Use native focus tracking
 		const hasFocus = useFocusWithin(containerRef);
@@ -396,23 +426,17 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			laneCount,
 			rows: allRows,
 			edgeBindings,
-		} = useMemo(() => buildGraph(revisions), [revisions]);
+		} = useMemo(() => buildGraph(stableRevisions), [stableRevisions]);
 		const search = useSearch({ from: Route.fullPath });
 		const navigate = useNavigate({ from: Route.fullPath });
 		const [inlineJumpQuery, setInlineJumpQuery] = useAtom(inlineJumpQueryAtom);
 		const inlineJumpMode = inlineJumpQuery !== null;
 
 		// Detect collapsible stacks
-		const stacks = useMemo(() => detectStacks(revisions), [revisions]);
+		const stacks = useMemo(() => detectStacks(stableRevisions), [stableRevisions]);
 
-		// Prefetch diffs for all revisions in background
-		// This eagerly creates TanStack DB collections which trigger async fetches
-		useMemo(() => {
-			if (repoPath && revisions.length > 0) {
-				const changeIds = revisions.map((r) => r.change_id);
-				prefetchRevisionDiffs(repoPath, changeIds);
-			}
-		}, [repoPath, revisions]);
+		// Setup prefetch hooks for visible revision data
+		const { prefetchDiffs, prefetchChanges } = usePrefetch(repoPath ?? "");
 
 		// Track which stacks are expanded (empty = all collapsed by default)
 		const [expandedStacks, setExpandedStacks] = useAtom(expandedStacksAtom);
@@ -482,6 +506,10 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 		// Filter rows to hide collapsed intermediate revisions and replace with a single collapsed stack row
 		const displayRows = useMemo(() => {
+			const traceId = traceStart("compute-display-rows", {
+				allRowsCount: allRows.length,
+			});
+
 			const result: DisplayRow[] = [];
 
 			for (const row of allRows) {
@@ -507,6 +535,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				}
 			}
 
+			traceEnd(traceId, { displayRowCount: result.length });
 			return result;
 		}, [allRows, stackByChangeId, intermediateChangeIds, expandedStacks, changeIdToLane]);
 
@@ -557,26 +586,25 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		}
 
 		// Maps for lookups - by revision key for UI, by commit_id for graph edges
-		const revisionMapByKey = new Map(revisions.map((r) => [getRevisionKey(r), r]));
-		const revisionMapByCommitId = new Map(revisions.map((r) => [r.commit_id, r]));
-
-		// Compute related revisions for dimming logic
-		// When a stack is focused, use the stack's top and bottom as the "selected" revisions
-		const focusedStack = focusedStackId ? stackById.get(focusedStackId) : null;
+		const revisionMapByKey = new Map(stableRevisions.map((r) => [getRevisionKey(r), r]));
+		const revisionMapByCommitId = new Map(stableRevisions.map((r) => [r.commit_id, r]));
 
 		// Defer the selected ID so dimming computation doesn't block selection highlight
 		const deferredSelectedChangeId = useDeferredValue(selectedRevision?.change_id ?? null);
 
+		// Compute related revisions for dimming logic
+		// Use focusedStackId (string) as dependency instead of focusedStack (object) for stability
 		const relatedRevisions = useMemo(() => {
+			const focusedStack = focusedStackId ? stackById.get(focusedStackId) : null;
 			if (focusedStack) {
 				// When stack is focused, highlight the stack endpoints and their ancestors/descendants
-				const topRelated = getRelatedRevisions(revisions, focusedStack.topChangeId);
-				const bottomRelated = getRelatedRevisions(revisions, focusedStack.bottomChangeId);
+				const topRelated = getRelatedRevisions(stableRevisions, focusedStack.topChangeId);
+				const bottomRelated = getRelatedRevisions(stableRevisions, focusedStack.bottomChangeId);
 				// Union of both sets
 				return new Set([...topRelated, ...bottomRelated]);
 			}
-			return getRelatedRevisions(revisions, deferredSelectedChangeId);
-		}, [revisions, focusedStack, deferredSelectedChangeId]);
+			return getRelatedRevisions(stableRevisions, deferredSelectedChangeId);
+		}, [stableRevisions, stackById, focusedStackId, deferredSelectedChangeId]);
 
 		// Build revision key -> displayRow index map for scrolling and edge positioning
 		// IMPORTANT: Use displayRows indices (not rows) to match virtualizer positioning
@@ -594,11 +622,11 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		// Create a mapping of change_id -> commit_id for edge remapping
 		const changeIdToCommitId = useMemo(() => {
 			const map = new Map<string, string>();
-			for (const rev of revisions) {
+			for (const rev of stableRevisions) {
 				map.set(rev.change_id, rev.commit_id);
 			}
 			return map;
-		}, [revisions]);
+		}, [stableRevisions]);
 
 		// Filter edge bindings to handle collapsed/expanded stacks
 		// When a stack is collapsed, edges from/to intermediates should be remapped
@@ -691,7 +719,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 		// Keyboard navigation (j/k/J/K/arrows/g/G/Home/End/l/Space/Enter/Escape)
 		useRevisionGraphNavigation({
-			revisions,
+			revisions: stableRevisions,
 			displayRows,
 			changeIdToIndex,
 			selectedRevision,
@@ -747,7 +775,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 				}
 				return ROW_HEIGHT;
 			},
-			overscan: 10,
+			overscan: 5,
 			debug: debugEnabled,
 		});
 
@@ -796,6 +824,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		}));
 
 		function handleSelect(revisionKey: string, modifiers: { shift: boolean; meta: boolean }) {
+			traceLog("handle-select", { revisionKey, shift: modifiers.shift, meta: modifiers.meta });
+
 			const revision = revisionMapByKey.get(revisionKey);
 			if (!revision) return;
 
@@ -872,6 +902,65 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			rowOffsets.set(item.index, item.start);
 		}
 
+		// Prefetch diffs and changes for visible and nearby revisions
+		// Uses a buffer to prefetch ahead of scroll for smoother experience
+		const PREFETCH_BUFFER = 20;
+		useEffect(() => {
+			if (!repoPath || displayRows.length === 0) return;
+
+			// Clear previous timer
+			if (prefetchDebounceRef.current) {
+				clearTimeout(prefetchDebounceRef.current);
+			}
+
+			// Debounce prefetch by 200ms to avoid jitter during rapid navigation
+			prefetchDebounceRef.current = setTimeout(() => {
+				// Calculate range including buffer
+				const startIdx = Math.max(0, visibleStartRow - PREFETCH_BUFFER);
+				const endIdx = Math.min(displayRows.length - 1, visibleEndRow + PREFETCH_BUFFER);
+
+				// Collect change IDs from display rows in the prefetch range
+				const changeIds: string[] = [];
+				for (let i = startIdx; i <= endIdx; i++) {
+					const displayRow = displayRows[i];
+					if (displayRow.type === "revision") {
+						changeIds.push(displayRow.row.revision.change_id);
+					} else if (displayRow.type === "collapsed-stack") {
+						// Only prefetch representative revision from collapsed stack
+						// (user hasn't expanded it, so don't load all)
+						if (displayRow.stack.changeIds.length > 0) {
+							changeIds.push(displayRow.stack.changeIds[0]);
+						}
+					}
+				}
+
+				// Also prefetch the selected revision if it exists
+				if (selectedRevision) {
+					changeIds.push(selectedRevision.change_id);
+				}
+
+				// Dedupe and cap to avoid overwhelming IPC with large repos
+				const uniqueIds = [...new Set(changeIds)].slice(0, 50);
+				prefetchDiffs(uniqueIds);
+				prefetchChanges(uniqueIds);
+			}, 200);
+
+			// Cleanup on unmount or when deps change
+			return () => {
+				if (prefetchDebounceRef.current) {
+					clearTimeout(prefetchDebounceRef.current);
+				}
+			};
+		}, [
+			repoPath,
+			visibleStartRow,
+			visibleEndRow,
+			displayRows,
+			selectedRevision,
+			prefetchDiffs,
+			prefetchChanges,
+		]);
+
 		// Compute jump hints for visible rows based on change ID prefix matching
 		const { jumpHintsMap, matchingRevisions } = useMemo(() => {
 			const hints = new Map<string, string>();
@@ -932,8 +1021,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const matchingRevisionsRef = useRef(matchingRevisions);
 		matchingRevisionsRef.current = matchingRevisions;
 
-		// Handle jump hint letter key presses (DOM event subscription - legitimate useEffect)
-		// biome-ignore lint/correctness/useExhaustiveDependencies: keyboard event handler pattern
+		// Handle jump hint letter key presses (DOM event subscription)
 		useEffect(() => {
 			if (!inlineJumpMode) return;
 
@@ -1083,7 +1171,6 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 									return (
 										<div
 											key={`collapsed-${stack.id}`}
-											ref={rowVirtualizer.measureElement}
 											data-index={virtualRow.index}
 											className="absolute left-0 w-full"
 											style={{
@@ -1166,7 +1253,6 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 								return (
 									<div
 										key={getRevisionKey(row.revision)}
-										ref={rowVirtualizer.measureElement}
 										data-index={virtualRow.index}
 										className="absolute left-0 w-full"
 										style={{

@@ -435,20 +435,7 @@ function createRevisionChangesCollection(repoPath: string, changeId: string) {
 			queryClient,
 			queryKey: ["revision-changes", repoPath, changeId],
 			queryFn: async () => {
-				console.log(
-					"[DB] FETCHING changes for",
-					changeId.slice(0, 8),
-					"at:",
-					performance.now().toFixed(0),
-				);
-				const changes = await getRevisionChanges(repoPath, changeId);
-				console.log(
-					"[DB] FETCHED changes for",
-					changeId.slice(0, 8),
-					"at:",
-					performance.now().toFixed(0),
-				);
-				return changes;
+				return await getRevisionChanges(repoPath, changeId);
 			},
 			getKey: (file: ChangedFile) => file.path,
 		}),
@@ -497,19 +484,7 @@ function createRevisionDiffCollection(repoPath: string, changeId: string) {
 			queryClient,
 			queryKey: ["revision-diff", repoPath, changeId],
 			queryFn: async () => {
-				console.log(
-					"[DB] FETCHING diff for",
-					changeId.slice(0, 8),
-					"at:",
-					performance.now().toFixed(0),
-				);
 				const diff = await getRevisionDiff(repoPath, changeId);
-				console.log(
-					"[DB] FETCHED diff for",
-					changeId.slice(0, 8),
-					"at:",
-					performance.now().toFixed(0),
-				);
 				return [{ id: "diff" as const, content: diff }];
 			},
 			getKey: (entry: DiffEntry) => entry.id,
@@ -616,3 +591,68 @@ export const emptyCommitRecencyCollection = createCollection({
 		getKey: (entry: CommitRecencyEntry) => entry.id,
 	}),
 });
+
+// ============================================================================
+// Unified Diffs Collection (single collection for all revision diffs)
+// ============================================================================
+
+/**
+ * Unified diff record - stores diff content keyed by repoPath:changeId.
+ * This replaces the per-revision collection pattern which caused GC issues.
+ */
+export interface DiffRecord {
+	repoPath: string;
+	changeId: string;
+	content: string;
+}
+
+function getDiffRecordKey(d: DiffRecord): string {
+	return `${d.repoPath}:${d.changeId}`;
+}
+
+const diffsQueryKey = ["diffs"] as const;
+
+export const diffsCollection = createCollection({
+	...queryCollectionOptions({
+		queryClient,
+		queryKey: diffsQueryKey,
+		queryFn: async () => [] as DiffRecord[],
+		getKey: getDiffRecordKey,
+	}),
+	startSync: true,
+});
+
+export type DiffsCollection = typeof diffsCollection;
+
+// ============================================================================
+// Unified Changes Collection (single collection for all revision file lists)
+// ============================================================================
+
+/**
+ * Unified change record - stores changed files keyed by repoPath:changeId:path.
+ * This replaces the per-revision collection pattern which caused GC issues.
+ */
+export interface ChangeRecord {
+	repoPath: string;
+	changeId: string;
+	path: string;
+	status: "added" | "modified" | "deleted";
+}
+
+function getChangeRecordKey(c: ChangeRecord): string {
+	return `${c.repoPath}:${c.changeId}:${c.path}`;
+}
+
+const changesQueryKey = ["changes"] as const;
+
+export const changesCollection = createCollection({
+	...queryCollectionOptions({
+		queryClient,
+		queryKey: changesQueryKey,
+		queryFn: async () => [] as ChangeRecord[],
+		getKey: getChangeRecordKey,
+	}),
+	startSync: true,
+});
+
+export type ChangesCollection = typeof changesCollection;

@@ -984,6 +984,27 @@ const handlers: Record<string, MockHandler> = {
 +This is a new line
  Welcome to the project`,
 	get_revision_changes: (): ChangedFile[] => mockChangedFiles,
+	get_diffs_batch: (args): { change_id: string; diff: string }[] => {
+		const changeIds = args.changeIds as string[];
+		return changeIds.map((change_id) => ({
+			change_id,
+			diff: `--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,3 +1,4 @@
+ fn main() {
+-    println!("old");
++    println!("new");
++    println!("extra");
+ }`,
+		}));
+	},
+	get_changes_batch: (args): { change_id: string; files: ChangedFile[] }[] => {
+		const changeIds = args.changeIds as string[];
+		return changeIds.map((change_id) => ({
+			change_id,
+			files: mockChangedFiles,
+		}));
+	},
 	watch_repository: () => undefined,
 	unwatch_repository: () => undefined,
 	generate_change_ids: (args) => {

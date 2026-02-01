@@ -72,7 +72,7 @@ export function RevisionRow({
 			role="button"
 			tabIndex={0}
 			style={{ height: ROW_HEIGHT }}
-			className={`flex relative select-none outline-none ${
+			className={`flex relative select-none outline-none contain-layout contain-style ${
 				revision.is_immutable ? "opacity-60" : ""
 			} ${isDimmed ? "opacity-40" : ""}`}
 			data-selected={isSelected || undefined}
@@ -162,7 +162,7 @@ export function RevisionRow({
 			<div className="shrink-0" style={{ width: nodeAreaWidth + 8 }} />
 			{/* Content area with visual styling - full row height */}
 			<div
-				className={`relative flex-1 mr-2 min-w-0 overflow-hidden text-card-foreground flex flex-col justify-center py-1 border-b transition-colors rounded-md ${
+				className={`relative flex-1 mr-2 min-w-0 overflow-hidden text-card-foreground flex flex-col justify-center py-1 border-b rounded-md ${
 					isDragOver
 						? "bg-primary/20 border-primary/50"
 						: isChecked || isFocused

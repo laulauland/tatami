@@ -126,7 +126,7 @@ export function GraphEdge({
 						strokeOpacity={0.7}
 						strokeDasharray="3 6"
 						strokeLinecap="round"
-						className="group-hover:[stroke-width:3] group-hover:[stroke-opacity:1] transition-[stroke-width,stroke-opacity] duration-150"
+						className="group-hover:scale-[1.5] group-hover:[stroke-opacity:1] transition-[transform,stroke-opacity] duration-150 origin-center"
 						data-edge-type="collapsed-stack"
 						data-stack-id={collapsedStackId}
 						data-source-revision={sourceRevision.change_id}
@@ -183,7 +183,7 @@ export function GraphEdge({
 						strokeWidth={hoverStrokeWidth}
 						strokeOpacity={hoverStrokeOpacity}
 						strokeDasharray={isDashed ? "4 4" : undefined}
-						className="transition-[stroke-width,stroke-opacity] duration-150"
+						className=""
 						data-edge-type={edgeType}
 						data-source-revision={sourceRevision.change_id}
 						data-target-revision={targetRevision?.change_id}

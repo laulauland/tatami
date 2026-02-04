@@ -4,14 +4,14 @@ import type { Revision } from "@/tauri-commands";
 export type CommitRecency = Record<string, number>;
 
 /**
- * Ancestry information for a revision within the visible revset.
+ * Direct parent/child relationships within the visible revset.
  * Used to determine graph edges and lane allocation.
+ *
+ * Note: We intentionally do NOT precompute transitive ancestors/descendants.
+ * That would be O(n²) memory for large graphs. Instead, ancestry queries
+ * are computed on-demand via BFS (see getRelatedRevisions in RevisionGraph).
  */
 export interface RevisionAncestry {
-	/** commit_id -> Set of ancestor commit_ids within the visible revset */
-	ancestors: Map<string, Set<string>>;
-	/** commit_id -> Set of descendant commit_ids within the visible revset */
-	descendants: Map<string, Set<string>>;
 	/** commit_id -> direct parent commit_ids within the visible revset */
 	parents: Map<string, string[]>;
 	/** commit_id -> direct child commit_ids within the visible revset */
@@ -19,14 +19,15 @@ export interface RevisionAncestry {
 }
 
 /**
- * Computes ancestor/descendant relationships for all revisions within the visible revset.
- * This is used to determine which revisions are actually related and should be connected by edges.
+ * Computes direct parent/child relationships for all revisions within the visible revset.
+ * This is O(n) and used to determine graph edges.
+ *
+ * Transitive ancestry (ancestors/descendants) is NOT precomputed here to avoid O(n²) memory.
+ * Use on-demand BFS for ancestry queries (see getRelatedRevisions in RevisionGraph).
  */
 export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry {
 	if (revisions.length === 0) {
 		return {
-			ancestors: new Map(),
-			descendants: new Map(),
 			parents: new Map(),
 			children: new Map(),
 		};
@@ -61,103 +62,7 @@ export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry
 		}
 	}
 
-	// Compute transitive ancestors for each commit using BFS
-	const ancestors = new Map<string, Set<string>>();
-	for (const rev of revisions) {
-		const ancestorSet = new Set<string>();
-		const queue = [...(parents.get(rev.commit_id) ?? [])];
-
-		while (queue.length > 0) {
-			const parentId = queue.shift();
-			if (!parentId || ancestorSet.has(parentId)) continue;
-			ancestorSet.add(parentId);
-			queue.push(...(parents.get(parentId) ?? []));
-		}
-
-		ancestors.set(rev.commit_id, ancestorSet);
-	}
-
-	// Compute transitive descendants for each commit using BFS
-	const descendants = new Map<string, Set<string>>();
-	for (const rev of revisions) {
-		const descendantSet = new Set<string>();
-		const queue = [...(children.get(rev.commit_id) ?? [])];
-
-		while (queue.length > 0) {
-			const childId = queue.shift();
-			if (!childId || descendantSet.has(childId)) continue;
-			descendantSet.add(childId);
-			queue.push(...(children.get(childId) ?? []));
-		}
-
-		descendants.set(rev.commit_id, descendantSet);
-	}
-
-	return { ancestors, descendants, parents, children };
-}
-
-/**
- * Checks if two revisions are related (one is ancestor/descendant of the other).
- */
-export function areRevisionsRelated(
-	commitIdA: string,
-	commitIdB: string,
-	ancestry: RevisionAncestry,
-): boolean {
-	if (commitIdA === commitIdB) return true;
-	const ancestorsA = ancestry.ancestors.get(commitIdA);
-	const ancestorsB = ancestry.ancestors.get(commitIdB);
-	if (ancestorsA?.has(commitIdB)) return true;
-	if (ancestorsB?.has(commitIdA)) return true;
-	return false;
-}
-
-/**
- * Groups revisions into connected components based on ancestry relationships.
- * Each component contains revisions that are related (share ancestor/descendant relationships).
- */
-export function groupIntoConnectedComponents(
-	revisions: Revision[],
-	ancestry: RevisionAncestry,
-): Map<string, string[]> {
-	const components = new Map<string, string[]>(); // componentId -> commit_ids
-	const commitToComponent = new Map<string, string>();
-
-	for (const rev of revisions) {
-		if (commitToComponent.has(rev.commit_id)) continue;
-
-		// Start a new component with this revision as the root
-		const componentId = rev.commit_id;
-		const componentMembers: string[] = [];
-		const queue = [rev.commit_id];
-
-		while (queue.length > 0) {
-			const commitId = queue.shift();
-			if (!commitId || commitToComponent.has(commitId)) continue;
-
-			commitToComponent.set(commitId, componentId);
-			componentMembers.push(commitId);
-
-			// Add all ancestors and descendants to the component
-			const ancestorSet = ancestry.ancestors.get(commitId) ?? new Set();
-			const descendantSet = ancestry.descendants.get(commitId) ?? new Set();
-
-			for (const ancestorId of ancestorSet) {
-				if (!commitToComponent.has(ancestorId)) {
-					queue.push(ancestorId);
-				}
-			}
-			for (const descendantId of descendantSet) {
-				if (!commitToComponent.has(descendantId)) {
-					queue.push(descendantId);
-				}
-			}
-		}
-
-		components.set(componentId, componentMembers);
-	}
-
-	return components;
+	return { parents, children };
 }
 
 /**

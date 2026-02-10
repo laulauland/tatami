@@ -13,7 +13,10 @@ import {
 	getRevisionDiff,
 	getRevisions,
 	jjAbandon,
+	jjDescribe,
 	jjEdit,
+	jjGitFetch,
+	jjGitPush,
 	jjNew,
 	removeRepository,
 	undoOperation,
@@ -138,12 +141,73 @@ async function setupRepoWatcher(repoPath: string): Promise<void> {
 			await queryClient.invalidateQueries({ queryKey: ["revision-changes", repoPath] });
 			await queryClient.invalidateQueries({ queryKey: ["revision-diff", repoPath] });
 			await queryClient.invalidateQueries({ queryKey: ["commit-recency", repoPath] });
+			await queryClient.invalidateQueries({ queryKey: ["status", repoPath] });
+			await queryClient.invalidateQueries({ queryKey: ["conflict-paths", repoPath] });
 			// DISABLED: Lineage calculations commented out
 			// await queryClient.invalidateQueries({ queryKey: ["lineage"] });
 		}
 	});
 
 	repoWatchers.set(repoPath, { unlisten, refCount: 1 });
+}
+
+function isAuthError(errorText: string): boolean {
+	const text = errorText.toLowerCase();
+	return (
+		text.includes("auth") ||
+		text.includes("authentication") ||
+		text.includes("permission denied") ||
+		text.includes("publickey") ||
+		text.includes("credential") ||
+		text.includes("forbidden")
+	);
+}
+
+async function invalidateRepositoryQueries(repoPath: string): Promise<void> {
+	await queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+	await queryClient.invalidateQueries({ queryKey: ["revision-changes", repoPath] });
+	await queryClient.invalidateQueries({ queryKey: ["revision-diff", repoPath] });
+	await queryClient.invalidateQueries({ queryKey: ["commit-recency", repoPath] });
+	await queryClient.invalidateQueries({ queryKey: ["status", repoPath] });
+	await queryClient.invalidateQueries({ queryKey: ["conflict-paths", repoPath] });
+}
+
+export async function syncRepository(repoPath: string, preset?: string): Promise<void> {
+	const limit = preset === "full_history" ? 10000 : 100;
+
+	try {
+		await jjGitFetch(repoPath, "origin");
+		await invalidateRepositoryQueries(repoPath);
+
+		const revisions = await getRevisions(repoPath, limit, undefined, preset);
+		const aheadBookmarks = Array.from(
+			new Set(
+				revisions.flatMap((revision) =>
+					revision.bookmarks
+						.filter((bookmark) => bookmark.is_ahead)
+						.map((bookmark) => bookmark.name),
+				),
+			),
+		);
+
+		if (aheadBookmarks.length > 0) {
+			await jjGitPush(repoPath, aheadBookmarks, "origin");
+			await invalidateRepositoryQueries(repoPath);
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (isAuthError(message)) {
+			toast.error("Sync failed: authentication error. Check SSH keys or credential helper.", {
+				description: message,
+				duration: Number.POSITIVE_INFINITY,
+			});
+			return;
+		}
+
+		toast.error(`Sync failed: ${message}`, {
+			duration: Number.POSITIVE_INFINITY,
+		});
+	}
 }
 
 // ============================================================================
@@ -419,6 +483,46 @@ export function abandonRevision(
 				collection.utils.writeUpsert([revision]);
 			}
 			toast.error(`Failed to abandon revision: ${error}`, { duration: Number.POSITIVE_INFINITY });
+		});
+}
+
+export function describeRevision(
+	collection: RevisionsCollection,
+	repoPath: string,
+	revision: Revision,
+	description: string,
+) {
+	const mutationId = `describe-${Date.now()}-${Math.random()}`;
+	const previousDescription = revision.description;
+
+	// Optimistic update
+	collection.utils.writeUpsert([{ ...revision, description }]);
+
+	trackMutation(mutationId, jjDescribe(repoPath, revision.change_id_short, description))
+		.then((result) => {
+			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+			toast.success(`Updated description for ${revision.change_id_short}`, {
+				action: {
+					label: "Undo",
+					onClick: () => {
+						undoOperation(repoPath, result.operation_id)
+							.then(() => {
+								queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+								toast.success("Undo successful");
+							})
+							.catch((err) => {
+								toast.error(`Undo failed: ${err}`, { duration: Number.POSITIVE_INFINITY });
+							});
+					},
+				},
+			});
+		})
+		.catch((error) => {
+			// Revert optimistic update on failure
+			collection.utils.writeUpsert([{ ...revision, description: previousDescription }]);
+			toast.error(`Failed to update description: ${error}`, {
+				duration: Number.POSITIVE_INFINITY,
+			});
 		});
 }
 

@@ -16,8 +16,8 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use storage::{AppLayout, Project, Storage, get_storage};
-use tauri::{AppHandle, Emitter, Manager};
 use tauri::menu::{MenuBuilder, MenuItem, SubmenuBuilder};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 use watcher::{WatcherManager, get_watcher_manager};
 
@@ -61,6 +61,15 @@ async fn get_revisions(
 async fn get_status(repo_path: String) -> Result<WorkingCopyStatus, String> {
     let path = Path::new(&repo_path);
     repo::status::fetch_status(path).map_err(|e| format!("Failed to fetch status: {}", e))
+}
+
+#[tauri::command]
+async fn get_conflict_paths(repo_path: String, change_id: String) -> Result<Vec<String>, String> {
+    let path = Path::new(&repo_path);
+    let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .get_conflict_paths(&change_id)
+        .map_err(|e| format!("Failed to get conflict paths: {}", e))
 }
 
 #[tauri::command]
@@ -362,7 +371,10 @@ fn compute_revision_diff_inner(jj_repo: &JjRepo, change_id: &str) -> Result<Stri
 }
 
 /// Compute changed files for a single revision (helper function for batch processing)
-fn compute_revision_changes_inner(jj_repo: &JjRepo, change_id: &str) -> Result<Vec<ChangedFile>, String> {
+fn compute_revision_changes_inner(
+    jj_repo: &JjRepo,
+    change_id: &str,
+) -> Result<Vec<ChangedFile>, String> {
     use jj_lib::backend::TreeValue;
     use jj_lib::matchers::EverythingMatcher;
 
@@ -439,15 +451,15 @@ async fn get_diffs_batch(
     // Process sequentially since JjRepo is not Sync
     let results: Vec<RevisionDiff> = change_ids
         .iter()
-        .filter_map(|change_id| {
-            match compute_revision_diff_inner(&jj_repo, change_id) {
+        .filter_map(
+            |change_id| match compute_revision_diff_inner(&jj_repo, change_id) {
                 Ok(diff) => Some(RevisionDiff {
                     change_id: change_id.clone(),
                     diff,
                 }),
                 Err(_) => None,
-            }
-        })
+            },
+        )
         .collect();
 
     let total_ms = batch_start.elapsed().as_millis();
@@ -459,7 +471,11 @@ async fn get_diffs_batch(
             batch_size,
             total_ms,
             open_repo_ms,
-            if batch_size > 0 { total_ms / batch_size as u128 } else { 0 }
+            if batch_size > 0 {
+                total_ms / batch_size as u128
+            } else {
+                0
+            }
         );
     }
 
@@ -477,15 +493,15 @@ async fn get_changes_batch(
     // Process sequentially since JjRepo is not Sync
     let results: Vec<RevisionChanges> = change_ids
         .iter()
-        .filter_map(|change_id| {
-            match compute_revision_changes_inner(&jj_repo, change_id) {
+        .filter_map(
+            |change_id| match compute_revision_changes_inner(&jj_repo, change_id) {
                 Ok(files) => Some(RevisionChanges {
                     change_id: change_id.clone(),
                     files,
                 }),
                 Err(_) => None,
-            }
-        })
+            },
+        )
         .collect();
 
     Ok(results)
@@ -599,6 +615,41 @@ async fn jj_abandon(repo_path: String, change_id: String) -> Result<MutationResu
 }
 
 #[tauri::command]
+async fn jj_describe(
+    repo_path: String,
+    change_id: String,
+    description: String,
+) -> Result<MutationResult, String> {
+    let path = Path::new(&repo_path);
+    let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .describe_revision(&change_id, description)
+        .map_err(|e| format!("Failed to describe revision: {}", e))
+}
+
+#[tauri::command]
+async fn jj_git_fetch(repo_path: String, remote: Option<String>) -> Result<MutationResult, String> {
+    let path = Path::new(&repo_path);
+    let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .git_fetch(remote)
+        .map_err(|e| format!("Failed to fetch from git remote: {}", e))
+}
+
+#[tauri::command]
+async fn jj_git_push(
+    repo_path: String,
+    remote: Option<String>,
+    bookmark_names: Vec<String>,
+) -> Result<MutationResult, String> {
+    let path = Path::new(&repo_path);
+    let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .git_push(remote, bookmark_names)
+        .map_err(|e| format!("Failed to push bookmarks to git remote: {}", e))
+}
+
+#[tauri::command]
 async fn get_operations(repo_path: String, limit: usize) -> Result<Vec<Operation>, String> {
     let path = Path::new(&repo_path);
     let jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
@@ -648,9 +699,7 @@ async fn get_lineage_batch(
 
     let results: Vec<LineageResult> = change_ids
         .iter()
-        .filter_map(|change_id| {
-            repo::log::get_lineage(path, change_id).ok()
-        })
+        .filter_map(|change_id| repo::log::get_lineage(path, change_id).ok())
         .collect();
 
     Ok(results)
@@ -679,7 +728,9 @@ async fn get_file_content_base64(
 
     let content = match version.as_str() {
         "current" => jj.get_file_content(&commit, &file_path).unwrap_or_default(),
-        "parent" => jj.get_parent_file_content(&commit, &file_path).unwrap_or_default(),
+        "parent" => jj
+            .get_parent_file_content(&commit, &file_path)
+            .unwrap_or_default(),
         _ => return Err("Invalid version: use 'current' or 'parent'".to_string()),
     };
 
@@ -692,33 +743,40 @@ async fn get_file_content_base64(
 /// Handle "Open Project" menu action: show folder picker, find jj repo, save project, emit event
 fn handle_open_project(app_handle: &AppHandle) {
     let handle = app_handle.clone();
-    
+
     app_handle.dialog().file().pick_folder(move |folder_path| {
         let Some(folder) = folder_path else { return };
         let path_str = folder.to_string();
-        
+
         // Find jj repo root
         let Some(repo_path) = repo::find_jj_repo(&PathBuf::from(&path_str)) else {
             // TODO: Could show an error dialog here
             return;
         };
         let repo_path_str = repo_path.to_string_lossy().to_string();
-        
+
         // Save project and emit event for frontend navigation
         let handle_clone = handle.clone();
         tauri::async_runtime::spawn(async move {
             let storage = get_storage(&handle_clone);
-            
+
             // Check if project already exists
-            let existing = storage.find_project_by_path(&repo_path_str).await.ok().flatten();
-            let project_id = existing.as_ref().map(|p| p.id.clone())
+            let existing = storage
+                .find_project_by_path(&repo_path_str)
+                .await
+                .ok()
+                .flatten();
+            let project_id = existing
+                .as_ref()
+                .map(|p| p.id.clone())
                 .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-            
-            let name = repo_path.file_name()
+
+            let name = repo_path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("Unknown")
                 .to_string();
-            
+
             let project = Project {
                 id: project_id.clone(),
                 path: repo_path_str,
@@ -726,12 +784,12 @@ fn handle_open_project(app_handle: &AppHandle) {
                 last_opened_at: chrono::Utc::now().timestamp_millis(),
                 revset_preset: None,
             };
-            
+
             if let Err(e) = storage.upsert_project(&project).await {
                 eprintln!("Failed to save project: {}", e);
                 return;
             }
-            
+
             // Emit event for frontend to navigate
             let _ = handle_clone.emit("open-project", project_id);
         });
@@ -739,8 +797,14 @@ fn handle_open_project(app_handle: &AppHandle) {
 }
 
 fn build_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let open_project = MenuItem::with_id(app, "open-project", "Open Project...", true, Some("Ctrl+Cmd+O"))?;
-    
+    let open_project = MenuItem::with_id(
+        app,
+        "open-project",
+        "Open Project...",
+        true,
+        Some("Ctrl+Cmd+O"),
+    )?;
+
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&open_project)
         .separator()
@@ -757,9 +821,7 @@ fn build_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .select_all()
         .build()?;
 
-    let view_menu = SubmenuBuilder::new(app, "View")
-        .fullscreen()
-        .build()?;
+    let view_menu = SubmenuBuilder::new(app, "View").fullscreen().build()?;
 
     let window_menu = SubmenuBuilder::new(app, "Window")
         .minimize()
@@ -770,7 +832,7 @@ fn build_app_menu(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(debug_assertions)]
     let reload_item = MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?;
-    
+
     #[cfg(debug_assertions)]
     let debug_menu = SubmenuBuilder::new(app, "Debug")
         .item(&reload_item)
@@ -821,17 +883,15 @@ pub fn run() {
             }
 
             // Handle menu events
-            app.on_menu_event(|app_handle, event| {
-                match event.id().0.as_str() {
-                    "open-project" => handle_open_project(app_handle),
-                    #[cfg(debug_assertions)]
-                    "reload" => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.eval("window.location.reload()");
-                        }
+            app.on_menu_event(|app_handle, event| match event.id().0.as_str() {
+                "open-project" => handle_open_project(app_handle),
+                #[cfg(debug_assertions)]
+                "reload" => {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.eval("window.location.reload()");
                     }
-                    _ => {}
                 }
+                _ => {}
             });
 
             Ok(())
@@ -840,6 +900,7 @@ pub fn run() {
             find_repository,
             get_revisions,
             get_status,
+            get_conflict_paths,
             get_file_diff,
             get_revision_diff,
             get_revision_changes,
@@ -861,6 +922,9 @@ pub fn run() {
             jj_new,
             jj_edit,
             jj_abandon,
+            jj_describe,
+            jj_git_fetch,
+            jj_git_push,
             get_operations,
             undo_operation,
         ])
@@ -909,13 +973,85 @@ mod tests {
     /// Get the working copy change ID.
     fn get_wc_change_id(repo_path: &Path) -> String {
         let jj_repo = JjRepo::open(repo_path).expect("Failed to open repo");
-        let repo = jj_repo.repo_loader().load_at_head().expect("Failed to load repo");
+        let repo = jj_repo
+            .repo_loader()
+            .load_at_head()
+            .expect("Failed to load repo");
         let wc_commit_id = repo
             .view()
             .get_wc_commit_id(jj_repo.workspace_name())
             .expect("No working copy");
-        let wc_commit = repo.store().get_commit(wc_commit_id).expect("Failed to get commit");
+        let wc_commit = repo
+            .store()
+            .get_commit(wc_commit_id)
+            .expect("Failed to get commit");
         wc_commit.change_id().reverse_hex()
+    }
+
+    fn create_conflicted_working_copy(repo_path: &Path) -> String {
+        fs::write(repo_path.join("f.txt"), "base\n").expect("Failed to write base file");
+        snapshot_working_copy(repo_path);
+        let base_change_id = get_wc_change_id(repo_path);
+
+        let left_new = Command::new("jj")
+            .args(["new", "-r", "@"])
+            .current_dir(repo_path)
+            .status()
+            .expect("Failed to create left branch");
+        assert!(left_new.success(), "jj new for left branch failed");
+
+        fs::write(repo_path.join("f.txt"), "left\n").expect("Failed to write left file");
+        snapshot_working_copy(repo_path);
+        let left_change_id = get_wc_change_id(repo_path);
+
+        let edit_base = Command::new("jj")
+            .args(["edit", &base_change_id])
+            .current_dir(repo_path)
+            .status()
+            .expect("Failed to return to base");
+        assert!(edit_base.success(), "jj edit base failed");
+
+        let right_new = Command::new("jj")
+            .args(["new", "-r", "@"])
+            .current_dir(repo_path)
+            .status()
+            .expect("Failed to create right branch");
+        assert!(right_new.success(), "jj new for right branch failed");
+
+        fs::write(repo_path.join("f.txt"), "right\n").expect("Failed to write right file");
+        snapshot_working_copy(repo_path);
+        let right_change_id = get_wc_change_id(repo_path);
+
+        let merge = Command::new("jj")
+            .args(["new", &left_change_id, &right_change_id])
+            .current_dir(repo_path)
+            .status()
+            .expect("Failed to create merge conflict");
+        assert!(merge.success(), "jj new merge failed");
+
+        get_wc_change_id(repo_path)
+    }
+
+    #[test]
+    fn test_get_conflict_paths() {
+        let (_temp_dir, repo_path) = create_test_repo();
+        let conflicted_change_id = create_conflicted_working_copy(&repo_path);
+
+        let jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+        let conflict_paths = jj_repo
+            .get_conflict_paths(&conflicted_change_id)
+            .expect("Failed to get conflict paths");
+
+        assert_eq!(conflict_paths, vec!["f.txt".to_string()]);
+    }
+
+    #[test]
+    fn test_working_copy_status_has_conflict() {
+        let (_temp_dir, repo_path) = create_test_repo();
+        create_conflicted_working_copy(&repo_path);
+
+        let status = repo::status::fetch_status(&repo_path).expect("Failed to fetch status");
+        assert!(status.has_conflict, "Working copy status should report conflict");
     }
 
     #[test]
@@ -939,8 +1075,14 @@ mod tests {
 
         let diff = result.unwrap();
         // The diff should show the new file
-        assert!(diff.contains("test.txt"), "Diff should contain the filename");
-        assert!(diff.contains("Hello, world!"), "Diff should contain the file content");
+        assert!(
+            diff.contains("test.txt"),
+            "Diff should contain the filename"
+        );
+        assert!(
+            diff.contains("Hello, world!"),
+            "Diff should contain the file content"
+        );
 
         drop(temp_dir); // Cleanup
     }
@@ -955,10 +1097,16 @@ mod tests {
 
         // Compute diff for empty commit
         let result = compute_revision_diff_inner(&jj_repo, &change_id);
-        assert!(result.is_ok(), "compute_revision_diff_inner should succeed for empty commit");
+        assert!(
+            result.is_ok(),
+            "compute_revision_diff_inner should succeed for empty commit"
+        );
 
         let diff = result.unwrap();
-        assert!(diff.is_empty(), "Diff should be empty for commit with no changes");
+        assert!(
+            diff.is_empty(),
+            "Diff should be empty for commit with no changes"
+        );
 
         drop(temp_dir);
     }
@@ -980,7 +1128,10 @@ mod tests {
 
         // Compute changes
         let result = compute_revision_changes_inner(&jj_repo, &change_id);
-        assert!(result.is_ok(), "compute_revision_changes_inner should succeed");
+        assert!(
+            result.is_ok(),
+            "compute_revision_changes_inner should succeed"
+        );
 
         let files = result.unwrap();
         assert_eq!(files.len(), 1, "Should have exactly one changed file");
@@ -1000,10 +1151,16 @@ mod tests {
 
         // Compute changes for empty commit
         let result = compute_revision_changes_inner(&jj_repo, &change_id);
-        assert!(result.is_ok(), "compute_revision_changes_inner should succeed for empty commit");
+        assert!(
+            result.is_ok(),
+            "compute_revision_changes_inner should succeed for empty commit"
+        );
 
         let files = result.unwrap();
-        assert!(files.is_empty(), "Should have no changed files for empty commit");
+        assert!(
+            files.is_empty(),
+            "Should have no changed files for empty commit"
+        );
 
         drop(temp_dir);
     }
@@ -1139,5 +1296,287 @@ mod tests {
         assert_eq!(results[0].files[0].status, "added");
 
         drop(temp_dir);
+    }
+
+    fn get_root_change_id(repo_path: &Path) -> String {
+        let jj_repo = JjRepo::open(repo_path).expect("Failed to open repo");
+        let repo = jj_repo
+            .repo_loader()
+            .load_at_head()
+            .expect("Failed to load repo");
+        let root_commit = repo
+            .store()
+            .get_commit(repo.store().root_commit_id())
+            .expect("Failed to get root commit");
+        root_commit.change_id().reverse_hex()
+    }
+
+    fn setup_git_remote_with_main_branch() -> (TempDir, PathBuf) {
+        let temp_dir = TempDir::new().expect("Failed to create temp directory for git remote");
+        let remote_path = temp_dir.path().join("remote.git");
+        let seed_path = temp_dir.path().join("seed");
+
+        let init_remote = Command::new("git")
+            .args([
+                "init",
+                "--bare",
+                remote_path.to_str().expect("Invalid remote path"),
+            ])
+            .status()
+            .expect("Failed to initialize bare git remote");
+        assert!(init_remote.success(), "git init --bare failed");
+
+        fs::create_dir_all(&seed_path).expect("Failed to create seed repo dir");
+
+        let init_seed = Command::new("git")
+            .args(["init"])
+            .current_dir(&seed_path)
+            .status()
+            .expect("Failed to initialize seed git repo");
+        assert!(init_seed.success(), "git init failed for seed repo");
+
+        let config_name = Command::new("git")
+            .args(["config", "user.name", "Tatami Test"])
+            .current_dir(&seed_path)
+            .status()
+            .expect("Failed to configure git user.name");
+        assert!(config_name.success(), "git config user.name failed");
+
+        let config_email = Command::new("git")
+            .args(["config", "user.email", "tatami-tests@example.com"])
+            .current_dir(&seed_path)
+            .status()
+            .expect("Failed to configure git user.email");
+        assert!(config_email.success(), "git config user.email failed");
+
+        fs::write(seed_path.join("README.md"), "seed\n").expect("Failed to write seed file");
+
+        let add = Command::new("git")
+            .args(["add", "README.md"])
+            .current_dir(&seed_path)
+            .status()
+            .expect("Failed to git add seed file");
+        assert!(add.success(), "git add failed");
+
+        let commit = Command::new("git")
+            .args(["commit", "-m", "seed commit"])
+            .current_dir(&seed_path)
+            .status()
+            .expect("Failed to create seed commit");
+        assert!(commit.success(), "git commit failed");
+
+        let rename_branch = Command::new("git")
+            .args(["branch", "-M", "main"])
+            .current_dir(&seed_path)
+            .status()
+            .expect("Failed to rename seed branch to main");
+        assert!(rename_branch.success(), "git branch -M main failed");
+
+        let add_remote = Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                remote_path.to_str().expect("Invalid remote path"),
+            ])
+            .current_dir(&seed_path)
+            .status()
+            .expect("Failed to add origin remote in seed repo");
+        assert!(add_remote.success(), "git remote add origin failed");
+
+        let push_main = Command::new("git")
+            .args(["push", "-u", "origin", "main"])
+            .current_dir(&seed_path)
+            .status()
+            .expect("Failed to push seed main branch");
+        assert!(push_main.success(), "git push origin main failed");
+
+        (temp_dir, remote_path)
+    }
+
+    #[test]
+    fn test_describe_revision() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        // Create a file so we have a non-root working-copy commit to describe
+        let file_path = repo_path.join("describe.txt");
+        fs::write(&file_path, "describe me\n").expect("Failed to write file");
+        snapshot_working_copy(&repo_path);
+
+        let change_id = get_wc_change_id(&repo_path);
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        let result = jj_repo
+            .describe_revision(&change_id, "New description".to_string())
+            .expect("describe_revision should succeed");
+
+        assert!(
+            !result.operation_id.is_empty(),
+            "Mutation result should include operation_id"
+        );
+
+        // Change ID should stay the same after describe rewrite
+        assert_eq!(get_wc_change_id(&repo_path), change_id);
+
+        let described_commit = jj_repo
+            .get_commit(&change_id)
+            .expect("Failed to load described commit");
+        assert_eq!(described_commit.description(), "New description");
+
+        let operations = jj_repo
+            .list_operations(20)
+            .expect("Failed to list operations");
+        assert!(
+            operations.iter().any(|op| op.id == result.operation_id),
+            "Describe operation should appear in operation log"
+        );
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_describe_immutable_rejected() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        let root_change_id = get_root_change_id(&repo_path);
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        let error = jj_repo
+            .describe_revision(&root_change_id, "should fail".to_string())
+            .expect_err("Describing immutable root commit should fail");
+
+        assert!(
+            error.to_string().contains("immutable"),
+            "Error should mention immutable"
+        );
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_describe_empty_message() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        // Create a file so we have a mutable commit to describe
+        let file_path = repo_path.join("empty-message.txt");
+        fs::write(&file_path, "empty\n").expect("Failed to write file");
+        snapshot_working_copy(&repo_path);
+
+        let change_id = get_wc_change_id(&repo_path);
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        jj_repo
+            .describe_revision(&change_id, "".to_string())
+            .expect("Empty description should be allowed");
+
+        let described_commit = jj_repo
+            .get_commit(&change_id)
+            .expect("Failed to load described commit");
+        assert_eq!(described_commit.description(), "");
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_git_fetch_no_remote() {
+        let (_temp_dir, repo_path) = create_test_repo();
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        let err = jj_repo
+            .git_fetch(None)
+            .expect_err("git_fetch should fail when no remotes are configured");
+        assert!(
+            err.to_string().contains("No git remotes configured"),
+            "Error should mention missing remotes"
+        );
+    }
+
+    #[test]
+    fn test_git_fetch_with_remote() {
+        let (_temp_dir, repo_path) = create_test_repo();
+        let (_remote_temp_dir, remote_path) = setup_git_remote_with_main_branch();
+
+        let add_remote = Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                remote_path.to_str().expect("Invalid remote path"),
+            ])
+            .current_dir(&repo_path)
+            .status()
+            .expect("Failed to add origin remote to jj repo");
+        assert!(add_remote.success(), "git remote add origin failed");
+
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+        let result = jj_repo
+            .git_fetch(None)
+            .expect("git_fetch should succeed with a configured remote");
+
+        assert!(
+            !result.operation_id.is_empty(),
+            "git_fetch should return an operation id"
+        );
+
+        let repo = jj_repo
+            .repo_loader()
+            .load_at_head()
+            .expect("Failed to reload repo after fetch");
+        assert!(
+            repo.view().all_remote_bookmarks().any(|(symbol, _)| {
+                symbol.remote.as_str() == "origin" && symbol.name.as_str() == "main"
+            }),
+            "Expected fetched main@origin remote bookmark to exist after fetch"
+        );
+    }
+
+    #[test]
+    fn test_git_push_bookmark() {
+        let (_temp_dir, repo_path) = create_test_repo();
+        let (_remote_temp_dir, remote_path) = setup_git_remote_with_main_branch();
+
+        let add_remote = Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                remote_path.to_str().expect("Invalid remote path"),
+            ])
+            .current_dir(&repo_path)
+            .status()
+            .expect("Failed to add origin remote to jj repo");
+        assert!(add_remote.success(), "git remote add origin failed");
+
+        let set_bookmark = Command::new("jj")
+            .args(["bookmark", "set", "feature", "-r", "@"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("Failed to create feature bookmark");
+        assert!(set_bookmark.success(), "jj bookmark set failed");
+
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+        let result = jj_repo
+            .git_push(None, vec!["feature".to_string()])
+            .expect("git_push should succeed for existing bookmark");
+
+        assert!(
+            !result.operation_id.is_empty(),
+            "git_push should return an operation id"
+        );
+
+        let remote_ref = Command::new("git")
+            .args([
+                "--git-dir",
+                remote_path.to_str().expect("Invalid remote path"),
+                "rev-parse",
+                "--verify",
+                "refs/heads/feature",
+            ])
+            .status()
+            .expect("Failed to verify feature branch on remote");
+        assert!(
+            remote_ref.success(),
+            "Expected pushed feature branch to exist on remote"
+        );
     }
 }

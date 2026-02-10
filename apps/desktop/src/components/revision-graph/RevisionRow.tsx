@@ -1,7 +1,8 @@
 import { useAtom } from "@effect-atom/atom-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { draggingBookmarkAtom } from "@/atoms";
 import { getRevisionKey } from "@/db";
+import { Badge } from "@/components/ui/badge";
 import type { Revision } from "@/tauri-commands";
 import { BookmarkTag } from "./BookmarkTag";
 import { ROW_HEIGHT, LANE_PADDING, LANE_WIDTH, NODE_RADIUS, laneToX, laneColor } from "./constants";
@@ -18,6 +19,9 @@ interface RevisionRowProps {
 	isDimmed: boolean;
 	isFocused: boolean;
 	isPendingAbandon: boolean;
+	isEditing: boolean;
+	onDescribe: (changeId: string, description: string) => void;
+	onCancelDescribe: () => void;
 	jumpModeActive: boolean;
 	jumpQuery: string;
 	jumpHint: string | null;
@@ -40,17 +44,23 @@ export function RevisionRow({
 	isDimmed,
 	isFocused,
 	isPendingAbandon,
+	isEditing,
+	onDescribe,
+	onCancelDescribe,
 	jumpModeActive,
 	jumpQuery,
 	jumpHint,
 	onMoveBookmark,
 	hasFocus,
 }: RevisionRowProps) {
+	const revisionKey = getRevisionKey(revision);
 	const firstLine = revision.description.split("\n")[0] || "(no description)";
+	const [draftDescription, setDraftDescription] = useState(revision.description);
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [showDropPlaceholder, setShowDropPlaceholder] = useState(false);
 	const dragOverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const dragEnterCountRef = useRef(0);
+	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const [draggingBookmark] = useAtom(draggingBookmarkAtom);
 
 	// Calculate the node position area - leaves space for graph edges on the left
@@ -59,6 +69,17 @@ export function RevisionRow({
 	const color = laneColor(lane);
 
 	const nodeSize = revision.is_working_copy ? NODE_RADIUS * 2 + 14 : NODE_RADIUS * 2 + 8;
+
+	useEffect(() => {
+		if (!isEditing) return;
+		setDraftDescription(revision.description);
+		requestAnimationFrame(() => {
+			const textarea = textareaRef.current;
+			if (!textarea) return;
+			textarea.focus({ preventScroll: true });
+			textarea.select();
+		});
+	}, [isEditing, revision.description]);
 
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: Complex styling requires div
@@ -79,16 +100,18 @@ export function RevisionRow({
 			data-checked={isChecked || undefined}
 			data-change-id={revision.change_id}
 			onClick={(e) => {
+				if (isEditing) return;
 				// Prevent text selection on shift+click
 				if (e.shiftKey) {
 					e.preventDefault();
 					window.getSelection()?.removeAllRanges();
 				}
-				onSelect(getRevisionKey(revision), { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
+				onSelect(revisionKey, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
 			}}
 			onKeyDown={(e) => {
+				if (isEditing) return;
 				if (e.key === "Enter" || e.key === " ") {
-					onSelect(getRevisionKey(revision), { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
+					onSelect(revisionKey, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey });
 				}
 			}}
 			onDragEnter={(e) => {
@@ -198,7 +221,11 @@ export function RevisionRow({
 							) : (
 								revision.change_id_short
 							)}
-							{revision.has_conflict && <span className="ml-1 text-destructive">⚠</span>}
+							{revision.has_conflict && (
+								<Badge variant="destructive" className="ml-1 h-4 px-1 text-[10px]">
+									Conflicts
+								</Badge>
+							)}
 						</code>
 						{/* Bookmarks - middle column */}
 						<div className="flex items-center gap-1 min-w-0 overflow-hidden">
@@ -221,7 +248,29 @@ export function RevisionRow({
 							{revision.author.split("@")[0]} · {revision.timestamp}
 						</span>
 					</div>
-					<div className="text-sm mt-1 truncate">{firstLine}</div>
+					{isEditing ? (
+						<textarea
+							ref={textareaRef}
+							value={draftDescription}
+							onChange={(e) => setDraftDescription(e.target.value)}
+							onClick={(e) => e.stopPropagation()}
+							onKeyDown={(e) => {
+								e.stopPropagation();
+								if (e.key === "Escape") {
+									e.preventDefault();
+									onCancelDescribe();
+									return;
+								}
+								if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+									e.preventDefault();
+									onDescribe(revisionKey, draftDescription);
+								}
+							}}
+							className="mt-1 w-full min-h-16 rounded border border-border bg-background px-2 py-1 text-sm leading-5 resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+						/>
+					) : (
+						<div className="text-sm mt-1 truncate">{firstLine}</div>
+					)}
 				</div>
 
 				{isPendingAbandon && (

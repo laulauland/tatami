@@ -28,6 +28,10 @@ export async function getStatus(repoPath: string): Promise<WorkingCopyStatus> {
 	return invoke<WorkingCopyStatus>("get_status", { repoPath });
 }
 
+export async function getConflictPaths(repoPath: string, changeId: string): Promise<string[]> {
+	return invoke<string[]>("get_conflict_paths", { repoPath, changeId });
+}
+
 export async function getFileDiff(
 	repoPath: string,
 	changeId: string,
@@ -143,6 +147,36 @@ export async function jjEdit(repoPath: string, changeId: string): Promise<Mutati
 
 export async function jjAbandon(repoPath: string, changeId: string): Promise<MutationResult> {
 	return invoke<MutationResult>("jj_abandon", { repoPath, changeId });
+}
+
+export async function jjDescribe(
+	repoPath: string,
+	changeId: string,
+	description: string,
+): Promise<MutationResult> {
+	return invoke<MutationResult>("jj_describe", { repoPath, changeId, description });
+}
+
+export async function jjGitFetch(
+	repoPath: string,
+	remote?: string,
+): Promise<MutationResult> {
+	return invoke<MutationResult>("jj_git_fetch", {
+		repoPath,
+		remote: remote ?? null,
+	});
+}
+
+export async function jjGitPush(
+	repoPath: string,
+	bookmarkNames: string[],
+	remote?: string,
+): Promise<MutationResult> {
+	return invoke<MutationResult>("jj_git_push", {
+		repoPath,
+		remote: remote ?? null,
+		bookmarkNames,
+	});
 }
 
 /** An operation in the jj operation log */

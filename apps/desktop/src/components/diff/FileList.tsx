@@ -1,3 +1,5 @@
+import { join } from "@tauri-apps/api/path";
+import { open } from "@tauri-apps/plugin-shell";
 import {
 	ChevronDownIcon,
 	ChevronRightIcon,
@@ -12,6 +14,8 @@ import {
 	SearchIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
@@ -19,12 +23,14 @@ import { cn } from "@/lib/utils";
 import type { ChangedFile, ChangedFileStatus } from "@/schemas";
 
 interface FileListProps {
+	repoPath: string;
 	files: ChangedFile[];
 	selectedFiles: Set<string>;
 	onSelectFiles: (filePaths: Set<string>) => void;
 	totalAdditions: number;
 	totalDeletions: number;
 	hasFocus: boolean;
+	conflictPaths: Set<string>;
 }
 
 function getFileStatusIcon(status: ChangedFileStatus) {
@@ -165,6 +171,8 @@ interface TreeNodeComponentProps {
 	toggleDir: (path: string) => void;
 	itemRefs: React.RefObject<Map<string, HTMLButtonElement>>;
 	hasFocus: boolean;
+	conflictPaths: Set<string>;
+	repoPath: string;
 }
 
 // Collect all file paths under a tree node
@@ -179,6 +187,11 @@ function collectFilePaths(node: TreeNode): string[] {
 	return paths;
 }
 
+async function openFileInEditor(repoPath: string, filePath: string): Promise<void> {
+	const absolutePath = await join(repoPath, filePath);
+	await open(absolutePath);
+}
+
 function TreeNodeComponent({
 	node,
 	depth,
@@ -189,6 +202,8 @@ function TreeNodeComponent({
 	toggleDir,
 	itemRefs,
 	hasFocus,
+	conflictPaths,
+	repoPath,
 }: TreeNodeComponentProps) {
 	const isExpanded = expandedDirs.has(node.path);
 	const sortedChildren = getSortedChildren(node);
@@ -235,6 +250,8 @@ function TreeNodeComponent({
 								toggleDir={toggleDir}
 								itemRefs={itemRefs}
 								hasFocus={hasFocus}
+								conflictPaths={conflictPaths}
+								repoPath={repoPath}
 							/>
 						))}
 					</div>
@@ -245,40 +262,62 @@ function TreeNodeComponent({
 
 	// File node
 	const isSelected = selectedFiles.has(node.path);
+	const isConflicted = conflictPaths.has(node.path);
 	// Add extra padding to align with folder text (chevron width + gap)
 	const fileIndent = depth * 12 + 12 + 18;
 	return (
-		<button
-			key={node.path}
-			ref={(el) => {
-				if (el) itemRefs.current?.set(node.path, el);
-				else itemRefs.current?.delete(node.path);
-			}}
-			type="button"
-			onClick={(e) => onSelectFile(node.path, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey })}
-			className={cn(
-				"w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm",
-				isSelected
-					? hasFocus
-						? "bg-accent/40 text-foreground"
-						: "bg-muted text-foreground"
-					: "text-muted-foreground",
+		<div className="flex items-center gap-2 pr-2">
+			<button
+				key={node.path}
+				ref={(el) => {
+					if (el) itemRefs.current?.set(node.path, el);
+					else itemRefs.current?.delete(node.path);
+				}}
+				type="button"
+				onClick={(e) => onSelectFile(node.path, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey })}
+				className={cn(
+					"min-w-0 flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-sm",
+					isSelected
+						? hasFocus
+							? "bg-accent/40 text-foreground"
+							: "bg-muted text-foreground"
+						: "text-muted-foreground",
+				)}
+				style={{ paddingLeft: `${fileIndent}px` }}
+			>
+				{node.file && getFileStatusIcon(node.file.status)}
+				<span className="truncate font-medium">{node.name}</span>
+				{isConflicted && (
+					<Badge variant="destructive" className="h-4 px-1 text-[10px]">
+						Conflict
+					</Badge>
+				)}
+			</button>
+			{isConflicted && (
+				<Button
+					variant="ghost"
+					size="sm"
+					className="h-6 px-2 text-[11px]"
+					onClick={() => {
+						void openFileInEditor(repoPath, node.path);
+					}}
+				>
+					Open in editor
+				</Button>
 			)}
-			style={{ paddingLeft: `${fileIndent}px` }}
-		>
-			{node.file && getFileStatusIcon(node.file.status)}
-			<span className="truncate font-medium">{node.name}</span>
-		</button>
+		</div>
 	);
 }
 
 export function FileList({
+	repoPath,
 	files,
 	selectedFiles,
 	onSelectFiles,
 	totalAdditions,
 	totalDeletions,
 	hasFocus,
+	conflictPaths,
 }: FileListProps) {
 	const listRef = useRef<HTMLDivElement>(null);
 	const itemRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -642,42 +681,61 @@ export function FileList({
 						? // Flat list view
 							filteredFiles.map((file, index) => {
 								const isSelected = selectedFiles.has(file.path);
+								const isConflicted = conflictPaths.has(file.path);
 								const fileName = getFileName(file.path);
 								const directory = getFileDirectory(file.path);
 
 								return (
-									<button
-										key={file.path}
-										ref={(el) => {
-											if (el) itemRefs.current.set(file.path, el);
-											else itemRefs.current.delete(file.path);
-										}}
-										type="button"
-										onClick={(e) =>
-											handleSelectFile(file.path, {
-												shift: e.shiftKey,
-												meta: e.metaKey || e.ctrlKey,
-											})
-										}
-										className={cn(
-											"w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm",
-											isSelected
-												? hasFocus
-													? "bg-accent/40 text-foreground"
-													: "bg-muted text-foreground"
-												: index % 2 === 1
-													? "bg-muted/30 text-muted-foreground"
-													: "text-muted-foreground",
-										)}
-									>
-										{getFileStatusIcon(file.status)}
-										<span className="flex-1 min-w-0 truncate">
-											<span className="font-medium">{fileName}</span>
-											{directory && (
-												<span className="text-muted-foreground ml-1 text-xs">{directory}</span>
+									<div key={file.path} className="flex items-center gap-2 pr-2">
+										<button
+											ref={(el) => {
+												if (el) itemRefs.current.set(file.path, el);
+												else itemRefs.current.delete(file.path);
+											}}
+											type="button"
+											onClick={(e) =>
+												handleSelectFile(file.path, {
+													shift: e.shiftKey,
+													meta: e.metaKey || e.ctrlKey,
+												})
+											}
+											className={cn(
+												"min-w-0 flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-sm",
+												isSelected
+													? hasFocus
+														? "bg-accent/40 text-foreground"
+														: "bg-muted text-foreground"
+													: index % 2 === 1
+														? "bg-muted/30 text-muted-foreground"
+														: "text-muted-foreground",
 											)}
-										</span>
-									</button>
+										>
+											{getFileStatusIcon(file.status)}
+											<span className="flex-1 min-w-0 truncate">
+												<span className="font-medium">{fileName}</span>
+												{directory && (
+													<span className="text-muted-foreground ml-1 text-xs">{directory}</span>
+												)}
+											</span>
+											{isConflicted && (
+												<Badge variant="destructive" className="h-4 px-1 text-[10px]">
+													Conflict
+												</Badge>
+											)}
+										</button>
+										{isConflicted && (
+											<Button
+												variant="ghost"
+												size="sm"
+												className="h-6 px-2 text-[11px]"
+												onClick={() => {
+													void openFileInEditor(repoPath, file.path);
+												}}
+											>
+												Open in editor
+											</Button>
+										)}
+									</div>
 								);
 							})
 						: // Tree view
@@ -693,6 +751,8 @@ export function FileList({
 									toggleDir={toggleDir}
 									itemRefs={itemRefs}
 									hasFocus={hasFocus}
+									conflictPaths={conflictPaths}
+									repoPath={repoPath}
 								/>
 							))}
 				</div>

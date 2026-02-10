@@ -4,9 +4,10 @@ import type { Revision } from "@/tauri-commands";
 
 interface RevisionHeaderProps {
 	revision: Revision;
+	conflictPaths?: string[];
 }
 
-export function RevisionHeader({ revision }: RevisionHeaderProps) {
+export function RevisionHeader({ revision, conflictPaths = [] }: RevisionHeaderProps) {
 	const commitIdShort = revision.commit_id.substring(0, 12);
 	const [isExpanded, setIsExpanded] = useState(false);
 
@@ -35,6 +36,18 @@ export function RevisionHeader({ revision }: RevisionHeaderProps) {
 					<span className="text-muted-foreground ml-4">at</span>{" "}
 					<span className="text-foreground">{revision.timestamp}</span>
 				</div>
+				{conflictPaths.length > 0 && (
+					<div className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+						<div className="font-semibold">⚠ {conflictPaths.length} conflicted file(s)</div>
+						<div className="mt-1 flex flex-wrap gap-x-2 gap-y-1">
+							{conflictPaths.map((path) => (
+								<code key={path} className="rounded bg-destructive/10 px-1 py-0.5 text-[11px]">
+									{path}
+								</code>
+							))}
+						</div>
+					</div>
+				)}
 				{title && (
 					<div className="mt-2 pt-2">
 						<div className="flex items-start gap-1">

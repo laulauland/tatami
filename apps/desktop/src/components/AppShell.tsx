@@ -1,5 +1,6 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { Profiler, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Route as ProjectRoute } from "@/routes/project.$projectId";
@@ -34,6 +35,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 
 import {
 	abandonRevision,
+	describeRevision,
 	editRevision,
 	emptyCommitRecencyCollection,
 	emptyRevisionsCollection,
@@ -42,12 +44,13 @@ import {
 	getRevisionsCollection,
 	newRevision,
 	repositoriesCollection,
+	syncRepository,
 } from "@/db";
 import { useAddRepository } from "@/hooks/useAddRepository";
 import { useAppTitle } from "@/hooks/useAppTitle";
 import { useKeyboardNavigation, useKeyboardShortcut, useKeySequence } from "@/hooks/useKeyboard";
 import { useSelectedRevision } from "@/hooks/useSelectedRevision";
-import type { Repository, Revision } from "@/tauri-commands";
+import { getStatus, type Repository, type Revision } from "@/tauri-commands";
 import { onRenderCallback } from "@/lib/trace";
 
 // Wrapper component that handles the case when no project is selected
@@ -101,7 +104,7 @@ function AppShellEmpty() {
 				<div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">
 					<p>Select or add a repository to get started</p>
 				</div>
-				<StatusBar branch={null} isConnected={false} />
+				<StatusBar branch={null} isConnected={false} hasConflict={false} />
 			</div>
 		</>
 	);
@@ -116,6 +119,7 @@ function AppShellWithProject() {
 	const [viewMode, setViewMode] = useAtom(viewModeAtom);
 	const [, setSearchOpen] = useAtom(searchOpenAtom);
 	const [pendingAbandon, setPendingAbandon] = useState<Revision | null>(null);
+	const [editingChangeId, setEditingChangeId] = useState<string | null>(null);
 	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 	const [isSyncing, setIsSyncing] = useState(false);
 	const revisionGraphRef = useRef<RevisionGraphHandle>(null);
@@ -134,13 +138,26 @@ function AppShellWithProject() {
 
 	const activeProject = repositories.find((p) => p.id === projectId) ?? null;
 
+	const { data: workingCopyStatus } = useQuery({
+		queryKey: ["status", activeProject?.path],
+		queryFn: () => getStatus(activeProject?.path ?? ""),
+		enabled: !!activeProject?.path,
+		retry: false,
+	});
+
 	useAppTitle(activeProject ? `Tatami - ${activeProject.path}` : "Tatami");
 
 	const revisionsCollection = activeProject
 		? getRevisionsCollection(activeProject.path, activeProject.revset_preset ?? "full_history")
 		: emptyRevisionsCollection;
 
-	const { data: revisions = [], isLoading = false } = useLiveQuery(revisionsCollection);
+	const {
+		data: revisions = [],
+		isLoading = false,
+		isError: revisionsLoadFailed,
+		status: revisionsStatus,
+		collection: revisionsLiveCollection,
+	} = useLiveQuery(revisionsCollection);
 
 	// Fetch commit recency data for branch ordering
 	const commitRecencyCollection = activeProject?.path
@@ -173,6 +190,21 @@ function AppShellWithProject() {
 	}, [revisions, orderedRevisions, expandedStacks]);
 
 	const selectedRevision = useSelectedRevision(revisions, rev);
+	const revisionsErrorMessage =
+		revisionsStatus === "error" || revisionsLoadFailed
+			? "Could not fetch revisions from jj."
+			: null;
+
+	const handleRetryRevisions = () => {
+		void revisionsLiveCollection.preload();
+	};
+
+	useEffect(() => {
+		if (!editingChangeId) return;
+		if (!selectedRevision || getRevisionKey(selectedRevision) !== editingChangeId) {
+			setEditingChangeId(null);
+		}
+	}, [editingChangeId, selectedRevision]);
 
 	// Debounce the changeId passed to DiffPanel to avoid expensive re-renders during rapid navigation
 	// DiffPanel only updates when navigation settles (200ms without movement)
@@ -283,6 +315,29 @@ function AppShellWithProject() {
 		enabled: !!activeProject && !!selectedRevision,
 	});
 
+	useKeyboardShortcut({
+		key: "d",
+		onPress: handleStartDescribe,
+		enabled: !!selectedRevision && !selectedRevision.is_immutable,
+	});
+
+	function handleDescribe(changeId: string, description: string) {
+		if (!activeProject) return;
+		const revision = revisions.find((r) => getRevisionKey(r) === changeId);
+		if (!revision || revision.is_immutable) return;
+		describeRevision(revisionsCollection, activeProject.path, revision, description);
+		setEditingChangeId(null);
+	}
+
+	function handleStartDescribe() {
+		if (!selectedRevision || selectedRevision.is_immutable) return;
+		setEditingChangeId(getRevisionKey(selectedRevision));
+	}
+
+	function handleCancelDescribe() {
+		setEditingChangeId(null);
+	}
+
 	function handleAbandon() {
 		if (!activeProject || !selectedRevision) return;
 		// Don't abandon immutable revisions (trunk ancestors)
@@ -372,12 +427,14 @@ function AppShellWithProject() {
 		return null;
 	})();
 
-	function handleSync() {
+	async function handleSync() {
 		if (!activeProject || isSyncing) return;
 		setIsSyncing(true);
-		// TODO: Implement jj git fetch
-		// For now, just simulate a sync delay
-		setTimeout(() => setIsSyncing(false), 1000);
+		try {
+			await syncRepository(activeProject.path, activeProject.revset_preset ?? "full_history");
+		} finally {
+			setIsSyncing(false);
+		}
 	}
 
 	function handleOpenSearch() {
@@ -435,9 +492,14 @@ function AppShellWithProject() {
 									selectedRevision={selectedRevision}
 									onSelectRevision={handleSelectRevision}
 									isLoading={isLoading}
+									errorMessage={revisionsErrorMessage}
+									onRetry={handleRetryRevisions}
 									flash={flash}
 									repoPath={activeProject?.path ?? null}
 									pendingAbandon={pendingAbandon}
+									editingChangeId={editingChangeId}
+									onDescribe={handleDescribe}
+									onCancelDescribe={handleCancelDescribe}
 									diffPanelRef={diffPanelRef}
 								/>
 							</Profiler>
@@ -459,9 +521,14 @@ function AppShellWithProject() {
 											selectedRevision={selectedRevision}
 											onSelectRevision={handleSelectRevision}
 											isLoading={isLoading}
+											errorMessage={revisionsErrorMessage}
+											onRetry={handleRetryRevisions}
 											flash={flash}
 											repoPath={activeProject?.path ?? null}
 											pendingAbandon={pendingAbandon}
+											editingChangeId={editingChangeId}
+											onDescribe={handleDescribe}
+											onCancelDescribe={handleCancelDescribe}
 											diffPanelRef={diffPanelRef}
 										/>
 									</Profiler>
@@ -487,7 +554,11 @@ function AppShellWithProject() {
 						</ResizablePanelGroup>
 					)}
 				</div>
-				<StatusBar branch={closestBookmark} isConnected={!!activeProject} />
+				<StatusBar
+					branch={closestBookmark}
+					isConnected={!!activeProject}
+					hasConflict={workingCopyStatus?.has_conflict ?? false}
+				/>
 			</div>
 		</>
 	);

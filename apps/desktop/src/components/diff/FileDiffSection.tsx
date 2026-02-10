@@ -1,12 +1,17 @@
 import { useAtom } from "@effect-atom/atom-react";
+import { join } from "@tauri-apps/api/path";
+import { open } from "@tauri-apps/plugin-shell";
 import { PatchDiff } from "@pierre/diffs/react";
 import { ChevronDownIcon, ChevronRightIcon, Columns2Icon, RowsIcon } from "lucide-react";
 import { type DiffStyle, diffStyleAtom, diffViewStateAtom } from "@/atoms";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 interface FileDiffSectionProps {
 	patch: string;
 	filePath: string;
+	repoPath?: string;
+	isConflicted?: boolean;
 	isSelected?: boolean;
 	fileRef?: React.RefObject<HTMLDivElement | null>;
 }
@@ -14,6 +19,8 @@ interface FileDiffSectionProps {
 export function FileDiffSection({
 	patch,
 	filePath,
+	repoPath,
+	isConflicted = false,
 	isSelected = false,
 	fileRef,
 }: FileDiffSectionProps) {
@@ -45,6 +52,12 @@ export function FileDiffSection({
 		});
 	}
 
+	async function handleOpenInEditor() {
+		if (!repoPath) return;
+		const absolutePath = await join(repoPath, filePath);
+		await open(absolutePath);
+	}
+
 	return (
 		<div
 			ref={fileRef}
@@ -74,9 +87,27 @@ export function FileDiffSection({
 				<code className="font-mono text-xs text-foreground text-left flex-1 truncate min-w-0">
 					{filePath}
 				</code>
+				{isConflicted && (
+					<Badge variant="destructive" className="h-4 px-1 text-[10px]">
+						Conflict
+					</Badge>
+				)}
 
 				{/* Per-file diff style toggle buttons */}
 				<span className="flex items-center gap-0.5">
+					{isConflicted && repoPath && (
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-6 px-2 text-[11px]"
+							onClick={(e) => {
+								e.stopPropagation();
+								void handleOpenInEditor();
+							}}
+						>
+							Open in editor
+						</Button>
+					)}
 					<Button
 						variant={effectiveDiffStyle === "unified" ? "secondary" : "ghost"}
 						size="icon-xs"

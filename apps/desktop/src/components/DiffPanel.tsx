@@ -1,5 +1,6 @@
 import { useAtom } from "@effect-atom/atom-react";
 import { PatchDiff } from "@pierre/diffs/react";
+import { useQuery } from "@tanstack/react-query";
 import { Columns2Icon, Loader2, RowsIcon } from "lucide-react";
 import type { FocusEvent, RefObject } from "react";
 import React, { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,7 +16,7 @@ import { extractFilePath, parsePatchStats, splitMultiFileDiff } from "@/lib/diff
 import { traceLog } from "@/lib/trace";
 import { cn } from "@/lib/utils";
 import type { ChangedFileStatus } from "@/schemas";
-import type { Revision } from "@/tauri-commands";
+import { getConflictPaths, getRevisionDiff, type Revision } from "@/tauri-commands";
 import { isImageFile } from "@/utils/file-types";
 
 interface DiffPanelProps {
@@ -280,7 +281,26 @@ export const DiffPanel = React.memo(
 
 		// Read diff from unified collection
 		const diffRecord = useDiff(repoPath ?? "", deferredChangeId);
-		const revisionDiff = diffRecord?.content ?? "";
+		const {
+			data: fallbackDiff,
+			error: diffError,
+			refetch: retryDiff,
+			isFetching: isRetryingDiff,
+		} = useQuery({
+			queryKey: ["diff-fallback", repoPath, deferredChangeId],
+			queryFn: () => getRevisionDiff(repoPath ?? "", deferredChangeId ?? ""),
+			enabled: !!repoPath && !!deferredChangeId && !diffRecord,
+			retry: false,
+		});
+		const revisionDiff = diffRecord?.content ?? fallbackDiff ?? "";
+
+		const { data: conflictPaths = [] } = useQuery({
+			queryKey: ["conflict-paths", repoPath, deferredChangeId],
+			queryFn: () => getConflictPaths(repoPath ?? "", deferredChangeId ?? ""),
+			enabled: !!repoPath && !!deferredChangeId && !!revision?.has_conflict,
+			retry: false,
+		});
+		const conflictPathSet = useMemo(() => new Set(conflictPaths), [conflictPaths]);
 
 		// Trigger prefetch when selection changes
 		useEffect(() => {
@@ -442,6 +462,31 @@ export const DiffPanel = React.memo(
 			);
 		}
 
+		if (diffError && !diffRecord) {
+			return (
+				// biome-ignore lint/a11y/noStaticElementInteractions: Focus tracking for keyboard navigation
+				<div
+					ref={setRefs}
+					tabIndex={-1}
+					onFocus={() => setHasFocus(true)}
+					onBlur={handleBlur}
+					className="flex h-full items-center justify-center outline-none"
+				>
+					<div className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-center">
+						<p className="text-sm text-destructive">Failed to load diff</p>
+						<button
+							type="button"
+							onClick={() => void retryDiff()}
+							className="mt-3 rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+							disabled={isRetryingDiff}
+						>
+							{isRetryingDiff ? "Retrying..." : "Retry"}
+						</button>
+					</div>
+				</div>
+			);
+		}
+
 		// Only show "No changes" if we have no displayed state to show
 		if (changedFiles.length === 0 && !displayedState) {
 			return (
@@ -473,13 +518,13 @@ export const DiffPanel = React.memo(
 				{/* Revision header */}
 				{revision && (
 					<div className="px-4 pt-2 pb-2 shrink-0">
-						<RevisionHeader revision={revision} />
+						<RevisionHeader revision={revision} conflictPaths={conflictPaths} />
 					</div>
 				)}
 
 				{/* Toolbar */}
 				<div className="flex items-center justify-end px-3 py-2 border-b border-border bg-background shrink-0 min-w-0">
-					<div
+					<fieldset
 						className="relative flex items-center rounded-md border border-border/70 bg-muted/60 p-0.5 shadow-inner shrink-0"
 						aria-label="Diff style"
 					>
@@ -496,7 +541,9 @@ export const DiffPanel = React.memo(
 							aria-label="Unified diff view"
 							disabled={effectiveSelectedFiles.size === 0}
 						>
-							<RowsIcon className={`size-3 ${effectiveDiffStyle === "unified" ? "text-foreground" : ""}`} />
+							<RowsIcon
+								className={`size-3 ${effectiveDiffStyle === "unified" ? "text-foreground" : ""}`}
+							/>
 						</button>
 						<button
 							type="button"
@@ -506,9 +553,11 @@ export const DiffPanel = React.memo(
 							aria-label="Split diff view"
 							disabled={effectiveSelectedFiles.size === 0}
 						>
-							<Columns2Icon className={`size-3 ${effectiveDiffStyle === "split" ? "text-foreground" : ""}`} />
+							<Columns2Icon
+								className={`size-3 ${effectiveDiffStyle === "split" ? "text-foreground" : ""}`}
+							/>
 						</button>
-					</div>
+					</fieldset>
 				</div>
 
 				{/* Two-column layout wrapper */}
@@ -522,12 +571,14 @@ export const DiffPanel = React.memo(
 						<ResizablePanel id="diff-file-list" defaultSize="30%" minSize="15%" maxSize="50%">
 							<div className="h-full w-full min-w-0">
 								<FileList
+									repoPath={repoPath}
 									files={changedFiles}
 									selectedFiles={effectiveSelectedFiles}
 									onSelectFiles={setSelectedFiles}
 									totalAdditions={totalAdditions}
 									totalDeletions={totalDeletions}
 									hasFocus={hasFocus}
+									conflictPaths={conflictPathSet}
 								/>
 							</div>
 						</ResizablePanel>

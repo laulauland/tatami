@@ -877,6 +877,16 @@ const mockRevisionsRaw: Omit<Revision, "change_id_short" | "children_ids">[] = [
 // Calculate shortest unique prefixes for all change IDs
 // Made mutable so mutation handlers can update it
 let mockRevisions: Revision[] = calculateShortIds(mockRevisionsRaw);
+let mockOperationCounter = 0;
+
+function nextOperationId(): string {
+	mockOperationCounter += 1;
+	return `mock-op-${mockOperationCounter}`;
+}
+
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const mockChangedFiles: ChangedFile[] = [
 	{ path: "src/main.rs", status: "modified" },
@@ -893,7 +903,7 @@ const mockChangedFiles: ChangedFile[] = [
 	{ path: "tests/integration/api/users.test.ts", status: "modified" },
 ];
 
-type MockHandler = (args: Record<string, unknown>) => unknown;
+type MockHandler = (args: Record<string, unknown>) => unknown | Promise<unknown>;
 
 const handlers: Record<string, MockHandler> = {
 	get_projects: () => mockProjects,
@@ -926,8 +936,10 @@ const handlers: Record<string, MockHandler> = {
 			repo_path: "/Users/demo/projects/tatami",
 			change_id: wc?.change_id ?? "klnmopqrstuv",
 			files: mockChangedFiles,
+			has_conflict: wc?.has_conflict ?? false,
 		};
 	},
+	get_conflict_paths: () => [],
 	get_file_diff: (): string => `--- a/src/main.rs
 +++ b/src/main.rs
 @@ -1,3 +1,4 @@
@@ -1104,6 +1116,79 @@ const handlers: Record<string, MockHandler> = {
 		}
 
 		return undefined;
+	},
+	jj_describe: (args) => {
+		const changeId = args.changeId as string;
+		const description = args.description as string;
+		const revisionIndex = mockRevisions.findIndex(
+			(r) => r.change_id.startsWith(changeId) || r.change_id_short === changeId,
+		);
+		if (revisionIndex < 0) {
+			return { operation_id: nextOperationId(), change_id: null };
+		}
+
+		const target = mockRevisions[revisionIndex];
+		mockRevisions[revisionIndex] = { ...target, description };
+
+		return {
+			operation_id: nextOperationId(),
+			change_id: target.change_id,
+		};
+	},
+	jj_git_fetch: async (_args) => {
+		await delay(500);
+
+		const mainHead = mockRevisions.find((revision) => revision.commit_id === "main0100000000");
+		const alreadyFetched = mockRevisions.some(
+			(revision) => revision.commit_id === "remote0110000000",
+		);
+
+		if (!alreadyFetched && mainHead) {
+			const remoteRevision: Omit<Revision, "change_id_short" | "children_ids"> = {
+				commit_id: "remote0110000000",
+				change_id: generateChangeId(),
+				parent_edges: [{ parent_id: mainHead.commit_id, edge_type: "direct" }],
+				description: "chore: fetched remote updates",
+				author: "origin@example.com",
+				timestamp: new Date().toISOString(),
+				is_working_copy: false,
+				is_immutable: true,
+				is_mine: false,
+				is_trunk: true,
+				is_divergent: false,
+				divergent_index: null,
+				has_conflict: false,
+				bookmarks: [mockBookmark("origin/main", { remote: "origin" })],
+			};
+
+			const allRevisionsRaw = [
+				...mockRevisions.map(({ change_id_short: _, children_ids: __, ...revision }) => revision),
+				remoteRevision,
+			];
+			mockRevisions = calculateShortIds(allRevisionsRaw);
+		}
+
+		return {
+			operation_id: nextOperationId(),
+			change_id: null,
+		};
+	},
+	jj_git_push: async (args) => {
+		await delay(500);
+		const bookmarkNames = (args.bookmarkNames as string[] | undefined) ?? [];
+		if (bookmarkNames.length > 0) {
+			mockRevisions = mockRevisions.map((revision) => ({
+				...revision,
+				bookmarks: revision.bookmarks.map((bookmark) =>
+					bookmarkNames.includes(bookmark.name) ? { ...bookmark, is_ahead: false } : bookmark,
+				),
+			}));
+		}
+
+		return {
+			operation_id: nextOperationId(),
+			change_id: null,
+		};
 	},
 	get_commit_recency: () => ({}),
 	resolve_revset: (args) => {

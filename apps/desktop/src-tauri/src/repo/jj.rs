@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use jj_lib::backend::{ChangeId, CommitId};
 use jj_lib::commit::Commit;
 use jj_lib::config::ConfigSource;
+use jj_lib::git;
 use jj_lib::merged_tree::MergedTree;
 use jj_lib::object_id::{HexPrefix, ObjectId, PrefixResolution};
 use jj_lib::op_store::OperationId;
@@ -11,7 +12,7 @@ use jj_lib::repo_path::RepoPath;
 use jj_lib::settings::UserSettings;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tokio::io::AsyncReadExt;
 
@@ -107,6 +108,23 @@ impl JjRepo {
         Ok(repo.store().get_commit(&commit_id)?)
     }
 
+    pub fn get_conflict_paths(&self, change_id: &str) -> Result<Vec<String>> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let commit_id = self.resolve_change_id(repo.as_ref(), change_id)?;
+        let commit = repo.store().get_commit(&commit_id)?;
+        let tree = commit.tree()?;
+
+        let mut paths = Vec::new();
+        for (path, value) in tree.conflicts() {
+            value?;
+            paths.push(path.as_internal_file_string().to_string());
+        }
+
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+
     #[allow(dead_code)] // May be used in future features
     pub fn get_parent_tree(&self, commit: &Commit) -> Result<MergedTree> {
         let repo = self.workspace.repo_loader().load_at_head()?;
@@ -142,9 +160,8 @@ impl JjRepo {
         match file_value.into_resolved() {
             Ok(Some(value)) => match value {
                 TreeValue::File { id, .. } => {
-                    let mut reader = pollster::block_on(async {
-                        repo.store().read_file(repo_path, &id).await
-                    })?;
+                    let mut reader =
+                        pollster::block_on(async { repo.store().read_file(repo_path, &id).await })?;
                     let mut content = Vec::new();
                     pollster::block_on(async { reader.read_to_end(&mut content).await })?;
                     Ok(content)
@@ -255,7 +272,9 @@ impl JjRepo {
         let mut parent_commits = Vec::new();
         for change_id in parent_change_ids {
             let commit_id = self.resolve_change_id(repo.as_ref(), &change_id)?;
-            let commit = repo.store().get_commit(&commit_id)
+            let commit = repo
+                .store()
+                .get_commit(&commit_id)
                 .map_err(|e| anyhow::anyhow!("Failed to get commit: {}", e))?;
             parent_commits.push(commit);
         }
@@ -273,8 +292,7 @@ impl JjRepo {
 
         // Set pre-generated change ID if provided
         if let Some(ref cid) = change_id {
-            let parsed = ChangeId::try_from_reverse_hex(cid)
-                .context("Invalid change ID format")?;
+            let parsed = ChangeId::try_from_reverse_hex(cid).context("Invalid change ID format")?;
             commit_builder = commit_builder.set_change_id(parsed);
         }
 
@@ -294,8 +312,11 @@ impl JjRepo {
         // Get old tree for checkout
         let old_commit = repo
             .store()
-            .get_commit(repo.view().get_wc_commit_id(self.workspace.workspace_name())
-            .context("No working copy commit")?)
+            .get_commit(
+                repo.view()
+                    .get_wc_commit_id(self.workspace.workspace_name())
+                    .context("No working copy commit")?,
+            )
             .map_err(|e| anyhow::anyhow!("Failed to get old commit: {}", e))?;
         let old_tree_id = old_commit.tree_id().clone();
 
@@ -320,7 +341,9 @@ impl JjRepo {
 
         // Resolve change ID to commit
         let commit_id = self.resolve_change_id(repo.as_ref(), change_id)?;
-        let commit = repo.store().get_commit(&commit_id)
+        let commit = repo
+            .store()
+            .get_commit(&commit_id)
             .map_err(|e| anyhow::anyhow!("Failed to get commit: {}", e))?;
 
         // Get the current working copy info before changes
@@ -338,7 +361,10 @@ impl JjRepo {
 
         // If we abandoned the working copy, check out the parent
         let final_op_id = if is_abandoning_wc {
-            let parent_id = commit.parent_ids().first().cloned()
+            let parent_id = commit
+                .parent_ids()
+                .first()
+                .cloned()
                 .context("Abandoned commit has no parent")?;
             let parent_commit = repo.store().get_commit(&parent_id)?;
 
@@ -357,7 +383,7 @@ impl JjRepo {
             self.workspace
                 .check_out(operation_id.clone(), Some(&old_tree_id), &parent_commit)
                 .context("Failed to check out parent commit")?;
-            
+
             operation_id
         } else {
             // Finalize transaction
@@ -377,7 +403,9 @@ impl JjRepo {
 
         // Resolve change ID to commit
         let commit_id = self.resolve_change_id(repo.as_ref(), &change_id)?;
-        let commit = repo.store().get_commit(&commit_id)
+        let commit = repo
+            .store()
+            .get_commit(&commit_id)
             .map_err(|e| anyhow::anyhow!("Failed to get commit: {}", e))?;
 
         // Set as working copy
@@ -389,8 +417,11 @@ impl JjRepo {
         // Get old tree for checkout
         let old_commit = repo
             .store()
-            .get_commit(repo.view().get_wc_commit_id(self.workspace.workspace_name())
-            .context("No working copy commit")?)
+            .get_commit(
+                repo.view()
+                    .get_wc_commit_id(self.workspace.workspace_name())
+                    .context("No working copy commit")?,
+            )
             .map_err(|e| anyhow::anyhow!("Failed to get old commit: {}", e))?;
         let old_tree_id = old_commit.tree_id().clone();
 
@@ -405,6 +436,186 @@ impl JjRepo {
 
         Ok(MutationResult {
             operation_id: operation_id.hex(),
+            change_id: None,
+        })
+    }
+
+    pub fn describe_revision(
+        &mut self,
+        change_id: &str,
+        description: String,
+    ) -> Result<MutationResult> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let mut tx = repo.start_transaction();
+
+        // Resolve change ID to commit
+        let commit_id = self.resolve_change_id(repo.as_ref(), change_id)?;
+        let commit = repo
+            .store()
+            .get_commit(&commit_id)
+            .map_err(|e| anyhow::anyhow!("Failed to get commit: {}", e))?;
+
+        // For now, only root commit is immutable in this app's revset model
+        if commit.id() == repo.store().root_commit_id() {
+            anyhow::bail!("Cannot describe immutable commit");
+        }
+
+        let workspace_name = self.workspace.workspace_name();
+        let wc_commit_id = repo.view().get_wc_commit_id(workspace_name).cloned();
+        let is_describing_wc = wc_commit_id.as_ref() == Some(commit.id());
+        let old_tree_id = if is_describing_wc {
+            Some(commit.tree_id().clone())
+        } else {
+            None
+        };
+
+        let new_commit = tx
+            .repo_mut()
+            .rewrite_commit(&commit)
+            .set_description(description)
+            .write()
+            .map_err(|e| anyhow::anyhow!("Failed to write rewritten commit: {}", e))?;
+
+        tx.repo_mut().rebase_descendants()?;
+
+        let new_repo = tx.commit("describe")?;
+        let operation_id = new_repo.operation().id().clone();
+
+        // Keep working copy metadata in sync if we rewrote the checked-out commit.
+        // Tree content is unchanged, so this won't modify files on disk.
+        if is_describing_wc {
+            self.workspace
+                .check_out(operation_id.clone(), old_tree_id.as_ref(), &new_commit)
+                .context("Failed to keep working copy in sync after describe")?;
+        }
+
+        Ok(MutationResult {
+            operation_id: operation_id.hex(),
+            change_id: None,
+        })
+    }
+
+    pub fn git_fetch(&mut self, remote: Option<String>) -> Result<MutationResult> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let remote_name: jj_lib::ref_name::RemoteNameBuf =
+            remote.unwrap_or_else(|| "origin".to_string()).into();
+
+        let remotes = git::get_all_remote_names(repo.store())?;
+        if remotes.is_empty() {
+            anyhow::bail!("No git remotes configured");
+        }
+        if !remotes.iter().any(|r| r == &remote_name) {
+            anyhow::bail!("No git remote named '{}'", remote_name.as_str());
+        }
+
+        let git_settings = self
+            .user_settings
+            .git_settings()
+            .context("Failed to load git settings")?;
+        let git_repo = git::get_git_repo(repo.store())?;
+        let (_, refspecs) = git::expand_default_fetch_refspecs(remote_name.as_ref(), &git_repo)?;
+
+        let mut tx = repo.start_transaction();
+        let mut git_fetch = git::GitFetch::new(tx.repo_mut(), &git_settings)?;
+        git_fetch.fetch(
+            remote_name.as_ref(),
+            refspecs,
+            git::RemoteCallbacks::default(),
+            None,
+            None,
+        )?;
+        git_fetch.import_refs()?;
+
+        let new_repo = tx.commit(format!("fetch from git remote {}", remote_name.as_str()))?;
+
+        Ok(MutationResult {
+            operation_id: new_repo.operation().id().hex(),
+            change_id: None,
+        })
+    }
+
+    pub fn git_push(
+        &mut self,
+        remote: Option<String>,
+        bookmark_names: Vec<String>,
+    ) -> Result<MutationResult> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let remote_name: jj_lib::ref_name::RemoteNameBuf =
+            remote.unwrap_or_else(|| "origin".to_string()).into();
+
+        let remotes = git::get_all_remote_names(repo.store())?;
+        if remotes.is_empty() {
+            anyhow::bail!("No git remotes configured");
+        }
+        if !remotes.iter().any(|r| r == &remote_name) {
+            anyhow::bail!("No git remote named '{}'", remote_name.as_str());
+        }
+
+        let requested: HashSet<&str> = bookmark_names.iter().map(String::as_str).collect();
+        let mut found_any = false;
+        let mut branch_updates = Vec::new();
+        for (name, targets) in repo.view().local_remote_bookmarks(remote_name.as_ref()) {
+            if !requested.contains(name.as_str()) {
+                continue;
+            }
+            found_any = true;
+
+            match jj_lib::refs::classify_bookmark_push_action(targets) {
+                jj_lib::refs::BookmarkPushAction::Update(update) => {
+                    branch_updates.push((name.to_owned(), update));
+                }
+                jj_lib::refs::BookmarkPushAction::AlreadyMatches => {}
+                jj_lib::refs::BookmarkPushAction::LocalConflicted => {
+                    anyhow::bail!("Cannot push conflicted local bookmark '{}'", name.as_str())
+                }
+                jj_lib::refs::BookmarkPushAction::RemoteConflicted => {
+                    anyhow::bail!(
+                        "Cannot push bookmark '{}' because remote is conflicted",
+                        name.as_str()
+                    )
+                }
+                jj_lib::refs::BookmarkPushAction::RemoteUntracked => {
+                    anyhow::bail!(
+                        "Cannot push bookmark '{}' because remote bookmark is untracked",
+                        name.as_str()
+                    )
+                }
+            }
+        }
+
+        if !found_any {
+            anyhow::bail!(
+                "No matching bookmarks found to push: {}",
+                bookmark_names.join(", ")
+            );
+        }
+
+        if branch_updates.is_empty() {
+            anyhow::bail!(
+                "No bookmark updates to push for remote '{}': {}",
+                remote_name.as_str(),
+                bookmark_names.join(", ")
+            );
+        }
+
+        let git_settings = self
+            .user_settings
+            .git_settings()
+            .context("Failed to load git settings")?;
+
+        let mut tx = repo.start_transaction();
+        git::push_branches(
+            tx.repo_mut(),
+            &git_settings,
+            remote_name.as_ref(),
+            &git::GitBranchPushTargets { branch_updates },
+            git::RemoteCallbacks::default(),
+        )?;
+
+        let new_repo = tx.commit(format!("push to git remote {}", remote_name.as_str()))?;
+
+        Ok(MutationResult {
+            operation_id: new_repo.operation().id().hex(),
             change_id: None,
         })
     }
@@ -468,18 +679,22 @@ impl JjRepo {
 
             // Get the working copy change ID from this operation's view
             let working_copy_change_id = op.view().ok().and_then(|view| {
-                view.wc_commit_ids().get(workspace_name).and_then(|commit_id| {
-                    // Look up the commit to get its change ID
-                    repo.store().get_commit(commit_id).ok().map(|commit| {
-                        commit.change_id().reverse_hex()
+                view.wc_commit_ids()
+                    .get(workspace_name)
+                    .and_then(|commit_id| {
+                        // Look up the commit to get its change ID
+                        repo.store()
+                            .get_commit(commit_id)
+                            .ok()
+                            .map(|commit| commit.change_id().reverse_hex())
                     })
-                })
             });
 
             // Format timestamp as ISO 8601
-            let timestamp = chrono::DateTime::from_timestamp_millis(metadata.time.start.timestamp.0)
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_else(|| "unknown".to_string());
+            let timestamp =
+                chrono::DateTime::from_timestamp_millis(metadata.time.start.timestamp.0)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_else(|| "unknown".to_string());
 
             operations.push(Operation {
                 id: op.id().hex(),
@@ -498,34 +713,38 @@ impl JjRepo {
     /// Undo a specific operation by reverting it (3-way merge to invert just that op)
     pub fn undo_operation(&mut self, op_id_hex: &str) -> Result<()> {
         let repo = self.workspace.repo_loader().load_at_head()?;
-        
+
         // Parse the operation ID
-        let op_id = OperationId::try_from_hex(op_id_hex)
-            .context("Invalid operation ID format")?;
-        
+        let op_id = OperationId::try_from_hex(op_id_hex).context("Invalid operation ID format")?;
+
         // Load the operation to undo
-        let bad_op = repo.loader().load_operation(&op_id)
+        let bad_op = repo
+            .loader()
+            .load_operation(&op_id)
             .context("Failed to load operation to undo")?;
-        
+
         // Get the parent operation (the state before the bad op)
-        let parent_op = bad_op.parents()
+        let parent_op = bad_op
+            .parents()
             .next()
             .context("Operation has no parent (cannot undo root operation)")?
             .context("Failed to load parent operation")?;
-        
+
         // Start a transaction for the revert
         let mut tx = repo.start_transaction();
-        
+
         // Load repos at both states for 3-way merge
         let repo_loader = tx.base_repo().loader();
-        let bad_repo = repo_loader.load_at(&bad_op)
+        let bad_repo = repo_loader
+            .load_at(&bad_op)
             .context("Failed to load repo at bad operation")?;
-        let parent_repo = repo_loader.load_at(&parent_op)
+        let parent_repo = repo_loader
+            .load_at(&parent_op)
             .context("Failed to load repo at parent operation")?;
-        
+
         // Perform 3-way merge to revert the operation
         tx.repo_mut().merge(&bad_repo, &parent_repo)?;
-        
+
         // Get old tree for checkout (current WC)
         let old_wc_commit_id = repo
             .view()
@@ -535,22 +754,30 @@ impl JjRepo {
             .as_ref()
             .and_then(|id| repo.store().get_commit(id).ok())
             .map(|c| c.tree_id().clone());
-        
+
         // Commit the revert
-        let new_repo = tx.commit(format!("undo operation {}", &op_id_hex[..12.min(op_id_hex.len())]))?;
+        let new_repo = tx.commit(format!(
+            "undo operation {}",
+            &op_id_hex[..12.min(op_id_hex.len())]
+        ))?;
         let new_op_id = new_repo.operation().id().clone();
-        
+
         // Update working copy if it changed
-        if let Some(new_wc_commit_id) = new_repo.view().get_wc_commit_id(self.workspace.workspace_name()) {
+        if let Some(new_wc_commit_id) = new_repo
+            .view()
+            .get_wc_commit_id(self.workspace.workspace_name())
+        {
             if old_wc_commit_id.as_ref() != Some(new_wc_commit_id) {
-                let new_wc_commit = new_repo.store().get_commit(new_wc_commit_id)
+                let new_wc_commit = new_repo
+                    .store()
+                    .get_commit(new_wc_commit_id)
                     .context("Failed to get new working copy commit")?;
                 self.workspace
                     .check_out(new_op_id, old_tree_id.as_ref(), &new_wc_commit)
                     .context("Failed to check out after undo")?;
             }
         }
-        
+
         Ok(())
     }
 }

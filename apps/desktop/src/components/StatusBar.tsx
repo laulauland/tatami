@@ -6,9 +6,10 @@ import { useTheme } from "@/hooks/useTheme";
 interface StatusBarProps {
 	branch: string | null;
 	isConnected: boolean;
+	hasConflict: boolean;
 }
 
-export function StatusBar({ branch, isConnected }: StatusBarProps) {
+export function StatusBar({ branch, isConnected, hasConflict }: StatusBarProps) {
 	const { theme, cycleTheme } = useTheme();
 	const ThemeIcon = theme === "system" ? Laptop : theme === "dark" ? Moon : Sun;
 
@@ -34,6 +35,15 @@ export function StatusBar({ branch, isConnected }: StatusBarProps) {
 					</>
 				)}
 
+				{hasConflict && (
+					<>
+						<div className="flex items-center gap-1.5 text-destructive">
+							<Circle className="h-2 w-2 fill-current" />
+							<span>Conflicts</span>
+						</div>
+						<Separator orientation="vertical" className="h-4" />
+					</>
+				)}
 				<div className="flex items-center gap-1.5">
 					<Circle
 						className={`h-2 w-2 fill-current ${isConnected ? "text-green-500" : "text-red-500"}`}

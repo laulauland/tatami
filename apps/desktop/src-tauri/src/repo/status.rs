@@ -13,6 +13,7 @@ pub struct WorkingCopyStatus {
     pub commit_id: String,
     pub description: String,
     pub files: Vec<ChangedFile>,
+    pub has_conflict: bool,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -80,6 +81,7 @@ pub fn fetch_status(repo_path: &Path) -> Result<WorkingCopyStatus> {
         commit_id: hex::encode(&wc_commit_id.to_bytes()[..6]),
         description,
         files,
+        has_conflict: wc_commit.has_conflict(),
     })
 }
 

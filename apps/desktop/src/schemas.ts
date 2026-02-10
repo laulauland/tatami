@@ -52,6 +52,7 @@ export const WorkingCopyStatus = Schema.Struct({
 	repo_path: Schema.String,
 	change_id: Schema.String,
 	files: Schema.Array(ChangedFile),
+	has_conflict: Schema.Boolean,
 });
 export type WorkingCopyStatus = typeof WorkingCopyStatus.Type;
 

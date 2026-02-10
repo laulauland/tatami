@@ -64,9 +64,14 @@ interface RevisionGraphProps {
 	selectedRevision: Revision | null;
 	onSelectRevision: (revision: Revision) => void;
 	isLoading: boolean;
+	errorMessage?: string | null;
+	onRetry?: () => void;
 	flash?: { changeId: string; key: number } | null;
 	repoPath: string | null;
 	pendingAbandon?: Revision | null;
+	editingChangeId: string | null;
+	onDescribe: (changeId: string, description: string) => void;
+	onCancelDescribe: () => void;
 	diffPanelRef: RefObject<HTMLElement | null>;
 }
 
@@ -328,9 +333,14 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			selectedRevision,
 			onSelectRevision,
 			isLoading,
+			errorMessage,
+			onRetry,
 			flash,
 			repoPath,
 			pendingAbandon,
+			editingChangeId,
+			onDescribe,
+			onCancelDescribe,
 			diffPanelRef,
 		},
 		ref,
@@ -1080,6 +1090,30 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			return () => window.removeEventListener("keydown", handleJumpKey);
 		}, [aceJumpMode, aceJumpQuery, setAceJumpQuery, revisions, onSelectRevision]);
 
+		if (errorMessage) {
+			return (
+				<div
+					ref={containerRef}
+					tabIndex={-1}
+					className="flex h-full items-center justify-center bg-background outline-none"
+				>
+					<div className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-center">
+						<p className="text-sm text-destructive">Failed to load revisions</p>
+						<p className="mt-1 text-xs text-muted-foreground">{errorMessage}</p>
+						{onRetry ? (
+							<button
+								type="button"
+								onClick={onRetry}
+								className="mt-3 rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+							>
+								Retry
+							</button>
+						) : null}
+					</div>
+				</div>
+			);
+		}
+
 		if (revisions.length === 0) {
 			return (
 				<div
@@ -1264,6 +1298,9 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 											isFlashing={isFlashing}
 											isDimmed={isDimmed}
 											isPendingAbandon={pendingAbandon?.change_id === row.revision.change_id}
+											isEditing={editingChangeId === getRevisionKey(row.revision)}
+											onDescribe={onDescribe}
+											onCancelDescribe={onCancelDescribe}
 											jumpModeActive={aceJumpMode}
 											jumpQuery={aceJumpQuery ?? ""}
 											jumpHint={jumpHintsMap.get(row.revision.change_id) ?? null}

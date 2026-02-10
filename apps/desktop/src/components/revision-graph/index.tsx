@@ -72,6 +72,8 @@ interface RevisionGraphProps {
 	editingChangeId: string | null;
 	onDescribe: (changeId: string, description: string) => void;
 	onCancelDescribe: () => void;
+	rebaseSourceChangeId: string | null;
+	onPickRebaseDestination: (revision: Revision) => void;
 	diffPanelRef: RefObject<HTMLElement | null>;
 }
 
@@ -341,6 +343,8 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			editingChangeId,
 			onDescribe,
 			onCancelDescribe,
+			rebaseSourceChangeId,
+			onPickRebaseDestination,
 			diffPanelRef,
 		},
 		ref,
@@ -371,6 +375,10 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const navigate = useNavigate({ from: Route.fullPath });
 		const [aceJumpQuery, setAceJumpQuery] = useAtom(aceJumpQueryAtom);
 		const aceJumpMode = aceJumpQuery !== null;
+		const isRebaseDestinationPickMode = rebaseSourceChangeId !== null;
+		const rebaseSourceRevision = isRebaseDestinationPickMode
+			? (stableRevisions.find((revision) => revision.change_id === rebaseSourceChangeId) ?? null)
+			: null;
 
 		// Detect collapsible stacks
 		const stacks = useMemo(() => detectStacks(stableRevisions), [stableRevisions]);
@@ -826,6 +834,13 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 			const revision = revisionMapByKey.get(revisionKey);
 			if (!revision) return;
 
+			if (isRebaseDestinationPickMode && !modifiers.meta && !modifiers.shift) {
+				if (revision.change_id !== rebaseSourceChangeId) {
+					onPickRebaseDestination(revision);
+				}
+				return;
+			}
+
 			// Cmd/Ctrl+click: toggle selection
 			if (modifiers.meta) {
 				toggleRevisionCheck(revisionKey);
@@ -1154,6 +1169,15 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 					className="h-full overflow-auto ascii-bg pt-4"
 					style={{ overflowAnchor: "none" }}
 				>
+					{isRebaseDestinationPickMode && rebaseSourceRevision ? (
+						<div className="sticky top-0 z-30 border-y border-primary/30 bg-primary/10 px-3 py-1 text-xs text-primary">
+							Rebase mode: choose destination for
+							<code className="mx-1 rounded bg-primary/20 px-1 py-0.5 font-mono text-[10px]">
+								{rebaseSourceRevision.change_id_short}
+							</code>
+							(Enter or click revision, Esc to cancel)
+						</div>
+					) : null}
 					<div
 						className="relative"
 						style={{

@@ -43,7 +43,9 @@ import {
 	getRevisionKey,
 	getRevisionsCollection,
 	newRevision,
+	rebaseRevision,
 	repositoriesCollection,
+	squashRevision,
 	syncRepository,
 } from "@/db";
 import { useAddRepository } from "@/hooks/useAddRepository";
@@ -120,6 +122,7 @@ function AppShellWithProject() {
 	const [, setSearchOpen] = useAtom(searchOpenAtom);
 	const [pendingAbandon, setPendingAbandon] = useState<Revision | null>(null);
 	const [editingChangeId, setEditingChangeId] = useState<string | null>(null);
+	const [rebaseSourceKey, setRebaseSourceKey] = useState<string | null>(null);
 	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 	const [isSyncing, setIsSyncing] = useState(false);
 	const revisionGraphRef = useRef<RevisionGraphHandle>(null);
@@ -190,6 +193,10 @@ function AppShellWithProject() {
 	}, [revisions, orderedRevisions, expandedStacks]);
 
 	const selectedRevision = useSelectedRevision(revisions, rev);
+	const rebaseSourceRevision = rebaseSourceKey
+		? (revisions.find((r) => getRevisionKey(r) === rebaseSourceKey) ?? null)
+		: null;
+	const isPickingRebaseDestination = !!rebaseSourceRevision;
 	const revisionsErrorMessage =
 		revisionsStatus === "error" || revisionsLoadFailed
 			? "Could not fetch revisions from jj."
@@ -205,6 +212,14 @@ function AppShellWithProject() {
 			setEditingChangeId(null);
 		}
 	}, [editingChangeId, selectedRevision]);
+
+	useEffect(() => {
+		if (!rebaseSourceKey) return;
+		const stillExists = revisions.some((revision) => getRevisionKey(revision) === rebaseSourceKey);
+		if (!stillExists) {
+			setRebaseSourceKey(null);
+		}
+	}, [rebaseSourceKey, revisions]);
 
 	// Debounce the changeId passed to DiffPanel to avoid expensive re-renders during rapid navigation
 	// DiffPanel only updates when navigation settles (200ms without movement)
@@ -303,22 +318,111 @@ function AppShellWithProject() {
 		editRevision(revisionsCollection, activeProject.path, selectedRevision, currentWC ?? null);
 	}
 
+	function handleSquash() {
+		if (!activeProject || !selectedRevision) return;
+		squashRevision(revisionsCollection, activeProject.path, selectedRevision);
+	}
+
+	function handleStartRebase() {
+		if (!selectedRevision || selectedRevision.is_immutable) return;
+		setPendingAbandon(null);
+		setEditingChangeId(null);
+		setRebaseSourceKey(getRevisionKey(selectedRevision));
+	}
+
+	function handleCancelRebaseDestinationPick() {
+		setRebaseSourceKey(null);
+	}
+
+	function handlePickRebaseDestination(destinationRevision: Revision) {
+		if (!activeProject || !rebaseSourceRevision) return;
+		rebaseRevision(
+			revisionsCollection,
+			activeProject.path,
+			rebaseSourceRevision,
+			destinationRevision,
+		);
+		setRebaseSourceKey(null);
+	}
+
 	useKeyboardShortcut({
 		key: "n",
 		onPress: handleNew,
-		enabled: !!activeProject && !!selectedRevision,
+		enabled:
+			!!activeProject &&
+			!!selectedRevision &&
+			!pendingAbandon &&
+			!isPickingRebaseDestination &&
+			!editingChangeId,
 	});
 
 	useKeyboardShortcut({
 		key: "e",
 		onPress: handleEdit,
-		enabled: !!activeProject && !!selectedRevision,
+		enabled:
+			!!activeProject &&
+			!!selectedRevision &&
+			!pendingAbandon &&
+			!isPickingRebaseDestination &&
+			!editingChangeId,
+	});
+
+	useKeyboardShortcut({
+		key: "s",
+		onPress: handleSquash,
+		enabled:
+			!!activeProject &&
+			!!selectedRevision &&
+			!selectedRevision.is_immutable &&
+			!pendingAbandon &&
+			!isPickingRebaseDestination &&
+			!editingChangeId,
+	});
+
+	useKeyboardShortcut({
+		key: "r",
+		onPress: () => {
+			if (isPickingRebaseDestination) {
+				handleCancelRebaseDestinationPick();
+				return;
+			}
+			handleStartRebase();
+		},
+		enabled:
+			isPickingRebaseDestination ||
+			(!!activeProject &&
+				!!selectedRevision &&
+				!selectedRevision.is_immutable &&
+				!pendingAbandon &&
+				!editingChangeId),
+	});
+
+	useKeyboardShortcut({
+		key: "Enter",
+		onPress: () => {
+			if (!selectedRevision) return;
+			handlePickRebaseDestination(selectedRevision);
+		},
+		enabled:
+			isPickingRebaseDestination &&
+			!!selectedRevision &&
+			getRevisionKey(selectedRevision) !== rebaseSourceKey,
+	});
+
+	useKeyboardShortcut({
+		key: "Escape",
+		onPress: handleCancelRebaseDestinationPick,
+		enabled: isPickingRebaseDestination,
 	});
 
 	useKeyboardShortcut({
 		key: "d",
 		onPress: handleStartDescribe,
-		enabled: !!selectedRevision && !selectedRevision.is_immutable,
+		enabled:
+			!!selectedRevision &&
+			!selectedRevision.is_immutable &&
+			!pendingAbandon &&
+			!isPickingRebaseDestination,
 	});
 
 	function handleDescribe(changeId: string, description: string) {
@@ -331,6 +435,7 @@ function AppShellWithProject() {
 
 	function handleStartDescribe() {
 		if (!selectedRevision || selectedRevision.is_immutable) return;
+		setRebaseSourceKey(null);
 		setEditingChangeId(getRevisionKey(selectedRevision));
 	}
 
@@ -342,6 +447,8 @@ function AppShellWithProject() {
 		if (!activeProject || !selectedRevision) return;
 		// Don't abandon immutable revisions (trunk ancestors)
 		if (selectedRevision.is_immutable) return;
+		setRebaseSourceKey(null);
+		setEditingChangeId(null);
 		// Show confirmation
 		setPendingAbandon(selectedRevision);
 	}
@@ -359,7 +466,12 @@ function AppShellWithProject() {
 	useKeyboardShortcut({
 		key: "a",
 		onPress: handleAbandon,
-		enabled: !!activeProject && !!selectedRevision && !pendingAbandon,
+		enabled:
+			!!activeProject &&
+			!!selectedRevision &&
+			!pendingAbandon &&
+			!isPickingRebaseDestination &&
+			!editingChangeId,
 	});
 
 	// Confirmation shortcuts
@@ -500,6 +612,8 @@ function AppShellWithProject() {
 									editingChangeId={editingChangeId}
 									onDescribe={handleDescribe}
 									onCancelDescribe={handleCancelDescribe}
+									rebaseSourceChangeId={rebaseSourceRevision?.change_id ?? null}
+									onPickRebaseDestination={handlePickRebaseDestination}
 									diffPanelRef={diffPanelRef}
 								/>
 							</Profiler>
@@ -529,6 +643,8 @@ function AppShellWithProject() {
 											editingChangeId={editingChangeId}
 											onDescribe={handleDescribe}
 											onCancelDescribe={handleCancelDescribe}
+											rebaseSourceChangeId={rebaseSourceRevision?.change_id ?? null}
+											onPickRebaseDestination={handlePickRebaseDestination}
 											diffPanelRef={diffPanelRef}
 										/>
 									</Profiler>

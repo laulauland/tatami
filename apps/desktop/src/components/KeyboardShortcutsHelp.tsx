@@ -24,6 +24,9 @@ const shortcuts = [
 		items: [
 			{ keys: ["n"], description: "New revision on selected" },
 			{ keys: ["e"], description: "Edit selected revision" },
+			{ keys: ["s"], description: "Squash selected revision into parent" },
+			{ keys: ["r"], description: "Start/cancel rebase destination pick" },
+			{ keys: ["Enter"], description: "Confirm rebase destination (pick mode)" },
 		],
 	},
 	{

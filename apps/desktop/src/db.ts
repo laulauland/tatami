@@ -18,6 +18,8 @@ import {
 	jjGitFetch,
 	jjGitPush,
 	jjNew,
+	jjRebase,
+	jjSquash,
 	removeRepository,
 	undoOperation,
 	upsertRepository,
@@ -170,6 +172,30 @@ async function invalidateRepositoryQueries(repoPath: string): Promise<void> {
 	await queryClient.invalidateQueries({ queryKey: ["commit-recency", repoPath] });
 	await queryClient.invalidateQueries({ queryKey: ["status", repoPath] });
 	await queryClient.invalidateQueries({ queryKey: ["conflict-paths", repoPath] });
+}
+
+function mutationSuccessWithUndo(
+	repoPath: string,
+	operationId: string,
+	title: string,
+	description?: string,
+) {
+	toast.success(title, {
+		description,
+		action: {
+			label: "Undo",
+			onClick: () => {
+				undoOperation(repoPath, operationId)
+					.then(() => {
+						void invalidateRepositoryQueries(repoPath);
+						toast.success("Undo successful");
+					})
+					.catch((error) => {
+						toast.error(`Undo failed: ${error}`, { duration: Number.POSITIVE_INFINITY });
+					});
+			},
+		},
+	});
 }
 
 export async function syncRepository(repoPath: string, preset?: string): Promise<void> {
@@ -521,6 +547,102 @@ export function describeRevision(
 			// Revert optimistic update on failure
 			collection.utils.writeUpsert([{ ...revision, description: previousDescription }]);
 			toast.error(`Failed to update description: ${error}`, {
+				duration: Number.POSITIVE_INFINITY,
+			});
+		});
+}
+
+export function squashRevision(
+	collection: RevisionsCollection,
+	repoPath: string,
+	revision: Revision,
+) {
+	if (revision.is_immutable) {
+		toast.error("Cannot squash immutable revision", { duration: Number.POSITIVE_INFINITY });
+		return;
+	}
+	if (revision.parent_edges.length === 0) {
+		toast.error("Cannot squash root revision", { duration: Number.POSITIVE_INFINITY });
+		return;
+	}
+	if (revision.parent_edges.length > 1) {
+		toast.error("Cannot squash merge revision with multiple parents", {
+			duration: Number.POSITIVE_INFINITY,
+		});
+		return;
+	}
+
+	const mutationId = `squash-${Date.now()}-${Math.random()}`;
+	const shouldOptimisticallyDelete = !revision.is_working_copy;
+
+	if (shouldOptimisticallyDelete) {
+		collection.utils.writeDelete(getRevisionKey(revision));
+	}
+
+	trackMutation(mutationId, jjSquash(repoPath, revision.change_id))
+		.then((result) => {
+			void invalidateRepositoryQueries(repoPath);
+			mutationSuccessWithUndo(
+				repoPath,
+				result.operation_id,
+				`Squashed ${revision.change_id_short} into parent`,
+			);
+		})
+		.catch((error) => {
+			if (shouldOptimisticallyDelete) {
+				collection.utils.writeUpsert([revision]);
+			}
+			toast.error(`Failed to squash revision: ${error}`, {
+				duration: Number.POSITIVE_INFINITY,
+			});
+		});
+}
+
+export function rebaseRevision(
+	collection: RevisionsCollection,
+	repoPath: string,
+	sourceRevision: Revision,
+	destinationRevision: Revision,
+) {
+	if (sourceRevision.is_immutable) {
+		toast.error("Cannot rebase immutable revision", { duration: Number.POSITIVE_INFINITY });
+		return;
+	}
+	if (sourceRevision.change_id === destinationRevision.change_id) {
+		toast.error("Cannot rebase revision onto itself", { duration: Number.POSITIVE_INFINITY });
+		return;
+	}
+
+	const mutationId = `rebase-${Date.now()}-${Math.random()}`;
+	const previousParentEdges = sourceRevision.parent_edges;
+
+	collection.utils.writeUpsert([
+		{
+			...sourceRevision,
+			parent_edges: [{ parent_id: destinationRevision.commit_id, edge_type: "direct" as const }],
+		},
+	]);
+
+	trackMutation(
+		mutationId,
+		jjRebase(repoPath, sourceRevision.change_id, destinationRevision.change_id),
+	)
+		.then((result) => {
+			void invalidateRepositoryQueries(repoPath);
+			mutationSuccessWithUndo(
+				repoPath,
+				result.operation_id,
+				`Rebased ${sourceRevision.change_id_short} onto ${destinationRevision.change_id_short}`,
+			);
+		})
+		.catch((error) => {
+			collection.utils.writeUpsert([
+				{
+					...sourceRevision,
+					parent_edges: previousParentEdges,
+				},
+			]);
+			toast.error(`Failed to rebase revision: ${error}`, {
 				duration: Number.POSITIVE_INFINITY,
 			});
 		});

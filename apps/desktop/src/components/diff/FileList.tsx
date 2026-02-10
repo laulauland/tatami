@@ -274,7 +274,9 @@ function TreeNodeComponent({
 					else itemRefs.current?.delete(node.path);
 				}}
 				type="button"
-				onClick={(e) => onSelectFile(node.path, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey })}
+				onClick={(e) =>
+					onSelectFile(node.path, { shift: e.shiftKey, meta: e.metaKey || e.ctrlKey })
+				}
 				className={cn(
 					"min-w-0 flex-1 flex items-center gap-2 px-3 py-1.5 text-left text-sm",
 					isSelected
@@ -654,7 +656,9 @@ export function FileList({
 								title="Tree file list"
 								aria-label="Tree file list"
 							>
-								<FolderTreeIcon className={`size-3 ${viewMode === "tree" ? "text-foreground" : ""}`} />
+								<FolderTreeIcon
+									className={`size-3 ${viewMode === "tree" ? "text-foreground" : ""}`}
+								/>
 							</button>
 						</div>
 					</div>

@@ -22,6 +22,7 @@ import {
 	jjSquash,
 	removeRepository,
 	undoOperation,
+	unwatchRepository,
 	upsertRepository,
 	watchRepository,
 } from "@/tauri-commands";
@@ -123,7 +124,7 @@ function consumeChangeId(repoPath: string): string | null {
 
 const repoWatchers = new Map<string, { unlisten: () => void; refCount: number }>();
 
-async function setupRepoWatcher(repoPath: string): Promise<void> {
+export async function setupRepoWatcher(repoPath: string): Promise<void> {
 	const existing = repoWatchers.get(repoPath);
 	if (existing) {
 		existing.refCount++;
@@ -151,6 +152,22 @@ async function setupRepoWatcher(repoPath: string): Promise<void> {
 	});
 
 	repoWatchers.set(repoPath, { unlisten, refCount: 1 });
+}
+
+export async function teardownRepoWatcher(repoPath: string): Promise<void> {
+	const existing = repoWatchers.get(repoPath);
+	if (!existing) {
+		return;
+	}
+
+	existing.refCount--;
+	if (existing.refCount > 0) {
+		return;
+	}
+
+	repoWatchers.delete(repoPath);
+	existing.unlisten();
+	await unwatchRepository(repoPath);
 }
 
 function isAuthError(errorText: string): boolean {
@@ -337,9 +354,6 @@ const revisionCollections = new Map<string, ReturnType<typeof createRevisionsCol
 
 function createRevisionsCollection(repoPath: string, preset?: string) {
 	const limit = preset === "full_history" ? 10000 : 100;
-
-	// Set up the shared watcher (idempotent - increments refCount if already exists)
-	setupRepoWatcher(repoPath);
 
 	return createCollection({
 		...queryCollectionOptions({

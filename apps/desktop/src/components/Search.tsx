@@ -183,8 +183,8 @@ export function Search({ revisions, repoPath, onJump }: SearchProps) {
 			filtered.sort((a, b) => {
 				const aType = matchType(a);
 				const bType = matchType(b);
-				const aPriority = aType ? priority[aType] ?? 3 : 3;
-				const bPriority = bType ? priority[bType] ?? 3 : 3;
+				const aPriority = aType ? (priority[aType] ?? 3) : 3;
+				const bPriority = bType ? (priority[bType] ?? 3) : 3;
 				return aPriority - bPriority;
 			});
 		}

@@ -60,8 +60,10 @@ import {
 	newRevision,
 	rebaseRevision,
 	repositoriesCollection,
+	setupRepoWatcher,
 	squashRevision,
 	syncRepository,
+	teardownRepoWatcher,
 } from "@/db";
 import { useAddRepository } from "@/hooks/useAddRepository";
 import { useAppTitle } from "@/hooks/useAppTitle";
@@ -75,6 +77,7 @@ import {
 	type Repository,
 	type Revision,
 } from "@/tauri-commands";
+import { switchProjectWithWatcherCleanup } from "@/lib/project-switch";
 import { onRenderCallback } from "@/lib/trace";
 
 // Wrapper component that handles the case when no project is selected
@@ -156,6 +159,7 @@ function AppShellWithProject() {
 	const layoutHydratedRef = useRef(false);
 	const selectionRestoredForProjectRef = useRef<string | null>(null);
 	const persistLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	const skipWatcherCleanupRef = useRef<string | null>(null);
 	const isNarrowScreen = useIsNarrowScreen();
 	const { handleAddRepository } = useAddRepository();
 
@@ -168,6 +172,21 @@ function AppShellWithProject() {
 	const { data: repositories = [] } = useLiveQuery(repositoriesCollection);
 
 	const activeProject = repositories.find((p) => p.id === projectId) ?? null;
+
+	useEffect(() => {
+		const repoPath = activeProject?.path;
+		if (!repoPath) return;
+
+		void setupRepoWatcher(repoPath).catch(() => {});
+
+		return () => {
+			if (skipWatcherCleanupRef.current === repoPath) {
+				skipWatcherCleanupRef.current = null;
+				return;
+			}
+			void teardownRepoWatcher(repoPath).catch(() => {});
+		};
+	}, [activeProject?.path]);
 
 	const { data: persistedLayout } = useQuery({
 		queryKey: ["app-layout"],
@@ -343,8 +362,18 @@ function AppShellWithProject() {
 		};
 	}, [selectedChangeId, setDebouncedChangeId]);
 
-	function handleSelectRepository(repository: Repository) {
-		navigate({ to: "/project/$projectId", params: { projectId: repository.id } });
+	async function handleSelectRepository(repository: Repository) {
+		const previousRepoPath = activeProject?.path ?? null;
+		await switchProjectWithWatcherCleanup(previousRepoPath, repository, {
+			onTeardownSuccess: (repoPath) => {
+				skipWatcherCleanupRef.current = repoPath;
+			},
+			navigateToProject: (nextProjectId) => {
+				navigate({ to: "/project/$projectId", params: { projectId: nextProjectId } });
+			},
+		}).catch(() => {
+			// Ignore teardown errors and still allow project switch.
+		});
 	}
 
 	function handleSelectRevision(revision: Revision) {

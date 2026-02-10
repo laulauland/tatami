@@ -12,7 +12,12 @@ type ResizablePanelGroupProps = React.ComponentProps<typeof Group> & {
 	direction?: PanelDirection;
 };
 
-function ResizablePanelGroup({ className, orientation, direction, ...props }: ResizablePanelGroupProps) {
+function ResizablePanelGroup({
+	className,
+	orientation,
+	direction,
+	...props
+}: ResizablePanelGroupProps) {
 	return (
 		<Group
 			data-slot="resizable-panel-group"

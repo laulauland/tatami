@@ -157,10 +157,23 @@ export async function jjDescribe(
 	return invoke<MutationResult>("jj_describe", { repoPath, changeId, description });
 }
 
-export async function jjGitFetch(
+export async function jjSquash(repoPath: string, changeId: string): Promise<MutationResult> {
+	return invoke<MutationResult>("jj_squash", { repoPath, changeId });
+}
+
+export async function jjRebase(
 	repoPath: string,
-	remote?: string,
+	sourceChangeId: string,
+	destinationChangeId: string,
 ): Promise<MutationResult> {
+	return invoke<MutationResult>("jj_rebase", {
+		repoPath,
+		sourceChangeId,
+		destinationChangeId,
+	});
+}
+
+export async function jjGitFetch(repoPath: string, remote?: string): Promise<MutationResult> {
 	return invoke<MutationResult>("jj_git_fetch", {
 		repoPath,
 		remote: remote ?? null,

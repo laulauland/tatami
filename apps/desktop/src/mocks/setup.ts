@@ -1135,6 +1135,107 @@ const handlers: Record<string, MockHandler> = {
 			change_id: target.change_id,
 		};
 	},
+	jj_squash: (args) => {
+		const changeId = args.changeId as string;
+		const revisionIndex = mockRevisions.findIndex(
+			(r) => r.change_id.startsWith(changeId) || r.change_id_short === changeId,
+		);
+		if (revisionIndex < 0) {
+			throw new Error(`Change ID not found: ${changeId}`);
+		}
+
+		const source = mockRevisions[revisionIndex];
+		if (source.is_immutable) {
+			throw new Error("Cannot squash immutable revision");
+		}
+		if (source.parent_edges.length === 0) {
+			throw new Error("Cannot squash root revision: no parent");
+		}
+
+		const parentCommitId = source.parent_edges[0].parent_id;
+		const parentIndex = mockRevisions.findIndex((r) => r.commit_id === parentCommitId);
+		if (parentIndex < 0) {
+			throw new Error("Cannot squash revision: parent not found");
+		}
+
+		const parent = mockRevisions[parentIndex];
+		const childCommitIds = mockRevisions
+			.filter((r) => r.parent_edges.some((edge) => edge.parent_id === source.commit_id))
+			.map((r) => r.commit_id);
+
+		mockRevisions = mockRevisions
+			.filter((r) => r.commit_id !== source.commit_id)
+			.map((revision) => {
+				if (!childCommitIds.includes(revision.commit_id)) {
+					return revision;
+				}
+				return {
+					...revision,
+					parent_edges: revision.parent_edges.map((edge) =>
+						edge.parent_id === source.commit_id ? { ...edge, parent_id: parentCommitId } : edge,
+					),
+				};
+			});
+
+		if (source.is_working_copy) {
+			mockRevisions = mockRevisions.map((revision) => ({
+				...revision,
+				is_working_copy: revision.commit_id === parent.commit_id,
+			}));
+		}
+
+		const allRevisionsRaw = mockRevisions.map(
+			({ change_id_short: _, children_ids: __, ...revision }) => revision,
+		);
+		mockRevisions = calculateShortIds(allRevisionsRaw);
+
+		return {
+			operation_id: nextOperationId(),
+			change_id: null,
+		};
+	},
+	jj_rebase: (args) => {
+		const sourceChangeId = args.sourceChangeId as string;
+		const destinationChangeId = args.destinationChangeId as string;
+
+		const sourceIndex = mockRevisions.findIndex(
+			(r) => r.change_id.startsWith(sourceChangeId) || r.change_id_short === sourceChangeId,
+		);
+		if (sourceIndex < 0) {
+			throw new Error(`Change ID not found: ${sourceChangeId}`);
+		}
+
+		const destination = mockRevisions.find(
+			(r) =>
+				r.change_id.startsWith(destinationChangeId) || r.change_id_short === destinationChangeId,
+		);
+		if (!destination) {
+			throw new Error(`Change ID not found: ${destinationChangeId}`);
+		}
+
+		const source = mockRevisions[sourceIndex];
+		if (source.is_immutable) {
+			throw new Error("Cannot rebase immutable revision");
+		}
+		if (source.commit_id === destination.commit_id) {
+			throw new Error("Cannot rebase revision onto itself");
+		}
+
+		mockRevisions[sourceIndex] = {
+			...source,
+			parent_edges: [{ parent_id: destination.commit_id, edge_type: "direct" }],
+		};
+
+		const allRevisionsRaw = mockRevisions.map(
+			({ change_id_short: _, children_ids: __, ...revision }) => revision,
+		);
+		mockRevisions = calculateShortIds(allRevisionsRaw);
+
+		return {
+			operation_id: nextOperationId(),
+			change_id: null,
+		};
+	},
 	jj_git_fetch: async (_args) => {
 		await delay(500);
 

@@ -9,6 +9,7 @@ use jj_lib::op_store::OperationId;
 use jj_lib::op_walk;
 use jj_lib::repo::{Repo, StoreFactories};
 use jj_lib::repo_path::RepoPath;
+use jj_lib::rewrite::{self, CommitWithSelection};
 use jj_lib::settings::UserSettings;
 use jj_lib::workspace::{Workspace, default_working_copy_factories};
 use serde::Serialize;
@@ -487,6 +488,154 @@ impl JjRepo {
             self.workspace
                 .check_out(operation_id.clone(), old_tree_id.as_ref(), &new_commit)
                 .context("Failed to keep working copy in sync after describe")?;
+        }
+
+        Ok(MutationResult {
+            operation_id: operation_id.hex(),
+            change_id: None,
+        })
+    }
+
+    pub fn squash_revision(&mut self, change_id: &str) -> Result<MutationResult> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let mut tx = repo.start_transaction();
+
+        let source_commit_id = self.resolve_change_id(repo.as_ref(), change_id)?;
+        let source_commit = repo
+            .store()
+            .get_commit(&source_commit_id)
+            .map_err(|e| anyhow::anyhow!("Failed to get source commit: {}", e))?;
+
+        if source_commit.parent_ids().is_empty() {
+            anyhow::bail!("Cannot squash root revision: no parent");
+        }
+        if source_commit.parent_ids().len() > 1 {
+            anyhow::bail!("Cannot squash merge revision with multiple parents");
+        }
+        if source_commit.id() == repo.store().root_commit_id() {
+            anyhow::bail!("Cannot squash immutable revision");
+        }
+
+        let parent_id = source_commit
+            .parent_ids()
+            .first()
+            .cloned()
+            .context("Cannot squash revision: no parent")?;
+        let parent_commit = repo
+            .store()
+            .get_commit(&parent_id)
+            .map_err(|e| anyhow::anyhow!("Failed to get parent commit: {}", e))?;
+
+        let workspace_name = self.workspace.workspace_name().to_owned();
+        let old_wc_commit_id = repo.view().get_wc_commit_id(&workspace_name).cloned();
+        let old_tree_id = old_wc_commit_id
+            .as_ref()
+            .and_then(|id| repo.store().get_commit(id).ok())
+            .map(|commit| commit.tree_id().clone());
+
+        let source = CommitWithSelection {
+            commit: source_commit.clone(),
+            selected_tree: source_commit.tree()?,
+            parent_tree: source_commit.parent_tree(repo.as_ref())?,
+        };
+
+        let squashed = rewrite::squash_commits(tx.repo_mut(), &[source], &parent_commit, false)?;
+        let Some(squashed) = squashed else {
+            anyhow::bail!("Nothing to squash");
+        };
+
+        squashed
+            .commit_builder
+            .write()
+            .map_err(|e| anyhow::anyhow!("Failed to write squashed commit: {}", e))?;
+
+        tx.repo_mut().rebase_descendants()?;
+
+        let new_repo = tx.commit("squash")?;
+        let operation_id = new_repo.operation().id().clone();
+
+        if let Some(new_wc_commit_id) = new_repo.view().get_wc_commit_id(&workspace_name) {
+            if old_wc_commit_id.as_ref() != Some(new_wc_commit_id) {
+                let new_wc_commit = new_repo
+                    .store()
+                    .get_commit(new_wc_commit_id)
+                    .context("Failed to get new working copy commit")?;
+                self.workspace
+                    .check_out(operation_id.clone(), old_tree_id.as_ref(), &new_wc_commit)
+                    .context("Failed to update working copy after squash")?;
+            }
+        }
+
+        Ok(MutationResult {
+            operation_id: operation_id.hex(),
+            change_id: None,
+        })
+    }
+
+    pub fn rebase_revision(
+        &mut self,
+        source_change_id: &str,
+        destination_change_id: &str,
+    ) -> Result<MutationResult> {
+        let repo = self.workspace.repo_loader().load_at_head()?;
+        let mut tx = repo.start_transaction();
+
+        let source_commit_id = self.resolve_change_id(repo.as_ref(), source_change_id)?;
+        let source_commit = repo
+            .store()
+            .get_commit(&source_commit_id)
+            .map_err(|e| anyhow::anyhow!("Failed to get source commit: {}", e))?;
+
+        if source_commit.id() == repo.store().root_commit_id() {
+            anyhow::bail!("Cannot rebase immutable revision");
+        }
+
+        let destination_commit_id = self.resolve_change_id(repo.as_ref(), destination_change_id)?;
+        let destination_commit = repo
+            .store()
+            .get_commit(&destination_commit_id)
+            .map_err(|e| anyhow::anyhow!("Failed to get destination commit: {}", e))?;
+
+        if source_commit.id() == destination_commit.id() {
+            anyhow::bail!("Cannot rebase revision onto itself");
+        }
+
+        if repo
+            .index()
+            .is_ancestor(source_commit.id(), destination_commit.id())?
+        {
+            anyhow::bail!("Cannot rebase revision onto its descendant");
+        }
+
+        let workspace_name = self.workspace.workspace_name().to_owned();
+        let old_wc_commit_id = repo.view().get_wc_commit_id(&workspace_name).cloned();
+        let old_tree_id = old_wc_commit_id
+            .as_ref()
+            .and_then(|id| repo.store().get_commit(id).ok())
+            .map(|commit| commit.tree_id().clone());
+
+        pollster::block_on(rewrite::rebase_commit(
+            tx.repo_mut(),
+            source_commit,
+            vec![destination_commit.id().clone()],
+        ))
+        .map_err(|e| anyhow::anyhow!("Failed to rebase revision: {}", e))?;
+
+        tx.repo_mut().rebase_descendants()?;
+
+        let new_repo = tx.commit("rebase")?;
+        let operation_id = new_repo.operation().id().clone();
+
+        if let Some(new_wc_commit_id) = new_repo.view().get_wc_commit_id(&workspace_name) {
+            if old_wc_commit_id.as_ref() != Some(new_wc_commit_id) {
+                let new_wc_commit = new_repo
+                    .store()
+                    .get_commit(new_wc_commit_id)
+                    .context("Failed to get new working copy commit")?;
+                self.workspace
+                    .check_out(operation_id.clone(), old_tree_id.as_ref(), &new_wc_commit)
+                    .context("Failed to update working copy after rebase")?;
+            }
         }
 
         Ok(MutationResult {

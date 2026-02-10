@@ -628,6 +628,28 @@ async fn jj_describe(
 }
 
 #[tauri::command]
+async fn jj_squash(repo_path: String, change_id: String) -> Result<MutationResult, String> {
+    let path = Path::new(&repo_path);
+    let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .squash_revision(&change_id)
+        .map_err(|e| format!("Failed to squash revision: {}", e))
+}
+
+#[tauri::command]
+async fn jj_rebase(
+    repo_path: String,
+    source_change_id: String,
+    destination_change_id: String,
+) -> Result<MutationResult, String> {
+    let path = Path::new(&repo_path);
+    let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
+    jj_repo
+        .rebase_revision(&source_change_id, &destination_change_id)
+        .map_err(|e| format!("Failed to rebase revision: {}", e))
+}
+
+#[tauri::command]
 async fn jj_git_fetch(repo_path: String, remote: Option<String>) -> Result<MutationResult, String> {
     let path = Path::new(&repo_path);
     let mut jj_repo = JjRepo::open(path).map_err(|e| format!("Failed to open repo: {}", e))?;
@@ -923,6 +945,8 @@ pub fn run() {
             jj_edit,
             jj_abandon,
             jj_describe,
+            jj_squash,
+            jj_rebase,
             jj_git_fetch,
             jj_git_push,
             get_operations,
@@ -1051,7 +1075,10 @@ mod tests {
         create_conflicted_working_copy(&repo_path);
 
         let status = repo::status::fetch_status(&repo_path).expect("Failed to fetch status");
-        assert!(status.has_conflict, "Working copy status should report conflict");
+        assert!(
+            status.has_conflict,
+            "Working copy status should report conflict"
+        );
     }
 
     #[test]
@@ -1473,6 +1500,202 @@ mod tests {
             .get_commit(&change_id)
             .expect("Failed to load described commit");
         assert_eq!(described_commit.description(), "");
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_squash_revision_into_parent() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        let file_path = repo_path.join("squash.txt");
+        fs::write(&file_path, "base\n").expect("Failed to write base file");
+        snapshot_working_copy(&repo_path);
+
+        let parent_change_id = get_wc_change_id(&repo_path);
+
+        let new_status = Command::new("jj")
+            .args(["new"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("Failed to create child revision for squash");
+        assert!(new_status.success(), "jj new failed for squash setup");
+
+        fs::write(&file_path, "base\nchild\n").expect("Failed to update squash file");
+        snapshot_working_copy(&repo_path);
+
+        let source_change_id = get_wc_change_id(&repo_path);
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        let result = jj_repo
+            .squash_revision(&source_change_id)
+            .expect("squash_revision should succeed");
+
+        assert!(
+            !result.operation_id.is_empty(),
+            "squash should return operation_id"
+        );
+        let current_wc_change_id = get_wc_change_id(&repo_path);
+        assert_ne!(
+            current_wc_change_id, source_change_id,
+            "source revision should no longer be the working copy after squash"
+        );
+
+        let source_lookup = jj_repo.get_commit(&source_change_id);
+        assert!(
+            source_lookup.is_err(),
+            "squashed source revision should no longer be directly addressable"
+        );
+
+        let squashed_parent = jj_repo
+            .get_commit(&parent_change_id)
+            .expect("Failed to load squashed parent commit");
+        let content = jj_repo
+            .get_file_content(&squashed_parent, "squash.txt")
+            .expect("Failed to load squashed file content");
+        assert_eq!(
+            String::from_utf8(content).expect("File content should be utf-8"),
+            "base\nchild\n"
+        );
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_squash_root_rejected() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        let root_change_id = get_root_change_id(&repo_path);
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        let error = jj_repo
+            .squash_revision(&root_change_id)
+            .expect_err("Squashing root commit should fail");
+        assert!(
+            error.to_string().contains("no parent"),
+            "Error should mention missing parent"
+        );
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_rebase_revision_onto_target() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        let file_path = repo_path.join("rebase.txt");
+        fs::write(&file_path, "base\n").expect("Failed to write base file");
+        snapshot_working_copy(&repo_path);
+
+        let base_change_id = get_wc_change_id(&repo_path);
+
+        let new_source = Command::new("jj")
+            .args(["new"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("Failed to create source revision");
+        assert!(new_source.success(), "jj new failed for source");
+
+        fs::write(&file_path, "base\nsource\n").expect("Failed to write source file");
+        snapshot_working_copy(&repo_path);
+        let source_change_id = get_wc_change_id(&repo_path);
+
+        let edit_base = Command::new("jj")
+            .args(["edit", &base_change_id])
+            .current_dir(&repo_path)
+            .status()
+            .expect("Failed to edit base revision");
+        assert!(edit_base.success(), "jj edit base failed");
+
+        let new_target = Command::new("jj")
+            .args(["new"])
+            .current_dir(&repo_path)
+            .status()
+            .expect("Failed to create destination revision");
+        assert!(new_target.success(), "jj new failed for destination");
+
+        fs::write(repo_path.join("target.txt"), "target\n").expect("Failed to write target file");
+        snapshot_working_copy(&repo_path);
+        let destination_change_id = get_wc_change_id(&repo_path);
+
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+        let source_before = jj_repo
+            .get_commit(&source_change_id)
+            .expect("Failed to load source before rebase");
+        let old_parent_id = source_before
+            .parent_ids()
+            .first()
+            .cloned()
+            .expect("Source should have a parent");
+        let destination_commit = jj_repo
+            .get_commit(&destination_change_id)
+            .expect("Failed to load destination commit");
+
+        let result = jj_repo
+            .rebase_revision(&source_change_id, &destination_change_id)
+            .expect("rebase_revision should succeed");
+
+        assert!(
+            !result.operation_id.is_empty(),
+            "rebase should return operation_id"
+        );
+
+        let rebased_source = jj_repo
+            .get_commit(&source_change_id)
+            .expect("Failed to load rebased source commit");
+        let new_parent_id = rebased_source
+            .parent_ids()
+            .first()
+            .expect("Rebased source should have a parent");
+
+        assert_eq!(
+            new_parent_id,
+            destination_commit.id(),
+            "source commit should now have destination as parent"
+        );
+        assert_ne!(
+            new_parent_id, &old_parent_id,
+            "source commit should have a different parent after rebase"
+        );
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_rebase_immutable_rejected() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        let root_change_id = get_root_change_id(&repo_path);
+        let destination_change_id = get_wc_change_id(&repo_path);
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        let error = jj_repo
+            .rebase_revision(&root_change_id, &destination_change_id)
+            .expect_err("Rebasing immutable commit should fail");
+
+        assert!(
+            error.to_string().contains("immutable"),
+            "Error should mention immutable"
+        );
+
+        drop(temp_dir);
+    }
+
+    #[test]
+    fn test_rebase_invalid_target_rejected() {
+        let (temp_dir, repo_path) = create_test_repo();
+
+        let source_change_id = get_wc_change_id(&repo_path);
+        let mut jj_repo = JjRepo::open(&repo_path).expect("Failed to open repo");
+
+        let error = jj_repo
+            .rebase_revision(&source_change_id, &source_change_id)
+            .expect_err("Rebasing onto itself should fail");
+
+        assert!(
+            error.to_string().contains("itself"),
+            "Error should mention invalid target"
+        );
 
         drop(temp_dir);
     }

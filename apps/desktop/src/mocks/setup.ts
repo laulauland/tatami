@@ -80,6 +80,13 @@ function calculateShortIds(
 	return result;
 }
 
+type MockAppLayout = {
+	active_project_id: string | null;
+	selected_change_id: string | null;
+	sidebar_width: number;
+	view_mode: 1 | 2;
+};
+
 let mockProjects: Repository[] = [
 	{
 		id: "mock-1",
@@ -96,6 +103,13 @@ let mockProjects: Repository[] = [
 		revset_preset: null,
 	},
 ];
+
+let mockLayout: MockAppLayout = {
+	active_project_id: mockProjects[0]?.id ?? null,
+	selected_change_id: null,
+	sidebar_width: 25,
+	view_mode: 1,
+};
 
 // Complex mock revision graph representing realistic development workflow
 // Structure: Multiple unmerged feature branches with 3+ commits, diverse branching patterns
@@ -920,6 +934,28 @@ const handlers: Record<string, MockHandler> = {
 	remove_project: (args) => {
 		const projectId = args.projectId as string;
 		mockProjects = mockProjects.filter((p) => p.id !== projectId);
+		if (mockLayout.active_project_id === projectId) {
+			mockLayout.active_project_id = null;
+			mockLayout.selected_change_id = null;
+		}
+		return undefined;
+	},
+	get_layout: () => mockLayout,
+	update_layout: (args) => {
+		const updates = (args.layout ?? {}) as Partial<MockAppLayout>;
+		const hasActiveProjectUpdate = typeof updates.active_project_id === "string";
+		if (hasActiveProjectUpdate) {
+			mockLayout.active_project_id = updates.active_project_id ?? null;
+		}
+		if (updates.selected_change_id !== undefined || hasActiveProjectUpdate) {
+			mockLayout.selected_change_id = updates.selected_change_id ?? null;
+		}
+		if (typeof updates.sidebar_width === "number" && updates.sidebar_width !== 0) {
+			mockLayout.sidebar_width = Math.max(15, Math.min(70, Math.round(updates.sidebar_width)));
+		}
+		if (typeof updates.view_mode === "number") {
+			mockLayout.view_mode = updates.view_mode === 2 ? 2 : 1;
+		}
 		return undefined;
 	},
 	find_project_by_path: (args) => {

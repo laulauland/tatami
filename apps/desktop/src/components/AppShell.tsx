@@ -7,6 +7,20 @@ import { Route as ProjectRoute } from "@/routes/project.$projectId";
 import { debouncedChangeIdAtom, expandedStacksAtom, searchOpenAtom, viewModeAtom } from "@/atoms";
 
 const NARROW_BREAKPOINT = 768;
+const DEFAULT_SIDEBAR_WIDTH = 25;
+const MIN_SIDEBAR_WIDTH = 15;
+const MAX_SIDEBAR_WIDTH = 70;
+
+function clampSidebarWidth(width: number | null | undefined): number {
+	if (typeof width !== "number" || Number.isNaN(width)) {
+		return DEFAULT_SIDEBAR_WIDTH;
+	}
+	return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
+}
+
+function normalizeViewMode(viewMode: number | null | undefined): 1 | 2 {
+	return viewMode === 2 ? 2 : 1;
+}
 
 function subscribeToMediaQuery(callback: () => void) {
 	const mediaQuery = window.matchMedia(`(max-width: ${NARROW_BREAKPOINT}px)`);
@@ -53,7 +67,14 @@ import { useAddRepository } from "@/hooks/useAddRepository";
 import { useAppTitle } from "@/hooks/useAppTitle";
 import { useKeyboardNavigation, useKeyboardShortcut, useKeySequence } from "@/hooks/useKeyboard";
 import { useSelectedRevision } from "@/hooks/useSelectedRevision";
-import { getStatus, type Repository, type Revision } from "@/tauri-commands";
+import {
+	getLayout,
+	getStatus,
+	updateLayout,
+	type AppLayout,
+	type Repository,
+	type Revision,
+} from "@/tauri-commands";
 import { onRenderCallback } from "@/lib/trace";
 
 // Wrapper component that handles the case when no project is selected
@@ -127,9 +148,14 @@ function AppShellWithProject() {
 	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 	const [isSyncing, setIsSyncing] = useState(false);
 	const [operationsLogOpen, setOperationsLogOpen] = useState(false);
+	const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+	const [splitLayoutSeed, setSplitLayoutSeed] = useState(0);
 	const revisionGraphRef = useRef<RevisionGraphHandle>(null);
 	const revisionsPanelRef = useRef<HTMLDivElement>(null);
 	const diffPanelRef = useRef<HTMLDivElement>(null);
+	const layoutHydratedRef = useRef(false);
+	const selectionRestoredForProjectRef = useRef<string | null>(null);
+	const persistLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const isNarrowScreen = useIsNarrowScreen();
 	const { handleAddRepository } = useAddRepository();
 
@@ -142,6 +168,12 @@ function AppShellWithProject() {
 	const { data: repositories = [] } = useLiveQuery(repositoriesCollection);
 
 	const activeProject = repositories.find((p) => p.id === projectId) ?? null;
+
+	const { data: persistedLayout } = useQuery({
+		queryKey: ["app-layout"],
+		queryFn: getLayout,
+		staleTime: Number.POSITIVE_INFINITY,
+	});
 
 	const { data: workingCopyStatus } = useQuery({
 		queryKey: ["status", activeProject?.path],
@@ -195,6 +227,7 @@ function AppShellWithProject() {
 	}, [revisions, orderedRevisions, expandedStacks]);
 
 	const selectedRevision = useSelectedRevision(revisions, rev);
+	const selectedRevisionKey = selectedRevision ? getRevisionKey(selectedRevision) : null;
 	const rebaseSourceRevision = rebaseSourceKey
 		? (revisions.find((r) => getRevisionKey(r) === rebaseSourceKey) ?? null)
 		: null;
@@ -207,6 +240,69 @@ function AppShellWithProject() {
 	const handleRetryRevisions = () => {
 		void revisionsLiveCollection.preload();
 	};
+
+	useEffect(() => {
+		if (!persistedLayout) return;
+
+		setViewMode(normalizeViewMode(persistedLayout.view_mode));
+		setSidebarWidth(clampSidebarWidth(persistedLayout.sidebar_width));
+		setSplitLayoutSeed((seed) => seed + 1);
+		layoutHydratedRef.current = true;
+	}, [persistedLayout, setViewMode]);
+
+	useEffect(() => {
+		if (!layoutHydratedRef.current) return;
+		if (selectionRestoredForProjectRef.current === projectId) return;
+		if (isLoading) return;
+
+		selectionRestoredForProjectRef.current = projectId;
+
+		if (rev) return;
+		if (!persistedLayout) return;
+		if (persistedLayout.active_project_id !== projectId) return;
+
+		const persistedSelection = persistedLayout.selected_change_id;
+		if (!persistedSelection) return;
+
+		const selectionExists = revisions.some((revision) => {
+			const revisionKey = getRevisionKey(revision);
+			return revisionKey === persistedSelection || revision.change_id === persistedSelection;
+		});
+		if (!selectionExists) return;
+
+		navigate({
+			to: "/project/$projectId",
+			params: { projectId },
+			search: { rev: persistedSelection },
+			replace: true,
+		});
+	}, [isLoading, navigate, persistedLayout, projectId, rev, revisions]);
+
+	useEffect(() => {
+		if (!layoutHydratedRef.current) return;
+		if (!projectId) return;
+
+		if (persistLayoutTimerRef.current) {
+			clearTimeout(persistLayoutTimerRef.current);
+		}
+
+		const layoutUpdate: AppLayout = {
+			active_project_id: projectId,
+			selected_change_id: selectedRevisionKey,
+			sidebar_width: clampSidebarWidth(sidebarWidth),
+			view_mode: viewMode,
+		};
+
+		persistLayoutTimerRef.current = setTimeout(() => {
+			void updateLayout(layoutUpdate).catch(() => {});
+		}, 250);
+
+		return () => {
+			if (persistLayoutTimerRef.current) {
+				clearTimeout(persistLayoutTimerRef.current);
+			}
+		};
+	}, [projectId, selectedRevisionKey, sidebarWidth, viewMode]);
 
 	useEffect(() => {
 		if (!editingChangeId) return;
@@ -560,6 +656,13 @@ function AppShellWithProject() {
 		setOperationsLogOpen(true);
 	}
 
+	function handleMainSplitLayout(layout: Record<string, number>) {
+		const nextSidebarRaw = layout["app-shell-revisions"];
+		if (typeof nextSidebarRaw !== "number") return;
+		const nextSidebarWidth = clampSidebarWidth(nextSidebarRaw);
+		setSidebarWidth((current) => (current === nextSidebarWidth ? current : nextSidebarWidth));
+	}
+
 	return (
 		<>
 			<ProjectPicker
@@ -634,8 +737,18 @@ function AppShellWithProject() {
 						</section>
 					) : (
 						// Split mode: revision list + diff panel (vertical on narrow screens)
-						<ResizablePanelGroup orientation={isNarrowScreen ? "vertical" : "horizontal"}>
-							<ResizablePanel defaultSize={isNarrowScreen ? 40 : 25} minSize={15}>
+						<ResizablePanelGroup
+							key={`${isNarrowScreen ? "narrow" : "wide"}-${splitLayoutSeed}`}
+							id="app-shell-layout"
+							orientation={isNarrowScreen ? "vertical" : "horizontal"}
+							onLayoutChange={handleMainSplitLayout}
+						>
+							<ResizablePanel
+								id="app-shell-revisions"
+								defaultSize={sidebarWidth}
+								minSize={MIN_SIDEBAR_WIDTH}
+								maxSize={MAX_SIDEBAR_WIDTH}
+							>
 								<section
 									ref={revisionsPanelRef}
 									tabIndex={-1}
@@ -668,7 +781,7 @@ function AppShellWithProject() {
 								withHandle
 								orientation={isNarrowScreen ? "vertical" : "horizontal"}
 							/>
-							<ResizablePanel defaultSize={isNarrowScreen ? 60 : 75} minSize={30}>
+							<ResizablePanel id="app-shell-diff" defaultSize={100 - sidebarWidth} minSize={30}>
 								<aside className="h-full" aria-label="Diff viewer">
 									<Profiler id="DiffPanel" onRender={onRenderCallback}>
 										<PrerenderedDiffPanel

@@ -111,6 +111,21 @@ export async function removeRepository(repositoryId: string): Promise<void> {
 	return invoke("remove_project", { projectId: repositoryId });
 }
 
+export interface AppLayout {
+	active_project_id: string | null;
+	selected_change_id: string | null;
+	sidebar_width: number;
+	view_mode: 1 | 2;
+}
+
+export async function getLayout(): Promise<AppLayout> {
+	return invoke<AppLayout>("get_layout");
+}
+
+export async function updateLayout(layout: AppLayout): Promise<void> {
+	return invoke("update_layout", { layout });
+}
+
 export async function watchRepository(repoPath: string): Promise<void> {
 	return invoke("watch_repository", { repoPath });
 }

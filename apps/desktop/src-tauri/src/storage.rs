@@ -13,11 +13,25 @@ pub struct Project {
     pub revset_preset: Option<String>,
 }
 
+const DEFAULT_SIDEBAR_WIDTH: i32 = 25;
+const MIN_SIDEBAR_WIDTH: i32 = 15;
+const MAX_SIDEBAR_WIDTH: i32 = 70;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppLayout {
     pub active_project_id: Option<String>,
     pub selected_change_id: Option<String>,
     pub sidebar_width: i32,
+    pub view_mode: i32,
+}
+
+impl AppLayout {
+    fn normalized(mut self) -> Self {
+        self.sidebar_width = self.sidebar_width.clamp(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
+        self.view_mode = if self.view_mode == 2 { 2 } else { 1 };
+        self
+    }
 }
 
 impl Default for AppLayout {
@@ -25,7 +39,8 @@ impl Default for AppLayout {
         Self {
             active_project_id: None,
             selected_change_id: None,
-            sidebar_width: 25,
+            sidebar_width: DEFAULT_SIDEBAR_WIDTH,
+            view_mode: 1,
         }
     }
 }
@@ -91,6 +106,7 @@ impl Storage {
             .ok()?;
 
         row.and_then(|(value,)| serde_json::from_str(&value).ok())
+            .map(AppLayout::normalized)
     }
 
     pub async fn get_projects(&self) -> anyhow::Result<Vec<Project>> {
@@ -188,7 +204,10 @@ impl Storage {
             layout.selected_change_id = updates.selected_change_id;
         }
         if updates.sidebar_width != 0 {
-            layout.sidebar_width = updates.sidebar_width;
+            layout.sidebar_width = updates.sidebar_width.clamp(MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
+        }
+        if updates.view_mode != 0 {
+            layout.view_mode = if updates.view_mode == 2 { 2 } else { 1 };
         }
 
         let value = serde_json::to_string(&*layout)?;

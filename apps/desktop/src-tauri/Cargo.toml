@@ -28,6 +28,7 @@ toml_edit = "0.23.9"
 tauri-plugin-dialog = "2.4.2"
 tauri-plugin-sql = { version = "2.3.1", features = ["sqlite"] }
 tauri-plugin-store = "2.4.1"
+tauri-plugin-window-state = "2.4.1"
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite"] }
 whoami = "1.6.1"
 notify = "8.2.0"

@@ -27,6 +27,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { CommandPalette } from "@/components/CommandPalette";
 import { PrerenderedDiffPanel } from "@/components/DiffPanel";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
+import { OperationsLog } from "@/components/OperationsLog";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { RevisionGraph, type RevisionGraphHandle } from "@/components/RevisionGraph";
 import { detectStacks, reorderForGraph } from "@/components/revision-graph-utils";
@@ -125,6 +126,7 @@ function AppShellWithProject() {
 	const [rebaseSourceKey, setRebaseSourceKey] = useState<string | null>(null);
 	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 	const [isSyncing, setIsSyncing] = useState(false);
+	const [operationsLogOpen, setOperationsLogOpen] = useState(false);
 	const revisionGraphRef = useRef<RevisionGraphHandle>(null);
 	const revisionsPanelRef = useRef<HTMLDivElement>(null);
 	const diffPanelRef = useRef<HTMLDivElement>(null);
@@ -553,6 +555,11 @@ function AppShellWithProject() {
 		setSearchOpen(true);
 	}
 
+	function handleOpenOperationsLog() {
+		if (!activeProject) return;
+		setOperationsLogOpen(true);
+	}
+
 	return (
 		<>
 			<ProjectPicker
@@ -565,6 +572,13 @@ function AppShellWithProject() {
 				onOpenRepo={handleAddRepository}
 				onOpenProjects={() => navigate({ to: "/repositories" })}
 				onOpenSettings={() => navigate({ to: "/settings" })}
+				canOpenOperationsLog={!!activeProject}
+				onOpenOperationsLog={handleOpenOperationsLog}
+			/>
+			<OperationsLog
+				repoPath={activeProject?.path ?? null}
+				open={operationsLogOpen}
+				onOpenChange={setOperationsLogOpen}
 			/>
 			<KeyboardShortcutsHelp />
 			<Search

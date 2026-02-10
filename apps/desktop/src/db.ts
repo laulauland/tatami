@@ -165,7 +165,7 @@ function isAuthError(errorText: string): boolean {
 	);
 }
 
-async function invalidateRepositoryQueries(repoPath: string): Promise<void> {
+export async function invalidateRepositoryQueries(repoPath: string): Promise<void> {
 	await queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
 	await queryClient.invalidateQueries({ queryKey: ["revision-changes", repoPath] });
 	await queryClient.invalidateQueries({ queryKey: ["revision-diff", repoPath] });

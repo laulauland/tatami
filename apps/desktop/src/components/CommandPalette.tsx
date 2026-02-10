@@ -1,5 +1,5 @@
-import { Folder, Settings, SlidersHorizontal } from "lucide-react";
-import { useState } from "react";
+import { Folder, History, Settings, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import { useMemo, useState } from "react";
 import {
 	CommandDialog,
 	CommandEmpty,
@@ -14,35 +14,77 @@ interface CommandPaletteProps {
 	onOpenRepo: () => void;
 	onOpenProjects: () => void;
 	onOpenSettings: () => void;
+	canOpenOperationsLog?: boolean;
+	onOpenOperationsLog?: () => void;
+}
+
+interface PaletteAction {
+	id: string;
+	label: string;
+	keywords: string[];
+	icon: LucideIcon;
+	onSelect: () => void;
+	disabled?: boolean;
 }
 
 export function CommandPalette({
 	onOpenRepo,
 	onOpenProjects,
 	onOpenSettings,
+	canOpenOperationsLog = false,
+	onOpenOperationsLog,
 }: CommandPaletteProps) {
 	const [open, setOpen] = useState(false);
 
 	useKeyboardShortcut({
 		key: "k",
 		modifiers: { meta: true, ctrl: true },
-		onPress: () => setOpen((open) => !open),
+		onPress: () => setOpen((prevOpen) => !prevOpen),
 	});
 
-	const handleOpenRepo = () => {
-		onOpenRepo();
+	function select(handler: () => void) {
+		handler();
 		setOpen(false);
-	};
+	}
 
-	const handleOpenProjects = () => {
-		onOpenProjects();
-		setOpen(false);
-	};
+	const actions = useMemo<PaletteAction[]>(() => {
+		const baseActions: PaletteAction[] = [
+			{
+				id: "open-repo",
+				label: "Add a repository...",
+				keywords: ["add", "repository", "open", "folder"],
+				icon: Folder,
+				onSelect: onOpenRepo,
+			},
+			{
+				id: "open-projects",
+				label: "Manage repositories...",
+				keywords: ["manage", "repositories", "projects"],
+				icon: Settings,
+				onSelect: onOpenProjects,
+			},
+			{
+				id: "open-settings",
+				label: "Settings",
+				keywords: ["settings", "preferences", "config"],
+				icon: SlidersHorizontal,
+				onSelect: onOpenSettings,
+			},
+		];
 
-	const handleOpenSettings = () => {
-		onOpenSettings();
-		setOpen(false);
-	};
+		if (onOpenOperationsLog) {
+			baseActions.push({
+				id: "open-operations-log",
+				label: "Open operations log",
+				keywords: ["operations", "log", "history", "undo"],
+				icon: History,
+				onSelect: onOpenOperationsLog,
+				disabled: !canOpenOperationsLog,
+			});
+		}
+
+		return baseActions;
+	}, [canOpenOperationsLog, onOpenOperationsLog, onOpenProjects, onOpenRepo, onOpenSettings]);
 
 	return (
 		<CommandDialog open={open} onOpenChange={setOpen}>
@@ -50,18 +92,17 @@ export function CommandPalette({
 			<CommandList>
 				<CommandEmpty>No actions found.</CommandEmpty>
 				<CommandGroup heading="Actions">
-					<CommandItem onSelect={handleOpenRepo}>
-						<Folder className="mr-2 h-4 w-4" />
-						<span>Add a repository...</span>
-					</CommandItem>
-					<CommandItem onSelect={handleOpenProjects}>
-						<Settings className="mr-2 h-4 w-4" />
-						<span>Manage repositories...</span>
-					</CommandItem>
-					<CommandItem onSelect={handleOpenSettings}>
-						<SlidersHorizontal className="mr-2 h-4 w-4" />
-						<span>Settings</span>
-					</CommandItem>
+					{actions.map((action) => (
+						<CommandItem
+							key={action.id}
+							onSelect={() => select(action.onSelect)}
+							keywords={action.keywords}
+							disabled={action.disabled}
+						>
+							<action.icon className="mr-2 h-4 w-4" />
+							<span>{action.label}</span>
+						</CommandItem>
+					))}
 				</CommandGroup>
 			</CommandList>
 		</CommandDialog>

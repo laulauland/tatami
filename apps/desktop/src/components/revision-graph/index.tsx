@@ -335,9 +335,6 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		},
 		ref,
 	) {
-		const renderCount = useRef(0);
-		console.log(`RevisionGraph Render #${++renderCount.current}`);
-
 		const parentRef = useRef<HTMLDivElement>(null);
 		const containerRef = useRef<HTMLDivElement>(null);
 		const prefetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);

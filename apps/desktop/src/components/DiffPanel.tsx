@@ -6,7 +6,6 @@ import React, { forwardRef, useCallback, useEffect, useMemo, useRef, useState } 
 import { type DiffStyle, type DiffViewState, diffStyleAtom, diffViewStateAtom } from "@/atoms";
 import { FileList, RevisionHeader } from "@/components/diff";
 import { ImageDiff } from "@/components/diff/ImageDiff";
-import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -480,27 +479,35 @@ export const DiffPanel = React.memo(
 
 				{/* Toolbar */}
 				<div className="flex items-center justify-end px-3 py-2 border-b border-border bg-background shrink-0 min-w-0">
-					<div className="flex items-center gap-0.5 shrink-0">
-						<Button
-							variant={effectiveDiffStyle === "unified" ? "secondary" : "ghost"}
-							size="icon-xs"
+					<div
+						className="relative flex items-center rounded-md border border-border/70 bg-muted/60 p-0.5 shadow-inner shrink-0"
+						aria-label="Diff style"
+					>
+						<div
+							className={`absolute top-0.5 h-5 w-5 rounded-sm bg-background shadow-sm transition-transform duration-200 ${
+								effectiveDiffStyle === "unified" ? "translate-x-0" : "translate-x-5"
+							}`}
+						/>
+						<button
+							type="button"
+							className="relative z-10 inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none"
 							onClick={() => handleSetLocalStyle("unified")}
 							title="Unified diff view"
-							className="h-6 w-6"
+							aria-label="Unified diff view"
 							disabled={effectiveSelectedFiles.size === 0}
 						>
-							<RowsIcon className="size-3" />
-						</Button>
-						<Button
-							variant={effectiveDiffStyle === "split" ? "secondary" : "ghost"}
-							size="icon-xs"
+							<RowsIcon className={`size-3 ${effectiveDiffStyle === "unified" ? "text-foreground" : ""}`} />
+						</button>
+						<button
+							type="button"
+							className="relative z-10 inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground transition-colors disabled:opacity-50 disabled:pointer-events-none"
 							onClick={() => handleSetLocalStyle("split")}
 							title="Split diff view"
-							className="h-6 w-6"
+							aria-label="Split diff view"
 							disabled={effectiveSelectedFiles.size === 0}
 						>
-							<Columns2Icon className="size-3" />
-						</Button>
+							<Columns2Icon className={`size-3 ${effectiveDiffStyle === "split" ? "text-foreground" : ""}`} />
+						</button>
 					</div>
 				</div>
 

@@ -3,7 +3,7 @@ import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { Profiler, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Route as ProjectRoute } from "@/routes/project.$projectId";
-import { debouncedChangeIdAtom, expandedStacksAtom, viewModeAtom } from "@/atoms";
+import { debouncedChangeIdAtom, expandedStacksAtom, searchOpenAtom, viewModeAtom } from "@/atoms";
 
 const NARROW_BREAKPOINT = 768;
 
@@ -95,6 +95,8 @@ function AppShellEmpty() {
 					onOpenProject={() => setProjectPickerOpen(true)}
 					onSync={() => {}}
 					onOpenSearch={() => {}}
+					viewMode={1}
+					onChangeViewMode={() => {}}
 				/>
 				<div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">
 					<p>Select or add a repository to get started</p>
@@ -112,6 +114,7 @@ function AppShellWithProject() {
 	const rev = useSearch({ from: ProjectRoute.fullPath, select: (s) => s.rev });
 	const [flash, setFlash] = useState<{ changeId: string; key: number } | null>(null);
 	const [viewMode, setViewMode] = useAtom(viewModeAtom);
+	const [, setSearchOpen] = useAtom(searchOpenAtom);
 	const [pendingAbandon, setPendingAbandon] = useState<Revision | null>(null);
 	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
 	const [isSyncing, setIsSyncing] = useState(false);
@@ -183,10 +186,10 @@ function AppShellWithProject() {
 			clearTimeout(debounceTimerRef.current);
 		}
 
-		// Update after 200ms of no changes
+		// Update after 50ms of no changes
 		debounceTimerRef.current = setTimeout(() => {
 			setDebouncedChangeId(selectedChangeId);
-		}, 200);
+		}, 50);
 
 		return () => {
 			if (debounceTimerRef.current) {
@@ -378,9 +381,7 @@ function AppShellWithProject() {
 	}
 
 	function handleOpenSearch() {
-		// Focus the revision search dialog
-		// The "/" key already triggers this via Search component
-		window.dispatchEvent(new KeyboardEvent("keydown", { key: "/" }));
+		setSearchOpen(true);
 	}
 
 	return (
@@ -414,6 +415,8 @@ function AppShellWithProject() {
 					onOpenProject={() => setProjectPickerOpen(true)}
 					onSync={handleSync}
 					onOpenSearch={handleOpenSearch}
+					viewMode={viewMode}
+					onChangeViewMode={setViewMode}
 					isSyncing={isSyncing}
 				/>
 				<div className="flex-1 min-h-0">
@@ -464,7 +467,10 @@ function AppShellWithProject() {
 									</Profiler>
 								</section>
 							</ResizablePanel>
-							<ResizableHandle withHandle />
+							<ResizableHandle
+								withHandle
+								orientation={isNarrowScreen ? "vertical" : "horizontal"}
+							/>
 							<ResizablePanel defaultSize={isNarrowScreen ? 60 : 75} minSize={30}>
 								<aside className="h-full" aria-label="Diff viewer">
 									<Profiler id="DiffPanel" onRender={onRenderCallback}>

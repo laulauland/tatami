@@ -12,7 +12,6 @@ import {
 	SearchIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
@@ -591,19 +590,34 @@ export function FileList({
 							{" / "}
 							<span className="text-red-500">-{totalDeletions}</span>
 						</span>
-						<Button
-							variant="ghost"
-							size="icon"
-							className="size-6"
-							onClick={() => setViewMode(viewMode === "flat" ? "tree" : "flat")}
-							title={viewMode === "flat" ? "Switch to tree view" : "Switch to flat list"}
+						<div
+							className="relative flex items-center rounded-md border border-border/70 bg-muted/60 p-0.5 shadow-inner"
+							aria-label="File list view mode"
 						>
-							{viewMode === "flat" ? (
-								<FolderTreeIcon className="size-3.5" />
-							) : (
-								<ListIcon className="size-3.5" />
-							)}
-						</Button>
+							<div
+								className={`absolute top-0.5 h-5 w-5 rounded-sm bg-background shadow-sm transition-transform duration-200 ${
+									viewMode === "flat" ? "translate-x-0" : "translate-x-5"
+								}`}
+							/>
+							<button
+								type="button"
+								className="relative z-10 inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground transition-colors"
+								onClick={() => setViewMode("flat")}
+								title="Flat file list"
+								aria-label="Flat file list"
+							>
+								<ListIcon className={`size-3 ${viewMode === "flat" ? "text-foreground" : ""}`} />
+							</button>
+							<button
+								type="button"
+								className="relative z-10 inline-flex h-5 w-5 items-center justify-center rounded-sm text-muted-foreground transition-colors"
+								onClick={() => setViewMode("tree")}
+								title="Tree file list"
+								aria-label="Tree file list"
+							>
+								<FolderTreeIcon className={`size-3 ${viewMode === "tree" ? "text-foreground" : ""}`} />
+							</button>
+						</div>
 					</div>
 				</div>
 			</div>

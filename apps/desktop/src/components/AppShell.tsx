@@ -785,9 +785,9 @@ function AppShellWithProject() {
 						>
 							<ResizablePanel
 								id="app-shell-revisions"
-								defaultSize={isNarrowScreen ? 40 : sidebarWidth}
-								minSize={isNarrowScreen ? 20 : MIN_SIDEBAR_WIDTH}
-								maxSize={isNarrowScreen ? 60 : MAX_SIDEBAR_WIDTH}
+								defaultSize={isNarrowScreen ? "40%" : `${sidebarWidth}%`}
+								minSize={isNarrowScreen ? "20%" : `${MIN_SIDEBAR_WIDTH}%`}
+								maxSize={isNarrowScreen ? "60%" : `${MAX_SIDEBAR_WIDTH}%`}
 							>
 								<section
 									ref={revisionsPanelRef}
@@ -821,7 +821,7 @@ function AppShellWithProject() {
 								withHandle
 								orientation={isNarrowScreen ? "vertical" : "horizontal"}
 							/>
-							<ResizablePanel id="app-shell-diff" defaultSize={isNarrowScreen ? 60 : (100 - sidebarWidth)} minSize={30}>
+							<ResizablePanel id="app-shell-diff" defaultSize={isNarrowScreen ? "60%" : `${100 - sidebarWidth}%`} minSize="30%">
 								<aside className="h-full" aria-label="Diff viewer">
 									<Profiler id="DiffPanel" onRender={onRenderCallback}>
 										<PrerenderedDiffPanel

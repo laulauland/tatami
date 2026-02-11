@@ -20,6 +20,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "react-grab": "^0.1.14",
     "shiki": "^3.21.0"
   }
 }

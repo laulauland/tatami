@@ -227,8 +227,10 @@ export function useKeyboardShortcut({
 			}
 
 			const altMatch = modifiers.alt === undefined ? !event.altKey : event.altKey === modifiers.alt;
+			// When shift is not explicitly specified, don't enforce shift state —
+			// event.key already reflects the shifted character (e.g., "?" vs "/")
 			const shiftMatch =
-				modifiers.shift === undefined ? !event.shiftKey : event.shiftKey === modifiers.shift;
+				modifiers.shift === undefined ? true : event.shiftKey === modifiers.shift;
 
 			if (metaCtrlMatch && altMatch && shiftMatch) {
 				event.preventDefault();

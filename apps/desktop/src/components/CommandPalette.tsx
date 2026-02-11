@@ -7,6 +7,7 @@ import {
 	CommandInput,
 	CommandItem,
 	CommandList,
+	CommandShortcut,
 } from "@/components/ui/command";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
 
@@ -25,6 +26,8 @@ interface PaletteAction {
 	icon: LucideIcon;
 	onSelect: () => void;
 	disabled?: boolean;
+	shortcut?: string;
+	group: "repository" | "tools" | "app";
 }
 
 export function CommandPalette({
@@ -55,6 +58,7 @@ export function CommandPalette({
 				keywords: ["add", "repository", "open", "folder"],
 				icon: Folder,
 				onSelect: onOpenRepo,
+				group: "repository",
 			},
 			{
 				id: "open-projects",
@@ -62,6 +66,7 @@ export function CommandPalette({
 				keywords: ["manage", "repositories", "projects"],
 				icon: Settings,
 				onSelect: onOpenProjects,
+				group: "repository",
 			},
 			{
 				id: "open-settings",
@@ -69,6 +74,8 @@ export function CommandPalette({
 				keywords: ["settings", "preferences", "config"],
 				icon: SlidersHorizontal,
 				onSelect: onOpenSettings,
+				shortcut: "⌘ ,",
+				group: "app",
 			},
 		];
 
@@ -80,30 +87,70 @@ export function CommandPalette({
 				icon: History,
 				onSelect: onOpenOperationsLog,
 				disabled: !canOpenOperationsLog,
+				group: "tools",
 			});
 		}
 
 		return baseActions;
 	}, [canOpenOperationsLog, onOpenOperationsLog, onOpenProjects, onOpenRepo, onOpenSettings]);
 
+	const repoActions = actions.filter((a) => a.group === "repository");
+	const toolsActions = actions.filter((a) => a.group === "tools");
+	const appActions = actions.filter((a) => a.group === "app");
+
 	return (
 		<CommandDialog open={open} onOpenChange={setOpen}>
 			<CommandInput placeholder="Search actions..." />
 			<CommandList>
 				<CommandEmpty>No actions found.</CommandEmpty>
-				<CommandGroup heading="Actions">
-					{actions.map((action) => (
-						<CommandItem
-							key={action.id}
-							onSelect={() => select(action.onSelect)}
-							keywords={action.keywords}
-							disabled={action.disabled}
-						>
-							<action.icon className="mr-2 h-4 w-4" />
-							<span>{action.label}</span>
-						</CommandItem>
-					))}
-				</CommandGroup>
+				{repoActions.length > 0 && (
+					<CommandGroup heading="Repository">
+						{repoActions.map((action) => (
+							<CommandItem
+								key={action.id}
+								onSelect={() => select(action.onSelect)}
+								keywords={action.keywords}
+								disabled={action.disabled}
+							>
+								<action.icon className="mr-2 h-4 w-4" />
+								<span>{action.label}</span>
+								{action.shortcut && <CommandShortcut>{action.shortcut}</CommandShortcut>}
+							</CommandItem>
+						))}
+					</CommandGroup>
+				)}
+				{toolsActions.length > 0 && (
+					<CommandGroup heading="Tools">
+						{toolsActions.map((action) => (
+							<CommandItem
+								key={action.id}
+								onSelect={() => select(action.onSelect)}
+								keywords={action.keywords}
+								disabled={action.disabled}
+							>
+								<action.icon className="mr-2 h-4 w-4" />
+								<span>{action.label}</span>
+								{action.shortcut && <CommandShortcut>{action.shortcut}</CommandShortcut>}
+							</CommandItem>
+						))}
+					</CommandGroup>
+				)}
+				{appActions.length > 0 && (
+					<CommandGroup heading="App">
+						{appActions.map((action) => (
+							<CommandItem
+								key={action.id}
+								onSelect={() => select(action.onSelect)}
+								keywords={action.keywords}
+								disabled={action.disabled}
+							>
+								<action.icon className="mr-2 h-4 w-4" />
+								<span>{action.label}</span>
+								{action.shortcut && <CommandShortcut>{action.shortcut}</CommandShortcut>}
+							</CommandItem>
+						))}
+					</CommandGroup>
+				)}
 			</CommandList>
 		</CommandDialog>
 	);

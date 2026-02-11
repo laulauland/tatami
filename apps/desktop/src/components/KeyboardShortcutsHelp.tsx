@@ -25,6 +25,8 @@ const shortcuts = [
 			{ keys: ["n"], description: "New revision on selected" },
 			{ keys: ["e"], description: "Edit selected revision" },
 			{ keys: ["s"], description: "Squash selected revision into parent" },
+			{ keys: ["d"], description: "Describe (edit commit message)" },
+			{ keys: ["a"], description: "Abandon selected revision" },
 			{ keys: ["r"], description: "Start/cancel rebase destination pick" },
 			{ keys: ["Enter"], description: "Confirm rebase destination (pick mode)" },
 		],
@@ -48,8 +50,8 @@ const shortcuts = [
 	{
 		category: "General",
 		items: [
-			{ keys: ["⌘", "O"], description: "Open command palette" },
-			{ keys: ["⌘", ","], description: "Open settings" },
+			{ keys: ["⌘ K"], description: "Open command palette" },
+			{ keys: ["⌘ ,"], description: "Open settings" },
 			{ keys: ["?"], description: "Show this help" },
 		],
 	},

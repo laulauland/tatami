@@ -4,7 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { Profiler, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Route as ProjectRoute } from "@/routes/project.$projectId";
-import { debouncedChangeIdAtom, expandedStacksAtom, searchOpenAtom, viewModeAtom } from "@/atoms";
+import {
+	debouncedChangeIdAtom,
+	expandedStacksAtom,
+	searchOpenAtom,
+	shortcutsHelpOpenAtom,
+	viewModeAtom,
+} from "@/atoms";
 
 const NARROW_BREAKPOINT = 768;
 const DEFAULT_SIDEBAR_WIDTH = 25;
@@ -47,6 +53,7 @@ import { RevisionGraph, type RevisionGraphHandle } from "@/components/RevisionGr
 import { detectStacks, reorderForGraph } from "@/components/revision-graph-utils";
 import { StatusBar } from "@/components/StatusBar";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { EmptyState } from "@/components/EmptyState";
 
 import {
 	abandonRevision,
@@ -97,6 +104,7 @@ function AppShellEmpty() {
 	const { handleAddRepository } = useAddRepository();
 	const { data: repositories = [] } = useLiveQuery(repositoriesCollection);
 	const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+	const [, setShortcutsOpen] = useAtom(shortcutsHelpOpenAtom);
 
 	function handleSelectRepository(repository: Repository) {
 		navigate({ to: "/project/$projectId", params: { projectId: repository.id } });
@@ -128,8 +136,11 @@ function AppShellEmpty() {
 					viewMode={1}
 					onChangeViewMode={() => {}}
 				/>
-				<div className="flex-1 min-h-0 flex items-center justify-center text-muted-foreground">
-					<p>Select or add a repository to get started</p>
+				<div className="flex-1 min-h-0 flex items-center justify-center">
+					<EmptyState
+						onOpenRepo={handleAddRepository}
+						onOpenShortcutsHelp={() => setShortcutsOpen(true)}
+					/>
 				</div>
 				<StatusBar branch={null} isConnected={false} hasConflict={false} />
 			</div>
@@ -770,13 +781,13 @@ function AppShellWithProject() {
 							key={`${isNarrowScreen ? "narrow" : "wide"}-${splitLayoutSeed}`}
 							id="app-shell-layout"
 							orientation={isNarrowScreen ? "vertical" : "horizontal"}
-							onLayoutChange={handleMainSplitLayout}
+							onLayoutChange={isNarrowScreen ? undefined : handleMainSplitLayout}
 						>
 							<ResizablePanel
 								id="app-shell-revisions"
-								defaultSize={sidebarWidth}
-								minSize={MIN_SIDEBAR_WIDTH}
-								maxSize={MAX_SIDEBAR_WIDTH}
+								defaultSize={isNarrowScreen ? 40 : sidebarWidth}
+								minSize={isNarrowScreen ? 20 : MIN_SIDEBAR_WIDTH}
+								maxSize={isNarrowScreen ? 60 : MAX_SIDEBAR_WIDTH}
 							>
 								<section
 									ref={revisionsPanelRef}
@@ -810,7 +821,7 @@ function AppShellWithProject() {
 								withHandle
 								orientation={isNarrowScreen ? "vertical" : "horizontal"}
 							/>
-							<ResizablePanel id="app-shell-diff" defaultSize={100 - sidebarWidth} minSize={30}>
+							<ResizablePanel id="app-shell-diff" defaultSize={isNarrowScreen ? 60 : (100 - sidebarWidth)} minSize={30}>
 								<aside className="h-full" aria-label="Diff viewer">
 									<Profiler id="DiffPanel" onRender={onRenderCallback}>
 										<PrerenderedDiffPanel

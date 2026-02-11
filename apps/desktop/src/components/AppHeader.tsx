@@ -1,5 +1,6 @@
 import { Columns2Icon, FolderOpenIcon, ListIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 interface AppHeaderProps {
 	projectName: string | null;
@@ -70,27 +71,39 @@ export function AppHeader({
 
 			{/* Right: sync + revision search */}
 			<div className="flex items-center gap-1 ml-auto">
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					className="h-7 w-7"
-					onClick={onSync}
-					disabled={isSyncing || !projectName}
-					title="Sync"
-					aria-label="Sync"
-				>
-					<RefreshCwIcon className={`size-4 ${isSyncing ? "animate-spin" : ""}`} />
-				</Button>
-				<Button
-					variant="ghost"
-					size="icon-sm"
-					className="h-7 w-7 text-muted-foreground"
-					onClick={onOpenSearch}
-					title="Search revisions (/)"
-					aria-label="Search revisions"
-				>
-					<SearchIcon className="size-4" />
-				</Button>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								className="h-7 w-7"
+								onClick={onSync}
+								disabled={isSyncing || !projectName}
+								aria-label="Sync repository"
+							>
+								<RefreshCwIcon className={`size-4 ${isSyncing ? "animate-spin" : ""}`} />
+							</Button>
+						}
+					/>
+					<TooltipContent side="bottom">Sync repository</TooltipContent>
+				</Tooltip>
+				<Tooltip>
+					<TooltipTrigger
+						render={
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								className="h-7 w-7 text-muted-foreground"
+								onClick={onOpenSearch}
+								aria-label="Search revisions"
+							>
+								<SearchIcon className="size-4" />
+							</Button>
+						}
+					/>
+					<TooltipContent side="bottom">Search revisions (/)</TooltipContent>
+				</Tooltip>
 			</div>
 		</header>
 	);

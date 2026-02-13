@@ -1,8 +1,9 @@
 import { useAtom } from "@effect-atom/atom-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { draggingBookmarkAtom } from "@/atoms";
 import { getRevisionKey } from "@/db";
 import { Badge } from "@/components/ui/badge";
+import { InlineEditor } from "@/components/InlineEditor";
 import type { Revision } from "@/tauri-commands";
 import { BookmarkTag } from "./BookmarkTag";
 import { ROW_HEIGHT, LANE_PADDING, LANE_WIDTH, NODE_RADIUS, laneToX, laneColor } from "./constants";
@@ -54,13 +55,19 @@ export function RevisionRow({
 	hasFocus,
 }: RevisionRowProps) {
 	const revisionKey = getRevisionKey(revision);
-	const firstLine = revision.description.split("\n")[0] || "(no description)";
-	const [draftDescription, setDraftDescription] = useState(revision.description);
+	// Track the last description saved from the editor so we can display it
+	// immediately when exiting edit mode, without waiting for the collection update.
+	const lastSavedDescRef = useRef<string | null>(null);
+	// Clear the override once the prop catches up
+	if (lastSavedDescRef.current !== null && revision.description === lastSavedDescRef.current) {
+		lastSavedDescRef.current = null;
+	}
+	const displayDescription = lastSavedDescRef.current ?? revision.description;
+	const firstLine = displayDescription.split("\n")[0] || "(no description)";
 	const [isDragOver, setIsDragOver] = useState(false);
 	const [showDropPlaceholder, setShowDropPlaceholder] = useState(false);
 	const dragOverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const dragEnterCountRef = useRef(0);
-	const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 	const [draggingBookmark] = useAtom(draggingBookmarkAtom);
 
 	// Calculate the node position area - leaves space for graph edges on the left
@@ -69,17 +76,6 @@ export function RevisionRow({
 	const color = laneColor(lane);
 
 	const nodeSize = revision.is_working_copy ? NODE_RADIUS * 2 + 14 : NODE_RADIUS * 2 + 8;
-
-	useEffect(() => {
-		if (!isEditing) return;
-		setDraftDescription(revision.description);
-		requestAnimationFrame(() => {
-			const textarea = textareaRef.current;
-			if (!textarea) return;
-			textarea.focus({ preventScroll: true });
-			textarea.select();
-		});
-	}, [isEditing, revision.description]);
 
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: Complex styling requires div
@@ -249,24 +245,17 @@ export function RevisionRow({
 						</span>
 					</div>
 					{isEditing ? (
-						<textarea
-							ref={textareaRef}
-							value={draftDescription}
-							onChange={(e) => setDraftDescription(e.target.value)}
-							onClick={(e) => e.stopPropagation()}
-							onKeyDown={(e) => {
-								e.stopPropagation();
-								if (e.key === "Escape") {
-									e.preventDefault();
-									onCancelDescribe();
-									return;
-								}
-								if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-									e.preventDefault();
-									onDescribe(revisionKey, draftDescription);
-								}
+						<InlineEditor
+							value={revision.description}
+							onSave={(desc) => {
+								lastSavedDescRef.current = desc;
+								onDescribe(revisionKey, desc);
 							}}
-							className="mt-1 w-full min-h-16 rounded border border-border bg-background px-2 py-1 text-sm leading-5 resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+							onCancel={onCancelDescribe}
+							placeholder="Enter commit description…"
+							autoFocus
+							compact
+							className="mt-1"
 						/>
 					) : (
 						<div className="text-sm mt-1 truncate">{firstLine}</div>

@@ -2,6 +2,17 @@ import { useEffect, useRef } from "react";
 import { getRevisionKey } from "@/db";
 import type { Revision } from "@/tauri-commands";
 
+/** Returns true if focus is inside a text-editable element (input, textarea, or contenteditable). */
+function isEditableElementFocused(): boolean {
+	const el = document.activeElement;
+	if (!el) return false;
+	const tag = el.tagName;
+	if (tag === "INPUT" || tag === "TEXTAREA") return true;
+	if (el.getAttribute("contenteditable") === "true") return true;
+	if (el.closest?.("[contenteditable=true]")) return true;
+	return false;
+}
+
 interface ScrollOptions {
 	align?: "auto" | "center";
 	smooth?: boolean;
@@ -74,10 +85,7 @@ export function useKeyboardNavigation({
 
 	useEffect(() => {
 		function handleKeyDown(event: KeyboardEvent) {
-			const activeElement = document.activeElement;
-			if (activeElement?.tagName === "INPUT" || activeElement?.tagName === "TEXTAREA") {
-				return;
-			}
+			if (isEditableElementFocused()) return;
 
 			const revisions = orderedRevisionsRef.current;
 			const revisionKey = selectedChangeIdRef.current;
@@ -198,13 +206,8 @@ export function useKeyboardShortcut({
 		if (!enabled) return;
 
 		function handleKeyDown(event: KeyboardEvent) {
-			// Don't handle if input/textarea is focused (unless explicitly ignored)
-			if (!ignoreInputFocus) {
-				const activeElement = document.activeElement;
-				if (activeElement?.tagName === "INPUT" || activeElement?.tagName === "TEXTAREA") {
-					return;
-				}
-			}
+			// Don't handle if an editable element is focused (unless explicitly ignored)
+			if (!ignoreInputFocus && isEditableElementFocused()) return;
 
 			// Check if the key matches
 			if (event.key !== key) return;
@@ -267,11 +270,7 @@ export function useKeySequence({
 
 		function handleKeyDown(event: KeyboardEvent) {
 			if (MODIFIER_KEYS.has(event.key)) return;
-
-			const activeElement = document.activeElement;
-			if (activeElement?.tagName === "INPUT" || activeElement?.tagName === "TEXTAREA") {
-				return;
-			}
+			if (isEditableElementFocused()) return;
 
 			const now = Date.now();
 			const buffer = bufferRef.current;

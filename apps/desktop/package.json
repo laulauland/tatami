@@ -16,6 +16,10 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",
+    "@codemirror/commands": "^6.10.2",
+    "@codemirror/language": "^6.12.1",
+    "@codemirror/state": "^6.5.4",
+    "@codemirror/view": "^6.39.14",
     "@effect-atom/atom": "^0.4.11",
     "@effect-atom/atom-react": "^0.4.4",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
@@ -37,6 +41,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "codemirror": "^6.0.2",
     "effect": "^3.19.13",
     "lucide-react": "^0.562.0",
     "react": "19",

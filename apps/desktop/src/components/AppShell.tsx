@@ -830,6 +830,7 @@ function AppShellWithProject() {
 											revisions={orderedRevisions}
 											selectedChangeId={debouncedChangeId}
 											revisionsPanelRef={revisionsPanelRef}
+											onDescribe={handleDescribe}
 										/>
 									</Profiler>
 								</aside>

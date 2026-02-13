@@ -1,21 +1,14 @@
-import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
-import { useState } from "react";
+import { InlineEditor } from "@/components/InlineEditor";
 import type { Revision } from "@/tauri-commands";
 
 interface RevisionHeaderProps {
 	revision: Revision;
 	conflictPaths?: string[];
+	onDescribe?: (changeId: string, description: string) => void;
 }
 
-export function RevisionHeader({ revision, conflictPaths = [] }: RevisionHeaderProps) {
+export function RevisionHeader({ revision, conflictPaths = [], onDescribe }: RevisionHeaderProps) {
 	const commitIdShort = revision.commit_id.substring(0, 12);
-	const [isExpanded, setIsExpanded] = useState(false);
-
-	// Split description into title (first line) and body (rest)
-	const descriptionLines = revision.description?.split("\n") ?? [];
-	const title = descriptionLines[0] ?? "";
-	const body = descriptionLines.slice(1).join("\n").trim();
-	const hasBody = body.length > 0;
 
 	return (
 		<div>
@@ -48,31 +41,14 @@ export function RevisionHeader({ revision, conflictPaths = [] }: RevisionHeaderP
 						</div>
 					</div>
 				)}
-				{title && (
-					<div className="mt-2 pt-2">
-						<div className="flex items-start gap-1">
-							{hasBody && (
-								<button
-									type="button"
-									onClick={() => setIsExpanded(!isExpanded)}
-									className="text-muted-foreground hover:text-foreground shrink-0 transition-colors mt-0.5"
-								>
-									{isExpanded ? (
-										<ChevronDownIcon className="size-4" />
-									) : (
-										<ChevronRightIcon className="size-4" />
-									)}
-								</button>
-							)}
-							<span className="text-sm font-semibold text-foreground font-sans">{title}</span>
-						</div>
-						{hasBody && isExpanded && (
-							<pre className="text-xs text-muted-foreground whitespace-pre-wrap font-sans mt-2 ml-5">
-								{body}
-							</pre>
-						)}
-					</div>
-				)}
+				<div className="mt-2 pt-2">
+					<InlineEditor
+						value={revision.description || ""}
+						onSave={(desc) => onDescribe?.(revision.change_id, desc)}
+						placeholder="Enter commit description…"
+						readOnly={revision.is_immutable}
+					/>
+				</div>
 			</div>
 		</div>
 	);

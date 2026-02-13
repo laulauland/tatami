@@ -24,6 +24,7 @@ interface DiffPanelProps {
 	changeId: string | null;
 	revision: Revision | null;
 	revisionsPanelRef: RefObject<HTMLElement | null>;
+	onDescribe?: (changeId: string, description: string) => void;
 }
 
 interface PrerenderedDiffPanelProps {
@@ -31,10 +32,17 @@ interface PrerenderedDiffPanelProps {
 	revisions: Revision[];
 	selectedChangeId: string | null;
 	revisionsPanelRef: RefObject<HTMLElement | null>;
+	onDescribe?: (changeId: string, description: string) => void;
 }
 
 export const PrerenderedDiffPanel = forwardRef<HTMLDivElement, PrerenderedDiffPanelProps>(
-	function PrerenderedDiffPanel({ repoPath, revisions, selectedChangeId, revisionsPanelRef }, ref) {
+	function PrerenderedDiffPanel({
+		repoPath,
+		revisions,
+		selectedChangeId,
+		revisionsPanelRef,
+		onDescribe,
+	}, ref) {
 		const selectedRevision = selectedChangeId
 			? (revisions.find((r) => r.change_id === selectedChangeId) ?? null)
 			: null;
@@ -46,6 +54,7 @@ export const PrerenderedDiffPanel = forwardRef<HTMLDivElement, PrerenderedDiffPa
 				changeId={selectedChangeId}
 				revision={selectedRevision}
 				revisionsPanelRef={revisionsPanelRef}
+				onDescribe={onDescribe}
 			/>
 		);
 	},
@@ -208,7 +217,7 @@ function diffPanelPropsAreEqual(prevProps: DiffPanelProps, nextProps: DiffPanelP
 
 export const DiffPanel = React.memo(
 	forwardRef<HTMLDivElement, DiffPanelProps>(function DiffPanel(
-		{ repoPath, changeId, revision, revisionsPanelRef },
+		{ repoPath, changeId, revision, revisionsPanelRef, onDescribe },
 		ref,
 	) {
 		// Use changeId directly - data is prefetched and cached, so no need to defer
@@ -518,7 +527,11 @@ export const DiffPanel = React.memo(
 				{/* Revision header */}
 				{revision && (
 					<div className="px-4 pt-2 pb-2 shrink-0">
-						<RevisionHeader revision={revision} conflictPaths={conflictPaths} />
+						<RevisionHeader
+							revision={revision}
+							conflictPaths={conflictPaths}
+							onDescribe={onDescribe}
+						/>
 					</div>
 				)}
 

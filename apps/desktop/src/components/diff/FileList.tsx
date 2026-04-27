@@ -631,10 +631,7 @@ export function FileList({
 							{" / "}
 							<span className="text-red-500">-{totalDeletions}</span>
 						</span>
-						<div
-							className="relative flex items-center rounded-md border border-border/70 bg-muted/60 p-0.5 shadow-inner"
-							aria-label="File list view mode"
-						>
+						<div className="relative flex items-center rounded-md border border-border/70 bg-muted/60 p-0.5 shadow-inner">
 							<div
 								className={`absolute top-0.5 h-5 w-5 rounded-sm bg-background shadow-sm transition-transform duration-200 ${
 									viewMode === "flat" ? "translate-x-0" : "translate-x-5"

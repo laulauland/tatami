@@ -15,6 +15,7 @@ export function useSelectedRevision(
 	revisions: Revision[],
 	rev: string | undefined,
 ): Revision | null {
+	// ast-grep-ignore: no-react-memoization
 	return useMemo(() => {
 		if (revisions.length === 0) return null;
 

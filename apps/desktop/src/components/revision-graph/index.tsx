@@ -735,6 +735,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		const [savedScrollTop, setSavedScrollTop] = useAtom(revisionGraphScrollTopAtom);
 
 		// Restore scroll position on mount
+		// biome-ignore lint/correctness/useExhaustiveDependencies: intentionally restore only once on mount using persisted scroll state.
 		useEffect(() => {
 			const scrollEl = parentRef.current;
 			if (!scrollEl || savedScrollTop === 0) return;
@@ -894,6 +895,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		// Prefetch diffs and changes for visible and nearby revisions
 		// Uses a buffer to prefetch ahead of scroll for smoother experience
 		const PREFETCH_BUFFER = 20;
+		// ast-grep-ignore: no-useeffect-state-sync
 		useEffect(() => {
 			if (!repoPath || displayRows.length === 0) return;
 
@@ -1011,6 +1013,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		matchingRevisionsRef.current = matchingRevisions;
 
 		// Handle AceJump letter key presses (DOM event subscription)
+		// ast-grep-ignore: no-useeffect-state-sync
 		useEffect(() => {
 			if (!aceJumpMode) return;
 

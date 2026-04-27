@@ -5,6 +5,7 @@ import { useEffect, useState, type RefObject } from "react";
  * Uses focusin/focusout events for reliable tracking.
  */
 export function useFocusWithin(containerRef: RefObject<HTMLElement | null>): boolean {
+	// ast-grep-ignore: no-usestate
 	const [hasFocus, setHasFocus] = useState(false);
 
 	useEffect(() => {

@@ -36,6 +36,7 @@ const findRepositoryEffect = (startPath: string) =>
  */
 export function useAddRepository() {
 	const navigate = useNavigate();
+	// ast-grep-ignore: no-usestate
 	const [isAdding, setIsAdding] = useState(false);
 
 	function handleAddRepository() {

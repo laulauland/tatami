@@ -48,19 +48,22 @@ function SettingsPage() {
 					<section>
 						<h2 className="text-sm font-medium text-muted-foreground mb-4">Developer</h2>
 						<div className="space-y-4">
-							<label className="flex items-center gap-3 cursor-pointer">
+							<div className="flex items-center gap-3">
 								<Checkbox
 									checked={traceEnabled}
 									onCheckedChange={handleTraceToggle}
 									className="size-4"
+									aria-labelledby="performance-tracing-label"
 								/>
 								<div className="space-y-0.5">
-									<Label className="cursor-pointer">Performance tracing</Label>
+									<Label id="performance-tracing-label" className="cursor-pointer">
+										Performance tracing
+									</Label>
 									<p className="text-sm text-muted-foreground">
 										Log timing info to console for debugging
 									</p>
 								</div>
-							</label>
+							</div>
 						</div>
 					</section>
 				</div>

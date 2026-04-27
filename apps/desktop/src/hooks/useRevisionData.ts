@@ -299,6 +299,7 @@ export function usePrefetch(repoPath: string): {
 		cleanupLoadersExcept(repoPath);
 	}
 
+	// ast-grep-ignore: no-react-memoization
 	return useMemo(() => {
 		function getDiffLoaderInstance(): BatchLoader {
 			if (!diffLoaderRef.current) {

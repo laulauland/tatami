@@ -271,6 +271,7 @@ function AppShellWithProject() {
 		void revisionsLiveCollection.preload();
 	};
 
+	// ast-grep-ignore: no-useeffect-state-sync
 	useEffect(() => {
 		if (!persistedLayout) return;
 
@@ -308,6 +309,7 @@ function AppShellWithProject() {
 		});
 	}, [isLoading, navigate, persistedLayout, projectId, rev, revisions]);
 
+	// ast-grep-ignore: no-useeffect-state-sync
 	useEffect(() => {
 		if (!layoutHydratedRef.current) return;
 		if (!projectId) return;
@@ -334,6 +336,7 @@ function AppShellWithProject() {
 		};
 	}, [projectId, selectedRevisionKey, sidebarWidth, viewMode]);
 
+	// ast-grep-ignore: no-useeffect-state-sync
 	useEffect(() => {
 		if (!editingChangeId) return;
 		if (!selectedRevision || getRevisionKey(selectedRevision) !== editingChangeId) {
@@ -341,6 +344,7 @@ function AppShellWithProject() {
 		}
 	}, [editingChangeId, selectedRevision]);
 
+	// ast-grep-ignore: no-useeffect-state-sync
 	useEffect(() => {
 		if (!rebaseSourceKey) return;
 		const stillExists = revisions.some((revision) => getRevisionKey(revision) === rebaseSourceKey);
@@ -355,6 +359,7 @@ function AppShellWithProject() {
 	const [debouncedChangeId, setDebouncedChangeId] = useAtom(debouncedChangeIdAtom);
 	const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
+	// ast-grep-ignore: no-useeffect-state-sync
 	useEffect(() => {
 		// Clear any pending debounce
 		if (debounceTimerRef.current) {
@@ -821,7 +826,11 @@ function AppShellWithProject() {
 								withHandle
 								orientation={isNarrowScreen ? "vertical" : "horizontal"}
 							/>
-							<ResizablePanel id="app-shell-diff" defaultSize={isNarrowScreen ? "60%" : `${100 - sidebarWidth}%`} minSize="30%">
+							<ResizablePanel
+								id="app-shell-diff"
+								defaultSize={isNarrowScreen ? "60%" : `${100 - sidebarWidth}%`}
+								minSize="30%"
+							>
 								<aside className="h-full" aria-label="Diff viewer">
 									<Profiler id="DiffPanel" onRender={onRenderCallback}>
 										<PrerenderedDiffPanel

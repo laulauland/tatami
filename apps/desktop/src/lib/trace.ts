@@ -44,6 +44,7 @@ export function traceStart(name: string, metadata?: Record<string, unknown>): st
 
 	const indent = parent ? "  → " : "";
 	const meta = metadata ? ` ${JSON.stringify(metadata)}` : "";
+	// biome-ignore lint/suspicious/noConsole: tracing is explicitly opt-in for performance debugging.
 	console.log(`%c[TRACE]%c ${indent}${name} start${meta}`, "color: #888", "color: inherit");
 
 	return id;
@@ -68,6 +69,7 @@ export function traceEnd(id: string, metadata?: Record<string, unknown>): void {
 	const indent = span.parent ? "  ← " : "";
 	const meta = metadata ? ` ${JSON.stringify(metadata)}` : "";
 
+	// biome-ignore lint/suspicious/noConsole: tracing is explicitly opt-in for performance debugging.
 	console.log(
 		`%c[TRACE]%c ${indent}${name} end %c${duration.toFixed(1)}ms%c${meta}`,
 		"color: #888",
@@ -85,6 +87,7 @@ export function traceLog(message: string, metadata?: Record<string, unknown>): v
 
 	const indent = currentSpan ? "    " : "";
 	const meta = metadata ? ` ${JSON.stringify(metadata)}` : "";
+	// biome-ignore lint/suspicious/noConsole: tracing is explicitly opt-in for performance debugging.
 	console.log(`%c[TRACE]%c ${indent}${message}${meta}`, "color: #888", "color: #666");
 }
 
@@ -102,6 +105,7 @@ export function onRenderCallback(
 ): void {
 	if (!TRACE_ENABLED()) return;
 	if (actualDuration > 5) {
+		// biome-ignore lint/suspicious/noConsole: profiler output is explicitly opt-in for performance debugging.
 		console.log(
 			`%c[PROFILER]%c ${id} ${phase}: %c${actualDuration.toFixed(1)}ms%c (base: ${baseDuration.toFixed(1)}ms)`,
 			"color: #888",

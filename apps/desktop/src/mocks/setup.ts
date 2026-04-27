@@ -104,7 +104,7 @@ let mockProjects: Repository[] = [
 	},
 ];
 
-let mockLayout: MockAppLayout = {
+const mockLayout: MockAppLayout = {
 	active_project_id: mockProjects[0]?.id ?? null,
 	selected_change_id: null,
 	sidebar_width: 25,

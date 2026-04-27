@@ -37,10 +37,7 @@ export function AppHeader({
 					<FolderOpenIcon className="size-4" />
 					<span className="truncate max-w-[200px]">{projectName ?? "Open Repository"}</span>
 				</Button>
-				<div
-					className="relative flex items-center rounded-md border border-border/70 bg-muted/60 p-0.5 shadow-inner"
-					aria-label="View mode"
-				>
+				<div className="relative flex items-center rounded-md border border-border/70 bg-muted/60 p-0.5 shadow-inner">
 					<div
 						className={`absolute top-0.5 h-6 w-6 rounded-sm bg-background shadow-sm transition-transform duration-200 ${
 							viewMode === 1 ? "translate-x-0" : "translate-x-6"

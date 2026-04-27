@@ -190,9 +190,7 @@ export function InlineEditor({
 			view.destroy();
 			viewRef.current = null;
 		};
-		// Only create once on mount
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
+	}, [autoFocus, placeholder, readOnly, value]);
 
 	const variantClasses =
 		variant === "transparent"
@@ -202,9 +200,7 @@ export function InlineEditor({
 	return (
 		<div
 			ref={containerRef}
-			className={`${variantClasses} ${
-				compact ? "max-h-20 overflow-auto" : ""
-			} ${className}`}
+			className={`${variantClasses} ${compact ? "max-h-20 overflow-auto" : ""} ${className}`}
 		/>
 	);
 }

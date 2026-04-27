@@ -36,13 +36,10 @@ interface PrerenderedDiffPanelProps {
 }
 
 export const PrerenderedDiffPanel = forwardRef<HTMLDivElement, PrerenderedDiffPanelProps>(
-	function PrerenderedDiffPanel({
-		repoPath,
-		revisions,
-		selectedChangeId,
-		revisionsPanelRef,
-		onDescribe,
-	}, ref) {
+	function PrerenderedDiffPanel(
+		{ repoPath, revisions, selectedChangeId, revisionsPanelRef, onDescribe },
+		ref,
+	) {
 		const selectedRevision = selectedChangeId
 			? (revisions.find((r) => r.change_id === selectedChangeId) ?? null)
 			: null;

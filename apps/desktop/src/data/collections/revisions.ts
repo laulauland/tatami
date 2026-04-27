@@ -1,6 +1,5 @@
-import { createCollection } from "@tanstack/db";
+import { createCollection, createOptimisticAction, type WritableDeep } from "@tanstack/db";
 import { queryCollectionOptions } from "@tanstack/query-db-collection";
-import { Effect } from "effect";
 import { toast } from "@/components/ui/sonner";
 import type { Revision } from "@/tauri-commands";
 import {
@@ -14,10 +13,10 @@ import {
 	undoOperation,
 } from "@/tauri-commands";
 import { consumeChangeId } from "../change-id-pool";
-import { reconcileOperation } from "./operations";
 import { trackMutation } from "../mutation-tracker";
 import { queryClient } from "../query-client";
 import { invalidateRepositoryQueries } from "../watchers";
+import { reconcileOperation } from "./operations";
 
 function mutationSuccessWithUndo(
 	repoPath: string,
@@ -92,41 +91,133 @@ export function getRevisionsCollection(repoPath: string, preset?: string) {
 	return collection;
 }
 
+type CollectionMutationMethods = {
+	insert?: (revision: Revision) => void;
+	update?: (key: string, updater: (draft: WritableDeep<Revision>) => void) => void;
+	delete?: (key: string) => void;
+	utils?: {
+		writeUpsert?: (revisions: Revision[]) => void;
+		writeDelete?: (key: string) => void;
+		refetch?: () => Promise<unknown>;
+	};
+	preload?: () => Promise<unknown>;
+};
+
+function collectionMethods(collection: RevisionsCollection): CollectionMutationMethods {
+	return collection as CollectionMutationMethods;
+}
+
+function optimisticUpdate(
+	collection: RevisionsCollection,
+	revision: Revision,
+	updater: (draft: WritableDeep<Revision>) => void,
+): void {
+	const methods = collectionMethods(collection);
+	if (methods.update) {
+		methods.update(getRevisionKey(revision), updater);
+		return;
+	}
+	const next = { ...revision } as WritableDeep<Revision>;
+	updater(next);
+	methods.utils?.writeUpsert?.([next]);
+}
+
+function optimisticInsert(collection: RevisionsCollection, revision: Revision): void {
+	const methods = collectionMethods(collection);
+	if (methods.insert) {
+		methods.insert(revision);
+		return;
+	}
+	methods.utils?.writeUpsert?.([revision]);
+}
+
+function optimisticDelete(collection: RevisionsCollection, revision: Revision): void {
+	const methods = collectionMethods(collection);
+	const key = getRevisionKey(revision);
+	if (methods.delete) {
+		methods.delete(key);
+		return;
+	}
+	methods.utils?.writeDelete?.(key);
+}
+
+async function refetchRevisions(collection: RevisionsCollection): Promise<void> {
+	const methods = collectionMethods(collection);
+	if (methods.utils?.refetch) {
+		await methods.utils.refetch();
+		return;
+	}
+	await methods.preload?.();
+}
+
+function uniqueMutationId(prefix: string): string {
+	return `${prefix}-${Date.now()}-${Math.random()}`;
+}
+
+function supportsCollectionTransactions(collection: RevisionsCollection): boolean {
+	const methods = collectionMethods(collection);
+	return !!(methods.insert || methods.update || methods.delete);
+}
+
 export function editRevision(
 	collection: RevisionsCollection,
 	repoPath: string,
 	targetRevision: Revision,
 	currentWcRevision: Revision | null,
 ) {
-	const mutationId = `edit-${Date.now()}-${Math.random()}`;
-
-	// Optimistic update
-	const updates: Revision[] = [];
-	if (currentWcRevision && getRevisionKey(currentWcRevision) !== getRevisionKey(targetRevision)) {
-		updates.push({ ...currentWcRevision, is_working_copy: false });
-	}
-	updates.push({ ...targetRevision, is_working_copy: true });
-	collection.utils.writeUpsert(updates);
-
-	// Track the mutation and fire backend
-	trackMutation(mutationId, jjEdit(repoPath, targetRevision.change_id_short))
-		.then((result) => {
-			// Invalidate to get fresh data from backend
-			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
-			void reconcileOperation(repoPath, result.operation_id);
-			toast.success(`Working copy is now ${targetRevision.change_id_short}`);
-		})
-		.catch((error) => {
-			// Revert optimistic update
-			const revertUpdates: Revision[] = [];
+	const mutationId = uniqueMutationId("edit");
+	const action = createOptimisticAction<void>({
+		metadata: { mutationId, kind: "jj-edit", repoPath },
+		onMutate: () => {
 			if (
 				currentWcRevision &&
 				getRevisionKey(currentWcRevision) !== getRevisionKey(targetRevision)
 			) {
-				revertUpdates.push({ ...currentWcRevision, is_working_copy: true });
+				optimisticUpdate(collection, currentWcRevision, (draft) => {
+					draft.is_working_copy = false;
+				});
 			}
-			revertUpdates.push({ ...targetRevision, is_working_copy: false });
-			collection.utils.writeUpsert(revertUpdates);
+			optimisticUpdate(collection, targetRevision, (draft) => {
+				draft.is_working_copy = true;
+			});
+		},
+		mutationFn: async () => {
+			const result = await trackMutation(
+				mutationId,
+				jjEdit(repoPath, targetRevision.change_id_short),
+			);
+			await refetchRevisions(collection);
+			void reconcileOperation(repoPath, result.operation_id);
+			toast.success(`Working copy is now ${targetRevision.change_id_short}`);
+			return result;
+		},
+	});
+
+	const transaction = action();
+	if (supportsCollectionTransactions(collection)) {
+		transaction.isPersisted.promise.catch((error) => {
+			toast.error(`Failed to edit revision: ${error}`, { duration: Number.POSITIVE_INFINITY });
+		});
+		return;
+	}
+
+	trackMutation(mutationId, jjEdit(repoPath, targetRevision.change_id_short))
+		.then((result) => {
+			void reconcileOperation(repoPath, result.operation_id);
+			toast.success(`Working copy is now ${targetRevision.change_id_short}`);
+		})
+		.catch((error) => {
+			if (
+				currentWcRevision &&
+				getRevisionKey(currentWcRevision) !== getRevisionKey(targetRevision)
+			) {
+				optimisticUpdate(collection, currentWcRevision, (draft) => {
+					draft.is_working_copy = true;
+				});
+			}
+			optimisticUpdate(collection, targetRevision, (draft) => {
+				draft.is_working_copy = false;
+			});
 			toast.error(`Failed to edit revision: ${error}`, { duration: Number.POSITIVE_INFINITY });
 		});
 }
@@ -138,50 +229,66 @@ export function newRevision(
 	parentRevision: Revision,
 	currentWcRevision: Revision | null,
 ) {
-	const mutationId = `new-${Date.now()}-${Math.random()}`;
+	const mutationId = uniqueMutationId("new");
 	const preAllocatedChangeId = consumeChangeId(repoPath);
 
-	// Create optimistic revision if we have a pre-allocated change ID
-	let optimisticRevision: Revision | null = null;
-	if (preAllocatedChangeId) {
-		optimisticRevision = {
-			commit_id: `pending-${preAllocatedChangeId}`, // Temporary, will be replaced
-			change_id: preAllocatedChangeId,
-			change_id_short: preAllocatedChangeId.slice(0, 8), // Approximate short ID
-			parent_edges: [{ parent_id: parentRevision.commit_id, edge_type: "direct" as const }],
-			children_ids: [],
-			description: "",
-			author: parentRevision.author, // Inherit from parent
-			timestamp: new Date().toISOString(),
-			is_working_copy: true,
-			is_immutable: false,
-			is_mine: true,
-			is_trunk: false,
-			is_divergent: false,
-			divergent_index: null,
-			has_conflict: false,
-			bookmarks: [],
-		};
+	const optimisticRevision: Revision | null = preAllocatedChangeId
+		? {
+				commit_id: `pending-${preAllocatedChangeId}`,
+				change_id: preAllocatedChangeId,
+				change_id_short: preAllocatedChangeId.slice(0, 8),
+				parent_edges: [{ parent_id: parentRevision.commit_id, edge_type: "direct" as const }],
+				children_ids: [],
+				description: "",
+				author: parentRevision.author,
+				timestamp: new Date().toISOString(),
+				is_working_copy: true,
+				is_immutable: false,
+				is_mine: true,
+				is_trunk: false,
+				is_divergent: false,
+				divergent_index: null,
+				has_conflict: false,
+				bookmarks: [],
+			}
+		: null;
 
-		// Optimistic update: clear WC from current, insert new revision
-		const updates: Revision[] = [];
-		if (currentWcRevision) {
-			updates.push({ ...currentWcRevision, is_working_copy: false });
-		}
-		updates.push(optimisticRevision);
-		collection.utils.writeUpsert(updates);
+	const action = createOptimisticAction<void>({
+		metadata: { mutationId, kind: "jj-new", repoPath },
+		onMutate: () => {
+			if (!optimisticRevision) return;
+			if (currentWcRevision) {
+				optimisticUpdate(collection, currentWcRevision, (draft) => {
+					draft.is_working_copy = false;
+				});
+			}
+			optimisticInsert(collection, optimisticRevision);
+		},
+		mutationFn: async () => {
+			const result = await trackMutation(
+				mutationId,
+				jjNew(repoPath, parentChangeIds, preAllocatedChangeId ?? undefined),
+			);
+			await refetchRevisions(collection);
+			void reconcileOperation(repoPath, result.operation_id);
+			const shortId = result.change_id?.slice(0, 8) ?? "unknown";
+			toast.success(`Working copy is now ${shortId}`, {
+				description: "Created new revision",
+			});
+			return result;
+		},
+	});
+
+	const transaction = action();
+	if (supportsCollectionTransactions(collection)) {
+		transaction.isPersisted.promise.catch((error) => {
+			toast.error(`Failed to create revision: ${error}`, { duration: Number.POSITIVE_INFINITY });
+		});
+		return;
 	}
 
-	// Fire backend call
-	const program = Effect.tryPromise({
-		try: () => jjNew(repoPath, parentChangeIds, preAllocatedChangeId ?? undefined),
-		catch: (error) => new Error(`Failed to create new revision: ${error}`),
-	}).pipe(Effect.tapError((error) => Effect.logError("jjNew failed", error)));
-
-	trackMutation(mutationId, Effect.runPromise(program))
+	trackMutation(mutationId, jjNew(repoPath, parentChangeIds, preAllocatedChangeId ?? undefined))
 		.then((result) => {
-			// Invalidate to get authoritative data (correct commit_id, short_id, etc.)
-			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
 			void reconcileOperation(repoPath, result.operation_id);
 			const shortId = result.change_id?.slice(0, 8) ?? "unknown";
 			toast.success(`Working copy is now ${shortId}`, {
@@ -189,11 +296,12 @@ export function newRevision(
 			});
 		})
 		.catch((error) => {
-			// Revert optimistic update
 			if (optimisticRevision) {
-				collection.utils.writeDelete(getRevisionKey(optimisticRevision));
+				optimisticDelete(collection, optimisticRevision);
 				if (currentWcRevision) {
-					collection.utils.writeUpsert([{ ...currentWcRevision, is_working_copy: true }]);
+					optimisticUpdate(collection, currentWcRevision, (draft) => {
+						draft.is_working_copy = true;
+					});
 				}
 			}
 			toast.error(`Failed to create revision: ${error}`, { duration: Number.POSITIVE_INFINITY });
@@ -205,40 +313,47 @@ export function abandonRevision(
 	repoPath: string,
 	revision: Revision,
 ) {
-	const mutationId = `abandon-${Date.now()}-${Math.random()}`;
+	const mutationId = uniqueMutationId("abandon");
+	const shouldOptimisticallyDelete = !revision.is_working_copy;
 
-	// For working copy, jj creates a new WC - can't do optimistic delete
-	// For other revisions, we can optimistically remove
-	if (!revision.is_working_copy) {
-		collection.utils.writeDelete(getRevisionKey(revision));
+	const action = createOptimisticAction<void>({
+		metadata: { mutationId, kind: "jj-abandon", repoPath },
+		onMutate: () => {
+			if (shouldOptimisticallyDelete) {
+				optimisticDelete(collection, revision);
+			}
+		},
+		mutationFn: async () => {
+			const result = await trackMutation(mutationId, jjAbandon(repoPath, revision.change_id_short));
+			await refetchRevisions(collection);
+			mutationSuccessWithUndo(
+				repoPath,
+				result.operation_id,
+				`Abandoned revision ${revision.change_id_short}`,
+			);
+			return result;
+		},
+	});
+
+	const transaction = action();
+	if (supportsCollectionTransactions(collection)) {
+		transaction.isPersisted.promise.catch((error) => {
+			toast.error(`Failed to abandon revision: ${error}`, { duration: Number.POSITIVE_INFINITY });
+		});
+		return;
 	}
 
-	// Track the mutation and fire backend
 	trackMutation(mutationId, jjAbandon(repoPath, revision.change_id_short))
 		.then((result) => {
-			// Invalidate to get fresh data (especially for WC abandon which creates new WC)
-			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
-			void reconcileOperation(repoPath, result.operation_id);
-			toast.success(`Abandoned revision ${revision.change_id_short}`, {
-				action: {
-					label: "Undo",
-					onClick: () => {
-						undoOperation(repoPath, result.operation_id)
-							.then(() => {
-								queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
-								toast.success("Undo successful");
-							})
-							.catch((err) => {
-								toast.error(`Undo failed: ${err}`, { duration: Number.POSITIVE_INFINITY });
-							});
-					},
-				},
-			});
+			mutationSuccessWithUndo(
+				repoPath,
+				result.operation_id,
+				`Abandoned revision ${revision.change_id_short}`,
+			);
 		})
 		.catch((error) => {
-			// Re-add on failure (only if we deleted it)
-			if (!revision.is_working_copy) {
-				collection.utils.writeUpsert([revision]);
+			if (shouldOptimisticallyDelete) {
+				optimisticInsert(collection, revision);
 			}
 			toast.error(`Failed to abandon revision: ${error}`, { duration: Number.POSITIVE_INFINITY });
 		});
@@ -250,35 +365,52 @@ export function describeRevision(
 	revision: Revision,
 	description: string,
 ) {
-	const mutationId = `describe-${Date.now()}-${Math.random()}`;
-	const previousDescription = revision.description;
+	const mutationId = uniqueMutationId("describe");
 
-	// Optimistic update
-	collection.utils.writeUpsert([{ ...revision, description }]);
+	const action = createOptimisticAction<void>({
+		metadata: { mutationId, kind: "jj-describe", repoPath },
+		onMutate: () => {
+			optimisticUpdate(collection, revision, (draft) => {
+				draft.description = description;
+			});
+		},
+		mutationFn: async () => {
+			const result = await trackMutation(
+				mutationId,
+				jjDescribe(repoPath, revision.change_id_short, description),
+			);
+			await refetchRevisions(collection);
+			mutationSuccessWithUndo(
+				repoPath,
+				result.operation_id,
+				`Updated description for ${revision.change_id_short}`,
+			);
+			return result;
+		},
+	});
+
+	const transaction = action();
+	if (supportsCollectionTransactions(collection)) {
+		transaction.isPersisted.promise.catch((error) => {
+			toast.error(`Failed to update description: ${error}`, {
+				duration: Number.POSITIVE_INFINITY,
+			});
+		});
+		return;
+	}
 
 	trackMutation(mutationId, jjDescribe(repoPath, revision.change_id_short, description))
 		.then((result) => {
-			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
-			void reconcileOperation(repoPath, result.operation_id);
-			toast.success(`Updated description for ${revision.change_id_short}`, {
-				action: {
-					label: "Undo",
-					onClick: () => {
-						undoOperation(repoPath, result.operation_id)
-							.then(() => {
-								queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
-								toast.success("Undo successful");
-							})
-							.catch((err) => {
-								toast.error(`Undo failed: ${err}`, { duration: Number.POSITIVE_INFINITY });
-							});
-					},
-				},
-			});
+			mutationSuccessWithUndo(
+				repoPath,
+				result.operation_id,
+				`Updated description for ${revision.change_id_short}`,
+			);
 		})
 		.catch((error) => {
-			// Revert optimistic update on failure
-			collection.utils.writeUpsert([{ ...revision, description: previousDescription }]);
+			optimisticUpdate(collection, revision, (draft) => {
+				draft.description = revision.description;
+			});
 			toast.error(`Failed to update description: ${error}`, {
 				duration: Number.POSITIVE_INFINITY,
 			});
@@ -305,30 +437,34 @@ export function squashRevision(
 		return;
 	}
 
-	const mutationId = `squash-${Date.now()}-${Math.random()}`;
+	const mutationId = uniqueMutationId("squash");
 	const shouldOptimisticallyDelete = !revision.is_working_copy;
 
-	if (shouldOptimisticallyDelete) {
-		collection.utils.writeDelete(getRevisionKey(revision));
-	}
-
-	trackMutation(mutationId, jjSquash(repoPath, revision.change_id))
-		.then((result) => {
-			void invalidateRepositoryQueries(repoPath);
+	const action = createOptimisticAction<void>({
+		metadata: { mutationId, kind: "jj-squash", repoPath },
+		onMutate: () => {
+			if (shouldOptimisticallyDelete) {
+				optimisticDelete(collection, revision);
+			}
+		},
+		mutationFn: async () => {
+			const result = await trackMutation(mutationId, jjSquash(repoPath, revision.change_id));
+			await invalidateRepositoryQueries(repoPath);
+			await refetchRevisions(collection);
 			mutationSuccessWithUndo(
 				repoPath,
 				result.operation_id,
 				`Squashed ${revision.change_id_short} into parent`,
 			);
-		})
-		.catch((error) => {
-			if (shouldOptimisticallyDelete) {
-				collection.utils.writeUpsert([revision]);
-			}
-			toast.error(`Failed to squash revision: ${error}`, {
-				duration: Number.POSITIVE_INFINITY,
-			});
+			return result;
+		},
+	});
+
+	action().isPersisted.promise.catch((error) => {
+		toast.error(`Failed to squash revision: ${error}`, {
+			duration: Number.POSITIVE_INFINITY,
 		});
+	});
 }
 
 export function rebaseRevision(
@@ -346,37 +482,36 @@ export function rebaseRevision(
 		return;
 	}
 
-	const mutationId = `rebase-${Date.now()}-${Math.random()}`;
-	const previousParentEdges = sourceRevision.parent_edges;
+	const mutationId = uniqueMutationId("rebase");
 
-	collection.utils.writeUpsert([
-		{
-			...sourceRevision,
-			parent_edges: [{ parent_id: destinationRevision.commit_id, edge_type: "direct" as const }],
+	const action = createOptimisticAction<void>({
+		metadata: { mutationId, kind: "jj-rebase", repoPath },
+		onMutate: () => {
+			optimisticUpdate(collection, sourceRevision, (draft) => {
+				draft.parent_edges = [
+					{ parent_id: destinationRevision.commit_id, edge_type: "direct" as const },
+				];
+			});
 		},
-	]);
-
-	trackMutation(
-		mutationId,
-		jjRebase(repoPath, sourceRevision.change_id, destinationRevision.change_id),
-	)
-		.then((result) => {
-			void invalidateRepositoryQueries(repoPath);
+		mutationFn: async () => {
+			const result = await trackMutation(
+				mutationId,
+				jjRebase(repoPath, sourceRevision.change_id, destinationRevision.change_id),
+			);
+			await invalidateRepositoryQueries(repoPath);
+			await refetchRevisions(collection);
 			mutationSuccessWithUndo(
 				repoPath,
 				result.operation_id,
 				`Rebased ${sourceRevision.change_id_short} onto ${destinationRevision.change_id_short}`,
 			);
-		})
-		.catch((error) => {
-			collection.utils.writeUpsert([
-				{
-					...sourceRevision,
-					parent_edges: previousParentEdges,
-				},
-			]);
-			toast.error(`Failed to rebase revision: ${error}`, {
-				duration: Number.POSITIVE_INFINITY,
-			});
+			return result;
+		},
+	});
+
+	action().isPersisted.promise.catch((error) => {
+		toast.error(`Failed to rebase revision: ${error}`, {
+			duration: Number.POSITIVE_INFINITY,
 		});
+	});
 }

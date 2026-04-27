@@ -11,7 +11,12 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDiffPanelKeyboard } from "@/hooks/useDiffPanelKeyboard";
-import { useChanges, useDiff, usePrefetch } from "@/hooks/useRevisionData";
+import {
+	revisionDiffQueryKey,
+	useChanges,
+	usePrefetch,
+	type DiffRecord,
+} from "@/hooks/useRevisionData";
 import { extractFilePath, parsePatchStats, splitMultiFileDiff } from "@/lib/diff-utils";
 import { traceLog } from "@/lib/trace";
 import { cn } from "@/lib/utils";
@@ -285,20 +290,27 @@ export const DiffPanel = React.memo(
 			[changesRecords],
 		);
 
-		// Read diff from unified collection
-		const diffRecord = useDiff(repoPath ?? "", deferredChangeId);
+		// Read diff payload from TanStack Query
 		const {
-			data: fallbackDiff,
+			data: diffRecord,
 			error: diffError,
 			refetch: retryDiff,
 			isFetching: isRetryingDiff,
-		} = useQuery({
-			queryKey: ["diff-fallback", repoPath, deferredChangeId],
-			queryFn: () => getRevisionDiff(repoPath ?? "", deferredChangeId ?? ""),
-			enabled: !!repoPath && !!deferredChangeId && !diffRecord,
+		} = useQuery<DiffRecord>({
+			queryKey:
+				repoPath && deferredChangeId
+					? revisionDiffQueryKey(repoPath, deferredChangeId)
+					: ["revision-diff", repoPath, null],
+			queryFn: async () => ({
+				repoPath: repoPath ?? "",
+				changeId: deferredChangeId ?? "",
+				content: await getRevisionDiff(repoPath ?? "", deferredChangeId ?? ""),
+			}),
+			enabled: !!repoPath && !!deferredChangeId,
+			staleTime: Number.POSITIVE_INFINITY,
 			retry: false,
 		});
-		const revisionDiff = diffRecord?.content ?? fallbackDiff ?? "";
+		const revisionDiff = diffRecord?.content ?? "";
 
 		const { data: conflictPaths = [] } = useQuery({
 			queryKey: ["conflict-paths", repoPath, deferredChangeId],

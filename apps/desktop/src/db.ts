@@ -26,28 +26,18 @@ export {
 	type RevisionsCollection,
 	squashRevision,
 } from "./data/collections/revisions";
-export {
-	emptyChangesCollection,
-	getRevisionChangesCollection,
-	type RevisionChangesCollection,
-} from "./data/collections/revision-changes";
-export {
-	emptyDiffCollection,
-	getRevisionDiffCollection,
-	type RevisionDiffCollection,
-} from "./data/collections/revision-diffs";
 export { prefetchRevisionChanges, prefetchRevisionDiffs } from "./data/prefetch";
+export {
+	revisionChangesQueryKey,
+	revisionDiffQueryKey,
+	type ChangeRecord,
+	type DiffRecord,
+} from "./hooks/useRevisionData";
 export {
 	emptyCommitRecencyCollection,
 	getCommitRecencyCollection,
 	type CommitRecencyCollection,
 } from "./data/collections/commit-recency";
-export {
-	changesCollection,
-	type ChangeRecord,
-	type ChangesCollection,
-} from "./data/collections/changes";
-export { diffsCollection, type DiffRecord, type DiffsCollection } from "./data/collections/diffs";
 export {
 	emptyOperationsCollection,
 	getOperationKey,

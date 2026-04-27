@@ -17,6 +17,8 @@ const mocks = vi.hoisted(() => ({
 	unwatchRepository: vi.fn(),
 	getRevisionDiff: vi.fn(),
 	getRevisionChanges: vi.fn(),
+	getDiffsBatchEffect: vi.fn(),
+	getChangesBatchEffect: vi.fn(),
 	getRevisions: vi.fn(),
 }));
 
@@ -34,6 +36,8 @@ vi.mock("@/tauri-commands", () => ({
 	getRepositories: vi.fn().mockResolvedValue([]),
 	getRevisionChanges: mocks.getRevisionChanges,
 	getRevisionDiff: mocks.getRevisionDiff,
+	getDiffsBatchEffect: mocks.getDiffsBatchEffect,
+	getChangesBatchEffect: mocks.getChangesBatchEffect,
 	getRevisions: mocks.getRevisions,
 	jjAbandon: vi.fn(),
 	jjDescribe: vi.fn(),
@@ -52,9 +56,9 @@ vi.mock("@/tauri-commands", () => ({
 
 import {
 	getRevisionsCollection,
-	getRevisionChangesCollection,
-	getRevisionDiffCollection,
 	queryClient,
+	revisionChangesQueryKey,
+	revisionDiffQueryKey,
 } from "@/db";
 
 // ============================================================================
@@ -269,20 +273,6 @@ describe("Data loading - Collection caching", () => {
 
 		expect(col1).not.toBe(col2);
 	});
-
-	test("getRevisionChangesCollection returns same instance for same repoPath+changeId", () => {
-		const col1 = getRevisionChangesCollection("/tmp/changes-repo", "change-a");
-		const col2 = getRevisionChangesCollection("/tmp/changes-repo", "change-a");
-
-		expect(col1).toBe(col2);
-	});
-
-	test("getRevisionDiffCollection returns same instance for same repoPath+changeId", () => {
-		const col1 = getRevisionDiffCollection("/tmp/diff-repo", "change-a");
-		const col2 = getRevisionDiffCollection("/tmp/diff-repo", "change-a");
-
-		expect(col1).toBe(col2);
-	});
 });
 
 // ============================================================================
@@ -297,30 +287,53 @@ describe("Data loading - Prefetch", () => {
 		mocks.listen.mockResolvedValue(vi.fn());
 		mocks.getRevisionDiff.mockResolvedValue("--- a/file\n+++ b/file");
 		mocks.getRevisionChanges.mockResolvedValue([]);
+		mocks.getDiffsBatchEffect.mockImplementation((repoPath: string, changeIds: string[]) =>
+			Effect.succeed(
+				changeIds.map((change_id) => ({ change_id, diff: `${repoPath}:${change_id}` })),
+			),
+		);
+		mocks.getChangesBatchEffect.mockImplementation((_repoPath: string, changeIds: string[]) =>
+			Effect.succeed(changeIds.map((change_id) => ({ change_id, files: [] }))),
+		);
 	});
 
-	test("prefetchRevisionDiffs creates collections for each changeId", async () => {
+	test("prefetchRevisionDiffs stores diff payloads in Query cache", async () => {
 		const { prefetchRevisionDiffs } = await import("@/db");
 		const changeIds = ["change-1", "change-2", "change-3"];
 
 		prefetchRevisionDiffs("/tmp/prefetch-repo", changeIds);
 
-		// Each changeId should have a collection created
+		await vi.waitFor(() => {
+			expect(
+				queryClient.getQueryData(revisionDiffQueryKey("/tmp/prefetch-repo", "change-1")),
+			).toBeDefined();
+		});
+
 		for (const id of changeIds) {
-			const col = getRevisionDiffCollection("/tmp/prefetch-repo", id);
-			expect(col).toBeDefined();
+			expect(queryClient.getQueryData(revisionDiffQueryKey("/tmp/prefetch-repo", id))).toEqual({
+				repoPath: "/tmp/prefetch-repo",
+				changeId: id,
+				content: `/tmp/prefetch-repo:${id}`,
+			});
 		}
 	});
 
-	test("prefetchRevisionChanges creates collections for each changeId", async () => {
+	test("prefetchRevisionChanges stores changed-file payloads in Query cache", async () => {
 		const { prefetchRevisionChanges } = await import("@/db");
 		const changeIds = ["change-a", "change-b"];
 
 		prefetchRevisionChanges("/tmp/prefetch-changes", changeIds);
 
+		await vi.waitFor(() => {
+			expect(
+				queryClient.getQueryData(revisionChangesQueryKey("/tmp/prefetch-changes", "change-a")),
+			).toBeDefined();
+		});
+
 		for (const id of changeIds) {
-			const col = getRevisionChangesCollection("/tmp/prefetch-changes", id);
-			expect(col).toBeDefined();
+			expect(
+				queryClient.getQueryData(revisionChangesQueryKey("/tmp/prefetch-changes", id)),
+			).toEqual([]);
 		}
 	});
 });

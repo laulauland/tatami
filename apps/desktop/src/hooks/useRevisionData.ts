@@ -1,270 +1,145 @@
 /**
- * Revision data hooks for diffs and changes.
+ * Revision payload hooks for diffs and changed-file lists.
  *
- * Provides React hooks that connect BatchLoader instances to TanStack DB collections,
- * enabling efficient batched fetching with instant reads from local state.
+ * Entity state lives in TanStack DB collections, while large revision payloads
+ * stay in TanStack Query. Query owns caching, prefetching, invalidation, and
+ * retry state for diff strings and changed-file arrays.
  */
 
-import { and, eq, useLiveQuery, useLiveSuspenseQuery } from "@tanstack/react-db";
-import { useMemo, useRef } from "react";
-import { type ChangeRecord, changesCollection, type DiffRecord, diffsCollection } from "@/db";
-import { type BatchLoader, createBatchLoader } from "@/lib/batch-loader";
+import { Effect } from "effect";
+import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { queryClient } from "@/data/query-client";
 import { traceLog } from "@/lib/trace";
 import {
 	getChangesBatchEffect,
 	getDiffsBatchEffect,
+	getRevisionChanges,
+	getRevisionDiff,
 	type RevisionChanges,
 	type RevisionDiff,
 } from "@/tauri-commands";
 
-// ============================================================================
-// Loader Factory Functions
-// ============================================================================
+export interface DiffRecord {
+	repoPath: string;
+	changeId: string;
+	content: string;
+}
 
-/**
- * Creates a BatchLoader for revision diffs.
- * The loader batches IPC calls and syncs results to the unified diffsCollection.
- */
-function createDiffLoader(repoPath: string): BatchLoader {
-	return createBatchLoader<RevisionDiff>({
-		debounceMs: 50,
-		maxBatchSize: 20,
-		fetchBatch: (ids) => getDiffsBatchEffect(repoPath, ids),
-		syncToCollection: (diffs) => {
-			// Wait for collection to be ready before writing
-			if (diffsCollection.status !== "ready") return;
-			const records: DiffRecord[] = diffs.map((d) => ({
-				repoPath,
-				changeId: d.change_id,
-				content: d.diff,
-			}));
-			diffsCollection.utils.writeUpsert(records);
+export interface ChangeRecord {
+	repoPath: string;
+	changeId: string;
+	path: string;
+	status: "added" | "modified" | "deleted";
+}
 
-			// LRU eviction: keep only last 100 diffs
-			const MAX_DIFFS = 100;
-			const allRecords = Array.from(diffsCollection.state.values());
-			if (allRecords.length > MAX_DIFFS) {
-				// Remove oldest entries (first ones in the Map iteration order)
-				const toRemove = allRecords.slice(0, allRecords.length - MAX_DIFFS);
-				for (const record of toRemove) {
-					const key = `${record.repoPath}:${record.changeId}`;
-					diffsCollection.state.delete(key);
-				}
-			}
-		},
-		isLoaded: (id) => {
-			if (diffsCollection.status !== "ready") return false;
-			const key = `${repoPath}:${id}`;
-			return diffsCollection.state.has(key);
-		},
-	});
+export function revisionDiffQueryKey(repoPath: string, changeId: string) {
+	return ["revision-diff", repoPath, changeId] as const;
+}
+
+export function revisionChangesQueryKey(repoPath: string, changeId: string) {
+	return ["revision-changes", repoPath, changeId] as const;
+}
+
+function toDiffRecord(repoPath: string, diff: RevisionDiff): DiffRecord {
+	return {
+		repoPath,
+		changeId: diff.change_id,
+		content: diff.diff,
+	};
+}
+
+function toChangeRecords(repoPath: string, changes: RevisionChanges): ChangeRecord[] {
+	return changes.files.map((file) => ({
+		repoPath,
+		changeId: changes.change_id,
+		path: file.path,
+		status: file.status,
+	}));
+}
+
+async function fetchDiff(repoPath: string, changeId: string): Promise<DiffRecord> {
+	const content = await getRevisionDiff(repoPath, changeId);
+	return { repoPath, changeId, content };
+}
+
+async function fetchChanges(repoPath: string, changeId: string): Promise<ChangeRecord[]> {
+	const files = await getRevisionChanges(repoPath, changeId);
+	return files.map((file) => ({ repoPath, changeId, path: file.path, status: file.status }));
 }
 
 /**
- * Creates a BatchLoader for revision changes (file lists).
- * The loader batches IPC calls and syncs results to the unified changesCollection.
- */
-function createChangesLoader(repoPath: string): BatchLoader {
-	return createBatchLoader<RevisionChanges>({
-		debounceMs: 50,
-		maxBatchSize: 20,
-		fetchBatch: (ids) => getChangesBatchEffect(repoPath, ids),
-		syncToCollection: (changesList) => {
-			// Wait for collection to be ready before writing
-			if (changesCollection.status !== "ready") return;
-			const records: ChangeRecord[] = [];
-			for (const changes of changesList) {
-				for (const file of changes.files) {
-					records.push({
-						repoPath,
-						changeId: changes.change_id,
-						path: file.path,
-						status: file.status,
-					});
-				}
-			}
-			changesCollection.utils.writeUpsert(records);
-
-			// LRU eviction: keep only last 500 change records
-			const MAX_CHANGES = 500;
-			const allRecords = Array.from(changesCollection.state.values());
-			if (allRecords.length > MAX_CHANGES) {
-				// Remove oldest entries (first ones in the Map iteration order)
-				const toRemove = allRecords.slice(0, allRecords.length - MAX_CHANGES);
-				for (const record of toRemove) {
-					const key = `${record.repoPath}:${record.changeId}:${record.path}`;
-					changesCollection.state.delete(key);
-				}
-			}
-		},
-		isLoaded: (id) => {
-			// Wait for collection to be ready
-			if (changesCollection.status !== "ready") return false;
-			// Check if we have any record for this changeId in this repo
-			for (const [key] of changesCollection.state) {
-				if (key.startsWith(`${repoPath}:${id}:`)) {
-					return true;
-				}
-			}
-			return false;
-		},
-	});
-}
-
-// ============================================================================
-// Loader Instance Cache
-// ============================================================================
-
-// Cache loaders per repoPath to avoid creating multiple instances
-const diffLoaders = new Map<string, BatchLoader>();
-const changesLoaders = new Map<string, BatchLoader>();
-
-/**
- * Clean up loaders for repos we're no longer viewing.
- * Called when the active repoPath changes to prevent memory leaks.
- */
-function cleanupLoadersExcept(currentRepoPath: string): void {
-	for (const [path] of diffLoaders) {
-		if (path !== currentRepoPath) {
-			diffLoaders.delete(path);
-		}
-	}
-	for (const [path] of changesLoaders) {
-		if (path !== currentRepoPath) {
-			changesLoaders.delete(path);
-		}
-	}
-}
-
-function getDiffLoader(repoPath: string): BatchLoader {
-	let loader = diffLoaders.get(repoPath);
-	if (!loader) {
-		loader = createDiffLoader(repoPath);
-		diffLoaders.set(repoPath, loader);
-	}
-	return loader;
-}
-
-function getChangesLoader(repoPath: string): BatchLoader {
-	let loader = changesLoaders.get(repoPath);
-	if (!loader) {
-		loader = createChangesLoader(repoPath);
-		changesLoaders.set(repoPath, loader);
-	}
-	return loader;
-}
-
-// ============================================================================
-// React Hooks
-// ============================================================================
-
-/**
- * Read a single diff from local DB. Returns undefined if not yet loaded.
- * Call prefetchDiffs to trigger loading.
+ * Read a single revision diff from TanStack Query.
  */
 export function useDiff(repoPath: string, changeId: string | null): DiffRecord | undefined {
-	// Use selective query - only re-renders when THIS specific diff changes
-	const { data } = useLiveQuery(
-		(q) =>
-			changeId
-				? q
-						.from({ diffs: diffsCollection })
-						.where(({ diffs }) => and(eq(diffs.repoPath, repoPath), eq(diffs.changeId, changeId)))
-						.findOne()
-				: null,
-		[repoPath, changeId],
-	);
+	const { data } = useQuery({
+		queryKey: changeId
+			? revisionDiffQueryKey(repoPath, changeId)
+			: ["revision-diff", repoPath, null],
+		queryFn: () => fetchDiff(repoPath, changeId ?? ""),
+		enabled: !!repoPath && !!changeId,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+	});
 
 	return data;
 }
 
 /**
- * Read changes (file list) for a revision from local DB.
- * Returns { data, isLoaded } to distinguish between "loading" and "genuinely empty".
- * Call prefetchChanges to trigger loading.
+ * Read changed files for a revision from TanStack Query.
  */
 export function useChanges(
 	repoPath: string,
 	changeId: string | null,
 ): { data: ChangeRecord[]; isLoaded: boolean } {
-	// Use selective query - only re-renders when changes for THIS revision update
-	const { data = [], isReady } = useLiveQuery(
-		(q) =>
-			changeId
-				? q
-						.from({ changes: changesCollection })
-						.where(({ changes }) =>
-							and(eq(changes.repoPath, repoPath), eq(changes.changeId, changeId)),
-						)
-				: null,
-		[repoPath, changeId],
-	);
+	const { data = [], isSuccess } = useQuery({
+		queryKey: changeId
+			? revisionChangesQueryKey(repoPath, changeId)
+			: ["revision-changes", repoPath, null],
+		queryFn: () => fetchChanges(repoPath, changeId ?? ""),
+		enabled: !!repoPath && !!changeId,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+	});
 
-	// isLoaded is true when:
-	// 1. No changeId requested (nothing to load)
-	// 2. Query is ready AND we have data (data was fetched)
-	// 3. Query is ready AND data is empty but was explicitly fetched
-	// We track "explicitly fetched" by checking if the changeId exists in the collection's loaded set
-	// For now, we use isReady as a proxy - if the query ran and returned, the data is loaded
-	const isLoaded = !changeId || isReady;
-
-	return { data, isLoaded };
+	return { data, isLoaded: !changeId || isSuccess };
 }
 
-// ============================================================================
-// Suspense-enabled Hooks
-// ============================================================================
-
 /**
- * Read a single diff from local DB with Suspense support.
- * Throws a promise when data isn't ready, caught by Suspense boundary.
- * Data is guaranteed to be defined when returned.
- *
- * @throws Promise when data is loading (caught by Suspense boundary)
+ * Suspense-compatible diff hook. Data may still be undefined if called without a
+ * matching prefetched/cache entry, preserving the previous public shape.
  */
 export function useDiffSuspense(repoPath: string, changeId: string): DiffRecord | undefined {
-	const { data } = useLiveSuspenseQuery(
-		(q) =>
-			q
-				.from({ diffs: diffsCollection })
-				.where(({ diffs }) => and(eq(diffs.repoPath, repoPath), eq(diffs.changeId, changeId)))
-				.findOne(),
-		[repoPath, changeId],
-	);
+	const { data } = useQuery({
+		queryKey: revisionDiffQueryKey(repoPath, changeId),
+		queryFn: () => fetchDiff(repoPath, changeId),
+		enabled: !!repoPath && !!changeId,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+	});
 
 	traceLog("useDiffSuspense", { changeId, hasData: !!data });
-
 	return data;
 }
 
 /**
- * Read changes (file list) for a revision from local DB with Suspense support.
- * Throws a promise when data isn't ready, caught by Suspense boundary.
- * Data is guaranteed to be defined when returned.
- *
- * @throws Promise when data is loading (caught by Suspense boundary)
+ * Suspense-compatible changed-file hook.
  */
 export function useChangesSuspense(repoPath: string, changeId: string): ChangeRecord[] {
-	const { data } = useLiveSuspenseQuery(
-		(q) =>
-			q
-				.from({ changes: changesCollection })
-				.where(({ changes }) =>
-					and(eq(changes.repoPath, repoPath), eq(changes.changeId, changeId)),
-				),
-		[repoPath, changeId],
-	);
+	const { data = [] } = useQuery({
+		queryKey: revisionChangesQueryKey(repoPath, changeId),
+		queryFn: () => fetchChanges(repoPath, changeId),
+		enabled: !!repoPath && !!changeId,
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+	});
 
 	traceLog("useChangesSuspense", { changeId, fileCount: data.length });
-
 	return data;
 }
 
 /**
- * Read lineage (related revision IDs) for a revision from local DB.
- * Returns { lineage, isLoaded } to allow callers to handle loading state.
- *
- * Stub: lineage calculations disabled - always returns empty/loaded.
+ * Lineage calculations are currently disabled.
  */
 export function useLineage(
 	_repoPath: string,
@@ -273,9 +148,40 @@ export function useLineage(
 	return { lineage: new Set<string>(), isLoaded: true };
 }
 
+async function prefetchDiffBatch(repoPath: string, ids: string[]): Promise<void> {
+	const missing = ids.filter(
+		(id) => !queryClient.getQueryData<DiffRecord>(revisionDiffQueryKey(repoPath, id)),
+	);
+	if (missing.length === 0) return;
+
+	const diffs = await Effect.runPromise(getDiffsBatchEffect(repoPath, missing));
+
+	for (const diff of diffs) {
+		queryClient.setQueryData(
+			revisionDiffQueryKey(repoPath, diff.change_id),
+			toDiffRecord(repoPath, diff),
+		);
+	}
+}
+
+async function prefetchChangesBatch(repoPath: string, ids: string[]): Promise<void> {
+	const missing = ids.filter(
+		(id) => !queryClient.getQueryData<ChangeRecord[]>(revisionChangesQueryKey(repoPath, id)),
+	);
+	if (missing.length === 0) return;
+
+	const changesList = await Effect.runPromise(getChangesBatchEffect(repoPath, missing));
+
+	for (const changes of changesList) {
+		queryClient.setQueryData(
+			revisionChangesQueryKey(repoPath, changes.change_id),
+			toChangeRecords(repoPath, changes),
+		);
+	}
+}
+
 /**
- * Prefetch hook for components that need to load data ahead of user interaction.
- * Returns functions to queue prefetch requests and flush them immediately if needed.
+ * Prefetch hook for components that need to load payloads ahead of interaction.
  */
 export function usePrefetch(repoPath: string): {
 	prefetchDiffs: (ids: string[]) => void;
@@ -285,48 +191,25 @@ export function usePrefetch(repoPath: string): {
 	flushChanges: () => Promise<void>;
 	flushLineage: () => Promise<void>;
 } {
-	// Use refs to avoid recreating loaders on each render
-	const diffLoaderRef = useRef<BatchLoader | null>(null);
-	const changesLoaderRef = useRef<BatchLoader | null>(null);
-	const currentRepoPathRef = useRef<string>(repoPath);
-
-	// Reset loaders if repoPath changes
-	if (currentRepoPathRef.current !== repoPath) {
-		currentRepoPathRef.current = repoPath;
-		diffLoaderRef.current = null;
-		changesLoaderRef.current = null;
-		// Clean up loaders for other repos to prevent memory leaks
-		cleanupLoadersExcept(repoPath);
-	}
-
 	// ast-grep-ignore: no-react-memoization
 	return useMemo(() => {
-		function getDiffLoaderInstance(): BatchLoader {
-			if (!diffLoaderRef.current) {
-				diffLoaderRef.current = getDiffLoader(repoPath);
-			}
-			return diffLoaderRef.current;
-		}
-
-		function getChangesLoaderInstance(): BatchLoader {
-			if (!changesLoaderRef.current) {
-				changesLoaderRef.current = getChangesLoader(repoPath);
-			}
-			return changesLoaderRef.current;
-		}
+		let pendingDiffFlush: Promise<void> = Promise.resolve();
+		let pendingChangesFlush: Promise<void> = Promise.resolve();
 
 		return {
 			prefetchDiffs: (ids: string[]) => {
+				if (!repoPath || ids.length === 0) return;
 				traceLog("prefetch-diffs", { count: ids.length, ids });
-				getDiffLoaderInstance().queueMany(ids);
+				pendingDiffFlush = prefetchDiffBatch(repoPath, ids);
 			},
 			prefetchChanges: (ids: string[]) => {
+				if (!repoPath || ids.length === 0) return;
 				traceLog("prefetch-changes", { count: ids.length, ids });
-				getChangesLoaderInstance().queueMany(ids);
+				pendingChangesFlush = prefetchChangesBatch(repoPath, ids);
 			},
 			prefetchLineage: (_ids: string[]) => {},
-			flushDiffs: () => getDiffLoaderInstance().flushPromise(),
-			flushChanges: () => getChangesLoaderInstance().flushPromise(),
+			flushDiffs: () => pendingDiffFlush,
+			flushChanges: () => pendingChangesFlush,
 			flushLineage: () => Promise.resolve(),
 		};
 	}, [repoPath]);

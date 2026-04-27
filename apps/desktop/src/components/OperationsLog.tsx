@@ -1,11 +1,16 @@
+import { useLiveQuery } from "@tanstack/react-db";
 import { RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
-import { invalidateRepositoryQueries, queryClient } from "@/db";
-import { getOperations, type Operation, undoOperation } from "@/tauri-commands";
+import {
+	emptyOperationsCollection,
+	getOperationsCollection,
+	invalidateRepositoryQueries,
+} from "@/db";
+import type { Operation } from "@/tauri-commands";
+import { undoOperation } from "@/tauri-commands";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/components/ui/sonner";
-import { useQuery } from "@tanstack/react-query";
 
 interface OperationsLogProps {
 	repoPath: string | null;
@@ -48,18 +53,15 @@ function operationTimestampMillis(operation: Operation): number {
 export function OperationsLog({ repoPath, open, onOpenChange }: OperationsLogProps) {
 	const [undoingOperationId, setUndoingOperationId] = useState<string | null>(null);
 
+	const operationsCollection =
+		repoPath && open ? getOperationsCollection(repoPath) : emptyOperationsCollection;
 	const {
 		data: operations = [],
 		isLoading,
-		error,
-		isFetching,
-		refetch,
-	} = useQuery({
-		queryKey: ["operations", repoPath],
-		queryFn: () => getOperations(repoPath ?? "", 50),
-		enabled: open && !!repoPath,
-		retry: false,
-	});
+		isError,
+		collection,
+	} = useLiveQuery(operationsCollection);
+	const isFetching = isLoading;
 
 	const sortedOperations = useMemo(() => {
 		const copy = [...operations];
@@ -73,12 +75,9 @@ export function OperationsLog({ repoPath, open, onOpenChange }: OperationsLogPro
 		setUndoingOperationId(operation.id);
 		try {
 			await undoOperation(repoPath, operation.id);
-			await Promise.all([
-				invalidateRepositoryQueries(repoPath),
-				queryClient.invalidateQueries({ queryKey: ["operations", repoPath] }),
-			]);
+			await invalidateRepositoryQueries(repoPath);
 			toast.success(`Undid operation ${operation.id.slice(0, 8)}`);
-			void refetch();
+			void collection.preload();
 		} catch (undoError) {
 			const message = undoError instanceof Error ? undoError.message : String(undoError);
 			const hint = getUndoHint(message);
@@ -101,7 +100,7 @@ export function OperationsLog({ repoPath, open, onOpenChange }: OperationsLogPro
 							variant="ghost"
 							size="xs"
 							onClick={() => {
-								void refetch();
+								void collection.preload();
 							}}
 							disabled={!repoPath || isFetching}
 						>
@@ -115,12 +114,8 @@ export function OperationsLog({ repoPath, open, onOpenChange }: OperationsLogPro
 						<p className="p-3 text-xs text-muted-foreground">Select a repository first.</p>
 					) : isLoading ? (
 						<p className="p-3 text-xs text-muted-foreground">Loading operations...</p>
-					) : error ? (
-						<p className="p-3 text-xs text-destructive">
-							{error instanceof Error
-								? error.message
-								: `Failed to load operations: ${String(error)}`}
-						</p>
+					) : isError ? (
+						<p className="p-3 text-xs text-destructive">Failed to load operations.</p>
 					) : sortedOperations.length === 0 ? (
 						<p className="p-3 text-xs text-muted-foreground">No operations found.</p>
 					) : (

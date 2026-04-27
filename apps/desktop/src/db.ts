@@ -48,3 +48,11 @@ export {
 	type ChangesCollection,
 } from "./data/collections/changes";
 export { diffsCollection, type DiffRecord, type DiffsCollection } from "./data/collections/diffs";
+export {
+	emptyOperationsCollection,
+	getOperationKey,
+	getOperationsCollection,
+	invalidateOperations,
+	reconcileOperation,
+	type OperationsCollection,
+} from "./data/collections/operations";

@@ -14,6 +14,7 @@ import {
 	undoOperation,
 } from "@/tauri-commands";
 import { consumeChangeId } from "../change-id-pool";
+import { reconcileOperation } from "./operations";
 import { trackMutation } from "../mutation-tracker";
 import { queryClient } from "../query-client";
 import { invalidateRepositoryQueries } from "../watchers";
@@ -24,6 +25,7 @@ function mutationSuccessWithUndo(
 	title: string,
 	description?: string,
 ) {
+	void reconcileOperation(repoPath, operationId);
 	toast.success(title, {
 		description,
 		action: {
@@ -108,9 +110,10 @@ export function editRevision(
 
 	// Track the mutation and fire backend
 	trackMutation(mutationId, jjEdit(repoPath, targetRevision.change_id_short))
-		.then((_result) => {
+		.then((result) => {
 			// Invalidate to get fresh data from backend
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+			void reconcileOperation(repoPath, result.operation_id);
 			toast.success(`Working copy is now ${targetRevision.change_id_short}`);
 		})
 		.catch((error) => {
@@ -179,6 +182,7 @@ export function newRevision(
 		.then((result) => {
 			// Invalidate to get authoritative data (correct commit_id, short_id, etc.)
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+			void reconcileOperation(repoPath, result.operation_id);
 			const shortId = result.change_id?.slice(0, 8) ?? "unknown";
 			toast.success(`Working copy is now ${shortId}`, {
 				description: "Created new revision",
@@ -214,6 +218,7 @@ export function abandonRevision(
 		.then((result) => {
 			// Invalidate to get fresh data (especially for WC abandon which creates new WC)
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+			void reconcileOperation(repoPath, result.operation_id);
 			toast.success(`Abandoned revision ${revision.change_id_short}`, {
 				action: {
 					label: "Undo",
@@ -254,6 +259,7 @@ export function describeRevision(
 	trackMutation(mutationId, jjDescribe(repoPath, revision.change_id_short, description))
 		.then((result) => {
 			queryClient.invalidateQueries({ queryKey: ["revisions", repoPath] });
+			void reconcileOperation(repoPath, result.operation_id);
 			toast.success(`Updated description for ${revision.change_id_short}`, {
 				action: {
 					label: "Undo",

@@ -1,5 +1,6 @@
 import { toast } from "@/components/ui/sonner";
 import { getRevisions, jjGitFetch, jjGitPush } from "@/tauri-commands";
+import { reconcileOperation } from "../collections/operations";
 import { invalidateRepositoryQueries } from "../watchers";
 
 function isAuthError(errorText: string): boolean {
@@ -18,8 +19,9 @@ export async function syncRepository(repoPath: string, preset?: string): Promise
 	const limit = preset === "full_history" ? 10000 : 100;
 
 	try {
-		await jjGitFetch(repoPath, "origin");
+		const fetchResult = await jjGitFetch(repoPath, "origin");
 		await invalidateRepositoryQueries(repoPath);
+		void reconcileOperation(repoPath, fetchResult.operation_id);
 
 		const revisions = await getRevisions(repoPath, limit, undefined, preset);
 		const aheadBookmarks = Array.from(
@@ -33,8 +35,9 @@ export async function syncRepository(repoPath: string, preset?: string): Promise
 		);
 
 		if (aheadBookmarks.length > 0) {
-			await jjGitPush(repoPath, aheadBookmarks, "origin");
+			const pushResult = await jjGitPush(repoPath, aheadBookmarks, "origin");
 			await invalidateRepositoryQueries(repoPath);
+			void reconcileOperation(repoPath, pushResult.operation_id);
 		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);

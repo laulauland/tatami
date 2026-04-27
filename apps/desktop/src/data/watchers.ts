@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { unwatchRepository, watchRepository } from "@/tauri-commands";
+import { invalidateOperations } from "./collections/operations";
 import { inFlightMutations } from "./mutation-tracker";
 import { queryClient } from "./query-client";
 
@@ -31,6 +32,7 @@ export async function setupRepoWatcher(repoPath: string): Promise<void> {
 			await queryClient.invalidateQueries({ queryKey: ["commit-recency", repoPath] });
 			await queryClient.invalidateQueries({ queryKey: ["status", repoPath] });
 			await queryClient.invalidateQueries({ queryKey: ["conflict-paths", repoPath] });
+			await invalidateOperations(repoPath);
 		}
 	});
 
@@ -60,4 +62,5 @@ export async function invalidateRepositoryQueries(repoPath: string): Promise<voi
 	await queryClient.invalidateQueries({ queryKey: ["commit-recency", repoPath] });
 	await queryClient.invalidateQueries({ queryKey: ["status", repoPath] });
 	await queryClient.invalidateQueries({ queryKey: ["conflict-paths", repoPath] });
+	await invalidateOperations(repoPath);
 }

@@ -94,7 +94,7 @@ function getWorkingCopyChain(revisions: Revision[]): Set<string> {
 	return chain;
 }
 
-function buildGraph(revisions: Revision[]): GraphData {
+export function buildGraph(revisions: Revision[]): GraphData {
 	const traceId = traceStart("build-graph", { revisionCount: revisions.length });
 	if (revisions.length === 0) {
 		traceEnd(traceId, { rowCount: 0, edgeCount: 0 });

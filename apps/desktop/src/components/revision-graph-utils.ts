@@ -4,14 +4,10 @@ import type { Revision } from "@/tauri-commands";
 export type CommitRecency = Record<string, number>;
 
 /**
- * Ancestry information for a revision within the visible revset.
+ * Direct parent/child relationships for revisions within the visible revset.
  * Used to determine graph edges and lane allocation.
  */
 export interface RevisionAncestry {
-	/** commit_id -> Set of ancestor commit_ids within the visible revset */
-	ancestors: Map<string, Set<string>>;
-	/** commit_id -> Set of descendant commit_ids within the visible revset */
-	descendants: Map<string, Set<string>>;
 	/** commit_id -> direct parent commit_ids within the visible revset */
 	parents: Map<string, string[]>;
 	/** commit_id -> direct child commit_ids within the visible revset */
@@ -19,14 +15,12 @@ export interface RevisionAncestry {
 }
 
 /**
- * Computes ancestor/descendant relationships for all revisions within the visible revset.
- * This is used to determine which revisions are actually related and should be connected by edges.
+ * Computes direct parent/child relationships for all revisions within the visible revset.
+ * This determines which revisions are actually related and should be connected by edges.
  */
 export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry {
 	if (revisions.length === 0) {
 		return {
-			ancestors: new Map(),
-			descendants: new Map(),
 			parents: new Map(),
 			children: new Map(),
 		};
@@ -61,103 +55,7 @@ export function computeRevisionAncestry(revisions: Revision[]): RevisionAncestry
 		}
 	}
 
-	// Compute transitive ancestors for each commit using BFS
-	const ancestors = new Map<string, Set<string>>();
-	for (const rev of revisions) {
-		const ancestorSet = new Set<string>();
-		const queue = [...(parents.get(rev.commit_id) ?? [])];
-
-		while (queue.length > 0) {
-			const parentId = queue.shift();
-			if (!parentId || ancestorSet.has(parentId)) continue;
-			ancestorSet.add(parentId);
-			queue.push(...(parents.get(parentId) ?? []));
-		}
-
-		ancestors.set(rev.commit_id, ancestorSet);
-	}
-
-	// Compute transitive descendants for each commit using BFS
-	const descendants = new Map<string, Set<string>>();
-	for (const rev of revisions) {
-		const descendantSet = new Set<string>();
-		const queue = [...(children.get(rev.commit_id) ?? [])];
-
-		while (queue.length > 0) {
-			const childId = queue.shift();
-			if (!childId || descendantSet.has(childId)) continue;
-			descendantSet.add(childId);
-			queue.push(...(children.get(childId) ?? []));
-		}
-
-		descendants.set(rev.commit_id, descendantSet);
-	}
-
-	return { ancestors, descendants, parents, children };
-}
-
-/**
- * Checks if two revisions are related (one is ancestor/descendant of the other).
- */
-export function areRevisionsRelated(
-	commitIdA: string,
-	commitIdB: string,
-	ancestry: RevisionAncestry,
-): boolean {
-	if (commitIdA === commitIdB) return true;
-	const ancestorsA = ancestry.ancestors.get(commitIdA);
-	const ancestorsB = ancestry.ancestors.get(commitIdB);
-	if (ancestorsA?.has(commitIdB)) return true;
-	if (ancestorsB?.has(commitIdA)) return true;
-	return false;
-}
-
-/**
- * Groups revisions into connected components based on ancestry relationships.
- * Each component contains revisions that are related (share ancestor/descendant relationships).
- */
-export function groupIntoConnectedComponents(
-	revisions: Revision[],
-	ancestry: RevisionAncestry,
-): Map<string, string[]> {
-	const components = new Map<string, string[]>(); // componentId -> commit_ids
-	const commitToComponent = new Map<string, string>();
-
-	for (const rev of revisions) {
-		if (commitToComponent.has(rev.commit_id)) continue;
-
-		// Start a new component with this revision as the root
-		const componentId = rev.commit_id;
-		const componentMembers: string[] = [];
-		const queue = [rev.commit_id];
-
-		while (queue.length > 0) {
-			const commitId = queue.shift();
-			if (!commitId || commitToComponent.has(commitId)) continue;
-
-			commitToComponent.set(commitId, componentId);
-			componentMembers.push(commitId);
-
-			// Add all ancestors and descendants to the component
-			const ancestorSet = ancestry.ancestors.get(commitId) ?? new Set();
-			const descendantSet = ancestry.descendants.get(commitId) ?? new Set();
-
-			for (const ancestorId of ancestorSet) {
-				if (!commitToComponent.has(ancestorId)) {
-					queue.push(ancestorId);
-				}
-			}
-			for (const descendantId of descendantSet) {
-				if (!commitToComponent.has(descendantId)) {
-					queue.push(descendantId);
-				}
-			}
-		}
-
-		components.set(componentId, componentMembers);
-	}
-
-	return components;
+	return { parents, children };
 }
 
 /**
@@ -191,8 +89,7 @@ export function detectStacks(revisions: Revision[]): RevisionStack[] {
 	if (revisions.length < 3) return [];
 
 	const commitIds = new Set(revisions.map((r) => r.commit_id));
-	const changeIdByCommitId = new Map(revisions.map((r) => [r.commit_id, r.change_id]));
-	const revisionByChangeId = new Map(revisions.map((r) => [r.change_id, r]));
+	const revisionByCommitId = new Map(revisions.map((r) => [r.commit_id, r]));
 
 	// Build parent/children maps (only for edges within our revset)
 	const childrenMap = new Map<string, string[]>(); // commit_id -> child commit_ids
@@ -211,6 +108,21 @@ export function detectStacks(revisions: Revision[]): RevisionStack[] {
 		parentMap.set(rev.commit_id, parents);
 	}
 
+	const linearParentByCommitId = new Map<string, string | null>();
+	for (const rev of revisions) {
+		let linearParentId: string | null = null;
+		for (const parentId of parentMap.get(rev.commit_id) ?? []) {
+			const parentChildren = childrenMap.get(parentId) ?? [];
+			if (parentChildren.length !== 1) continue;
+			if (linearParentId !== null) {
+				linearParentId = null;
+				break;
+			}
+			linearParentId = parentId;
+		}
+		linearParentByCommitId.set(rev.commit_id, linearParentId);
+	}
+
 	// Check if a revision should NOT be collapsed (needs to stay visible)
 	function shouldRemainVisible(rev: Revision): boolean {
 		if (rev.is_working_copy) return true;
@@ -223,65 +135,39 @@ export function detectStacks(revisions: Revision[]): RevisionStack[] {
 	const stacks: RevisionStack[] = [];
 	const usedInStack = new Set<string>();
 
-	// Walk through revisions and find stack starts
+	function isStackHead(rev: Revision): boolean {
+		if (usedInStack.has(rev.change_id)) return false;
+		if (rev.is_immutable) return false; // Don't collapse immutable commits
+		if (!linearParentByCommitId.get(rev.commit_id)) return false;
+
+		const children = childrenMap.get(rev.commit_id) ?? [];
+		if (children.length !== 1) return true;
+
+		const child = revisionByCommitId.get(children[0]);
+		if (!child || child.is_immutable) return true;
+
+		return linearParentByCommitId.get(child.commit_id) !== rev.commit_id;
+	}
+
+	// Walk from stack heads only, so linear chains are traversed once.
 	for (const rev of revisions) {
-		if (usedInStack.has(rev.change_id)) continue;
-		if (rev.is_immutable) continue; // Don't collapse immutable commits
-
-		const commitId = rev.commit_id;
-
-		// A stack starts at a revision that:
-		// - Is not immutable
-		// - Has at least one parent in our view that forms a linear chain
-		//   (i.e., that parent has exactly 1 child - this revision)
-		// This handles merge commits: we follow the "linear" parent
-		const parents = parentMap.get(commitId) ?? [];
-		if (parents.length === 0) continue;
-
-		// Find the linear parent (has exactly 1 child - this revision)
-		const linearParents = parents.filter((parentId) => {
-			const parentChildren = childrenMap.get(parentId) ?? [];
-			return parentChildren.length === 1;
-		});
-		// Need exactly one linear parent to start a chain
-		if (linearParents.length !== 1) continue;
+		if (!isStackHead(rev)) continue;
 
 		// Walk down the chain to find all linear descendants
 		const chain: string[] = [rev.change_id];
 		let current = rev;
 
 		while (true) {
-			const currentParents = parentMap.get(current.commit_id) ?? [];
-			if (currentParents.length === 0) break;
-
-			// Find the "linear" parent - the one that has exactly 1 child (current)
-			// This handles merge commits: the branch parent has 1 child, while
-			// the "main being merged in" parent typically has multiple children
-			let linearParentId: string | null = null;
-			for (const parentId of currentParents) {
-				const parentChildren = childrenMap.get(parentId) ?? [];
-				if (parentChildren.length === 1) {
-					if (linearParentId !== null) {
-						// Multiple parents with single child - ambiguous, stop
-						linearParentId = null;
-						break;
-					}
-					linearParentId = parentId;
-				}
-			}
-
+			const linearParentId = linearParentByCommitId.get(current.commit_id);
 			if (!linearParentId) break;
 
-			const parentChangeId = changeIdByCommitId.get(linearParentId);
-			if (!parentChangeId) break;
-
-			const parentRev = revisionByChangeId.get(parentChangeId);
+			const parentRev = revisionByCommitId.get(linearParentId);
 			if (!parentRev) break;
 
 			// Stop if parent is immutable
 			if (parentRev.is_immutable) break;
 
-			chain.push(parentChangeId);
+			chain.push(parentRev.change_id);
 			current = parentRev;
 
 			// If parent should remain visible and we have enough in chain, stop

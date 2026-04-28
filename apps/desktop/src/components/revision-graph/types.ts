@@ -26,6 +26,25 @@ export interface EdgeBinding {
 }
 
 /**
+ * Edge binding annotated with the display rows it spans.
+ */
+export interface EdgeInterval {
+	minRow: number;
+	maxRow: number;
+	order: number;
+	data: EdgeBinding;
+}
+
+/**
+ * Interval index for querying edges that intersect a visible row range.
+ */
+export interface EdgeIntervalIndex {
+	byMinRow: EdgeInterval[];
+	byMaxRow: EdgeInterval[];
+	edgeCount: number;
+}
+
+/**
  * Connection from a revision to one of its parents
  */
 export interface ParentConnection {
@@ -64,4 +83,5 @@ export interface GraphData {
 	laneCount: number;
 	rows: GraphRow[];
 	edgeBindings: EdgeBinding[];
+	edgeIntervalIndex: EdgeIntervalIndex;
 }

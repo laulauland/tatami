@@ -1,13 +1,14 @@
 import { useAtom } from "@effect-atom/atom-react";
+import { useMemo } from "react";
 import { hoveredStackIdAtom } from "@/atoms";
 import type { Revision } from "@/tauri-commands";
-import type { RevisionStack } from "@/components/revision-graph-utils";
-import type { EdgeBinding } from "./types";
+import { queryEdgeIntervalIndex, type RevisionStack } from "@/components/revision-graph-utils";
+import type { EdgeIntervalIndex } from "./types";
 import { NODE_RADIUS } from "./constants";
 import { GraphEdge } from "./GraphEdge";
 
 interface EdgeLayerProps {
-	bindings: EdgeBinding[];
+	edgeIndex: EdgeIntervalIndex;
 	commitToRow: Map<string, number>;
 	revisionMap: Map<string, Revision>;
 	getRowCenter: (row: number) => number;
@@ -25,7 +26,7 @@ interface EdgeLayerProps {
  * Handles visibility filtering for virtualization
  */
 export function EdgeLayer({
-	bindings,
+	edgeIndex,
 	commitToRow,
 	revisionMap,
 	getRowCenter,
@@ -46,24 +47,10 @@ export function EdgeLayer({
 	const startRow = Math.max(0, visibleStartRow - overscan);
 	const endRow = visibleEndRow + overscan;
 
-	// Filter bindings to those visible in the viewport
-	const visibleBindings = bindings.filter((binding) => {
-		const sourceRow = commitToRow.get(binding.sourceRevisionId);
-		const targetRow = commitToRow.get(binding.targetRevisionId);
-		if (sourceRow === undefined) return false;
-
-		// For missing stubs, just check if source is near visible range
-		if (binding.isMissingStub) {
-			return sourceRow >= startRow && sourceRow <= endRow;
-		}
-
-		if (targetRow === undefined) return false;
-
-		// Check if edge passes through visible area
-		const minRow = Math.min(sourceRow, targetRow);
-		const maxRow = Math.max(sourceRow, targetRow);
-		return maxRow >= startRow && minRow <= endRow;
-	});
+	const visibleBindings = useMemo(
+		() => queryEdgeIntervalIndex(edgeIndex, startRow, endRow),
+		[edgeIndex, startRow, endRow],
+	);
 
 	return (
 		<svg

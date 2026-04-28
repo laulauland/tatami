@@ -16,6 +16,7 @@ import {
 	reorderForGraph,
 	detectStacks,
 	computeRevisionAncestry,
+	buildEdgeIntervalIndex,
 	type RevisionStack,
 } from "@/components/revision-graph-utils";
 import { getRevisionKey } from "@/db";
@@ -94,11 +95,17 @@ function getWorkingCopyChain(revisions: Revision[]): Set<string> {
 	return chain;
 }
 
-export function buildGraph(revisions: Revision[]): GraphData {
+function buildGraph(revisions: Revision[]): GraphData {
 	const traceId = traceStart("build-graph", { revisionCount: revisions.length });
 	if (revisions.length === 0) {
 		traceEnd(traceId, { rowCount: 0, edgeCount: 0 });
-		return { nodes: [], laneCount: 1, rows: [], edgeBindings: [] };
+		return {
+			nodes: [],
+			laneCount: 1,
+			rows: [],
+			edgeBindings: [],
+			edgeIntervalIndex: buildEdgeIntervalIndex([], new Map()),
+		};
 	}
 
 	// Map commit_id -> Revision for ancestry lookups
@@ -315,8 +322,10 @@ export function buildGraph(revisions: Revision[]): GraphData {
 		}
 	}
 
+	const edgeIntervalIndex = buildEdgeIntervalIndex(edgeBindings, commitToRow);
+
 	traceEnd(traceId, { rowCount: rows.length, edgeCount: edgeBindings.length });
-	return { nodes, laneCount: globalMaxLane + 1, rows, edgeBindings };
+	return { nodes, laneCount: globalMaxLane + 1, rows, edgeBindings, edgeIntervalIndex };
 }
 
 export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>(
@@ -543,21 +552,32 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 		}
 
 		// Maps for lookups - by revision key for UI, by commit_id for graph edges
-		const revisionMapByKey = new Map(stableRevisions.map((r) => [getRevisionKey(r), r]));
-		const revisionMapByCommitId = new Map(stableRevisions.map((r) => [r.commit_id, r]));
+		const revisionMapByKey = useMemo(
+			() => new Map(stableRevisions.map((r) => [getRevisionKey(r), r])),
+			[stableRevisions],
+		);
+		const revisionMapByCommitId = useMemo(
+			() => new Map(stableRevisions.map((r) => [r.commit_id, r])),
+			[stableRevisions],
+		);
 
 		// Build revision key -> displayRow index map for scrolling and edge positioning
 		// IMPORTANT: Use displayRows indices (not rows) to match virtualizer positioning
 		// Uses getRevisionKey() to handle divergent revisions (same change_id, different divergent_index)
-		const changeIdToIndex = new Map<string, number>();
-		const commitToRowIndex = new Map<string, number>();
-		for (let i = 0; i < displayRows.length; i++) {
-			const displayRow = displayRows[i];
-			if (displayRow.type === "revision") {
-				changeIdToIndex.set(getRevisionKey(displayRow.row.revision), i);
-				commitToRowIndex.set(displayRow.row.revision.commit_id, i);
+		const { changeIdToIndex, commitToRowIndex } = useMemo(() => {
+			const changeIdToIndex = new Map<string, number>();
+			const commitToRowIndex = new Map<string, number>();
+
+			for (let i = 0; i < displayRows.length; i++) {
+				const displayRow = displayRows[i];
+				if (displayRow.type === "revision") {
+					changeIdToIndex.set(getRevisionKey(displayRow.row.revision), i);
+					commitToRowIndex.set(displayRow.row.revision.commit_id, i);
+				}
 			}
-		}
+
+			return { changeIdToIndex, commitToRowIndex };
+		}, [displayRows]);
 
 		// Create a mapping of change_id -> commit_id for edge remapping
 		const changeIdToCommitId = useMemo(() => {
@@ -651,6 +671,11 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 
 			return remapped;
 		}, [edgeBindings, stacks, expandedStacks, changeIdToCommitId]);
+
+		const filteredEdgeIntervalIndex = useMemo(
+			() => buildEdgeIntervalIndex(filteredEdgeBindings, commitToRowIndex),
+			[filteredEdgeBindings, commitToRowIndex],
+		);
 
 		const [debugEnabled, setDebugEnabled] = useAtom(debugOverlayEnabledAtom);
 
@@ -1164,7 +1189,7 @@ export const RevisionGraph = forwardRef<RevisionGraphHandle, RevisionGraphProps>
 						{/* Key includes expandedStacks to force remount when stack state changes */}
 						<EdgeLayer
 							key={`edges-${[...expandedStacks].sort().join(",")}`}
-							bindings={filteredEdgeBindings}
+							edgeIndex={filteredEdgeIntervalIndex}
 							commitToRow={commitToRowIndex}
 							revisionMap={revisionMapByCommitId}
 							getRowCenter={getRowCenter}

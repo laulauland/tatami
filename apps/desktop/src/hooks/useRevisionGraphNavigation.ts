@@ -1,9 +1,7 @@
-import { useAtom } from "@effect-atom/atom-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import type { RefObject } from "react";
 import { useRef } from "react";
 import { Route } from "@/routes/project.$projectId";
-import { viewModeAtom } from "@/atoms";
 import { traceLog } from "@/lib/trace";
 import type { RevisionStack } from "@/components/revision-graph-utils";
 import { getRevisionKey } from "@/db";
@@ -79,7 +77,6 @@ export function useRevisionGraphNavigation({
 }: UseRevisionGraphNavigationParams) {
 	const navigate = useNavigate({ from: Route.fullPath });
 	const search = useSearch({ from: Route.fullPath });
-	const [viewMode, setViewMode] = useAtom(viewModeAtom);
 
 	// Read focused stack and selection from URL params
 	const focusedStackId = useSearch({ from: Route.fullPath, select: (s) => s.stack ?? null });
@@ -479,16 +476,12 @@ export function useRevisionGraphNavigation({
 		enabled: enabled && hasFocus,
 	});
 
-	// l / ArrowRight: switch to split mode and focus diff panel
+	// l / ArrowRight: focus diff panel
 	useKeyboardShortcut({
 		key: "l",
 		modifiers: {},
 		onPress: () => {
 			if (!selectedRevision) return;
-			// Always switch to split mode and focus diff panel
-			if (viewMode === 1) {
-				setViewMode(2);
-			}
 			diffPanelRef.current?.focus();
 		},
 		enabled: enabled && hasFocus,
@@ -499,10 +492,6 @@ export function useRevisionGraphNavigation({
 		modifiers: {},
 		onPress: () => {
 			if (!selectedRevision) return;
-			// Always switch to split mode and focus diff panel
-			if (viewMode === 1) {
-				setViewMode(2);
-			}
 			diffPanelRef.current?.focus();
 		},
 		enabled: enabled && hasFocus,

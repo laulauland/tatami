@@ -115,7 +115,6 @@ export interface AppLayout {
 	active_project_id: string | null;
 	selected_change_id: string | null;
 	sidebar_width: number;
-	view_mode: 1 | 2;
 }
 
 export async function getLayout(): Promise<AppLayout> {

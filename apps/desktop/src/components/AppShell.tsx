@@ -2,6 +2,7 @@ import { useAtom } from "@effect-atom/atom-react";
 import { useLiveQuery } from "@tanstack/react-db";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { FolderOpenIcon, RefreshCwIcon, SearchIcon } from "lucide-react";
 import { Profiler, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Route as ProjectRoute } from "@/routes/project.$projectId";
 import {
@@ -9,7 +10,6 @@ import {
 	expandedStacksAtom,
 	searchOpenAtom,
 	shortcutsHelpOpenAtom,
-	viewModeAtom,
 } from "@/atoms";
 
 const NARROW_BREAKPOINT = 768;
@@ -22,10 +22,6 @@ function clampSidebarWidth(width: number | null | undefined): number {
 		return DEFAULT_SIDEBAR_WIDTH;
 	}
 	return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(width)));
-}
-
-function normalizeViewMode(viewMode: number | null | undefined): 1 | 2 {
-	return viewMode === 2 ? 2 : 1;
 }
 
 function subscribeToMediaQuery(callback: () => void) {
@@ -43,7 +39,6 @@ function useIsNarrowScreen() {
 }
 
 import { Search } from "@/components/Search";
-import { AppHeader } from "@/components/AppHeader";
 import { CommandPalette } from "@/components/CommandPalette";
 import { PrerenderedDiffPanel } from "@/components/DiffPanel";
 import { KeyboardShortcutsHelp } from "@/components/KeyboardShortcutsHelp";
@@ -51,8 +46,9 @@ import { OperationsLog } from "@/components/OperationsLog";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { RevisionGraph, type RevisionGraphHandle } from "@/components/RevisionGraph";
 import { detectStacks, reorderForGraph } from "@/components/revision-graph-utils";
-import { StatusBar } from "@/components/StatusBar";
+import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/EmptyState";
 
 import {
@@ -78,7 +74,6 @@ import { useKeyboardNavigation, useKeyboardShortcut, useKeySequence } from "@/ho
 import { useSelectedRevision } from "@/hooks/useSelectedRevision";
 import {
 	getLayout,
-	getStatus,
 	updateLayout,
 	type AppLayout,
 	type Repository,
@@ -128,21 +123,25 @@ function AppShellEmpty() {
 				onOpenChange={setProjectPickerOpen}
 			/>
 			<div className="flex flex-col h-screen overflow-hidden">
-				<AppHeader
-					projectName={null}
-					onOpenProject={() => setProjectPickerOpen(true)}
-					onSync={() => {}}
-					onOpenSearch={() => {}}
-					viewMode={1}
-					onChangeViewMode={() => {}}
-				/>
-				<div className="flex-1 min-h-0 flex items-center justify-center">
-					<EmptyState
-						onOpenRepo={handleAddRepository}
-						onOpenShortcutsHelp={() => setShortcutsOpen(true)}
-					/>
+				<div className="flex-1 min-h-0 flex flex-col">
+					<div className="px-2 py-2 shrink-0">
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-7 px-2 gap-1.5 text-sm font-medium"
+							onClick={() => setProjectPickerOpen(true)}
+						>
+							<FolderOpenIcon className="size-4" />
+							<span className="truncate">Open Repository</span>
+						</Button>
+					</div>
+					<div className="flex-1 flex items-center justify-center min-h-0">
+						<EmptyState
+							onOpenRepo={handleAddRepository}
+							onOpenShortcutsHelp={() => setShortcutsOpen(true)}
+						/>
+					</div>
 				</div>
-				<StatusBar branch={null} isConnected={false} hasConflict={false} />
 			</div>
 		</>
 	);
@@ -154,7 +153,6 @@ function AppShellWithProject() {
 	const { projectId } = useParams({ from: ProjectRoute.fullPath });
 	const rev = useSearch({ from: ProjectRoute.fullPath, select: (s) => s.rev });
 	const [flash, setFlash] = useState<{ changeId: string; key: number } | null>(null);
-	const [viewMode, setViewMode] = useAtom(viewModeAtom);
 	const [, setSearchOpen] = useAtom(searchOpenAtom);
 	const [pendingAbandon, setPendingAbandon] = useState<Revision | null>(null);
 	const [editingChangeId, setEditingChangeId] = useState<string | null>(null);
@@ -203,13 +201,6 @@ function AppShellWithProject() {
 		queryKey: ["app-layout"],
 		queryFn: getLayout,
 		staleTime: Number.POSITIVE_INFINITY,
-	});
-
-	const { data: workingCopyStatus } = useQuery({
-		queryKey: ["status", activeProject?.path],
-		queryFn: () => getStatus(activeProject?.path ?? ""),
-		enabled: !!activeProject?.path,
-		retry: false,
 	});
 
 	useAppTitle(activeProject ? `Tatami - ${activeProject.path}` : "Tatami");
@@ -275,11 +266,10 @@ function AppShellWithProject() {
 	useEffect(() => {
 		if (!persistedLayout) return;
 
-		setViewMode(normalizeViewMode(persistedLayout.view_mode));
 		setSidebarWidth(clampSidebarWidth(persistedLayout.sidebar_width));
 		setSplitLayoutSeed((seed) => seed + 1);
 		layoutHydratedRef.current = true;
-	}, [persistedLayout, setViewMode]);
+	}, [persistedLayout]);
 
 	useEffect(() => {
 		if (!layoutHydratedRef.current) return;
@@ -322,7 +312,6 @@ function AppShellWithProject() {
 			active_project_id: projectId,
 			selected_change_id: selectedRevisionKey,
 			sidebar_width: clampSidebarWidth(sidebarWidth),
-			view_mode: viewMode,
 		};
 
 		persistLayoutTimerRef.current = setTimeout(() => {
@@ -334,7 +323,7 @@ function AppShellWithProject() {
 				clearTimeout(persistLayoutTimerRef.current);
 			}
 		};
-	}, [projectId, selectedRevisionKey, sidebarWidth, viewMode]);
+	}, [projectId, selectedRevisionKey, sidebarWidth]);
 
 	// ast-grep-ignore: no-useeffect-state-sync
 	useEffect(() => {
@@ -636,52 +625,6 @@ function AppShellWithProject() {
 		enabled: !!pendingAbandon,
 	});
 
-	// View mode shortcuts: 1 = overview, 2 = split
-	useKeyboardShortcut({
-		key: "1",
-		onPress: () => setViewMode(1),
-	});
-
-	useKeyboardShortcut({
-		key: "2",
-		onPress: () => setViewMode(2),
-	});
-
-	const closestBookmark = (() => {
-		const workingCopy = revisions.find((r) => r.is_working_copy);
-		if (!workingCopy) return null;
-
-		if (workingCopy.bookmarks.length > 0) {
-			return workingCopy.bookmarks[0].name;
-		}
-
-		// BFS to find closest ancestor with bookmarks
-		const byCommitId = new Map<string, Revision>();
-		for (const rev of revisions) {
-			byCommitId.set(rev.commit_id, rev);
-		}
-
-		const visited = new Set<string>();
-		const queue = workingCopy.parent_edges.map((e) => e.parent_id);
-
-		while (queue.length > 0) {
-			const commitId = queue.shift();
-			if (!commitId || visited.has(commitId)) continue;
-			visited.add(commitId);
-
-			const rev = byCommitId.get(commitId);
-			if (!rev) continue;
-
-			if (rev.bookmarks.length > 0) {
-				return rev.bookmarks[0].name;
-			}
-
-			queue.push(...rev.parent_edges.map((e) => e.parent_id));
-		}
-
-		return null;
-	})();
-
 	async function handleSync() {
 		if (!activeProject || isSyncing) return;
 		setIsSyncing(true);
@@ -741,65 +684,74 @@ function AppShellWithProject() {
 				}}
 			/>
 			<div className="flex flex-col h-screen overflow-hidden">
-				<AppHeader
-					projectName={activeProject?.name ?? null}
-					onOpenProject={() => setProjectPickerOpen(true)}
-					onSync={handleSync}
-					onOpenSearch={handleOpenSearch}
-					viewMode={viewMode}
-					onChangeViewMode={setViewMode}
-					isSyncing={isSyncing}
-				/>
 				<div className="flex-1 min-h-0">
-					{viewMode === 1 ? (
-						// Overview mode: only revision list
-						<section
-							ref={revisionsPanelRef}
-							tabIndex={-1}
-							className="h-full relative outline-none"
-							aria-label="Revision list"
+					<ResizablePanelGroup
+						key={`${isNarrowScreen ? "narrow" : "wide"}-${splitLayoutSeed}`}
+						id="app-shell-layout"
+						orientation={isNarrowScreen ? "vertical" : "horizontal"}
+						onLayoutChange={isNarrowScreen ? undefined : handleMainSplitLayout}
+					>
+						<ResizablePanel
+							id="app-shell-revisions"
+							defaultSize={isNarrowScreen ? "40%" : `${sidebarWidth}%`}
+							minSize={isNarrowScreen ? "20%" : `${MIN_SIDEBAR_WIDTH}%`}
+							maxSize={isNarrowScreen ? "60%" : `${MAX_SIDEBAR_WIDTH}%`}
 						>
-							<Profiler id="RevisionGraph" onRender={onRenderCallback}>
-								<RevisionGraph
-									ref={revisionGraphRef}
-									revisions={revisions}
-									selectedRevision={selectedRevision}
-									onSelectRevision={handleSelectRevision}
-									isLoading={isLoading}
-									errorMessage={revisionsErrorMessage}
-									onRetry={handleRetryRevisions}
-									flash={flash}
-									repoPath={activeProject?.path ?? null}
-									pendingAbandon={pendingAbandon}
-									editingChangeId={editingChangeId}
-									onDescribe={handleDescribe}
-									onCancelDescribe={handleCancelDescribe}
-									rebaseSourceChangeId={rebaseSourceRevision?.change_id ?? null}
-									onPickRebaseDestination={handlePickRebaseDestination}
-									diffPanelRef={diffPanelRef}
-								/>
-							</Profiler>
-						</section>
-					) : (
-						// Split mode: revision list + diff panel (vertical on narrow screens)
-						<ResizablePanelGroup
-							key={`${isNarrowScreen ? "narrow" : "wide"}-${splitLayoutSeed}`}
-							id="app-shell-layout"
-							orientation={isNarrowScreen ? "vertical" : "horizontal"}
-							onLayoutChange={isNarrowScreen ? undefined : handleMainSplitLayout}
-						>
-							<ResizablePanel
-								id="app-shell-revisions"
-								defaultSize={isNarrowScreen ? "40%" : `${sidebarWidth}%`}
-								minSize={isNarrowScreen ? "20%" : `${MIN_SIDEBAR_WIDTH}%`}
-								maxSize={isNarrowScreen ? "60%" : `${MAX_SIDEBAR_WIDTH}%`}
+							<section
+								ref={revisionsPanelRef}
+								tabIndex={-1}
+								className="h-full flex flex-col outline-none"
+								aria-label="Revision list"
 							>
-								<section
-									ref={revisionsPanelRef}
-									tabIndex={-1}
-									className="h-full relative outline-none"
-									aria-label="Revision list"
-								>
+								<div className="px-2 py-2 shrink-0 flex items-center gap-1">
+									<Button
+										variant="ghost"
+										size="sm"
+										className="flex-1 min-w-0 justify-start h-7 px-2 gap-1.5 text-sm font-medium"
+										onClick={() => setProjectPickerOpen(true)}
+									>
+										<FolderOpenIcon className="size-4" />
+										<span className="truncate">
+											{activeProject?.name ?? "Open Repository"}
+										</span>
+									</Button>
+									<Tooltip>
+										<TooltipTrigger
+											render={
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													className="h-7 w-7 text-muted-foreground"
+													onClick={handleOpenSearch}
+													aria-label="Search revisions"
+												>
+													<SearchIcon className="size-4" />
+												</Button>
+											}
+										/>
+										<TooltipContent side="bottom">Search revisions (/)</TooltipContent>
+									</Tooltip>
+									<Tooltip>
+										<TooltipTrigger
+											render={
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													className="h-7 w-7 text-muted-foreground"
+													onClick={handleSync}
+													disabled={isSyncing || !activeProject}
+													aria-label="Sync repository"
+												>
+													<RefreshCwIcon
+														className={`size-4 ${isSyncing ? "animate-spin" : ""}`}
+													/>
+												</Button>
+											}
+										/>
+										<TooltipContent side="bottom">Sync repository</TooltipContent>
+									</Tooltip>
+								</div>
+								<div className="flex-1 min-h-0 relative">
 									<Profiler id="RevisionGraph" onRender={onRenderCallback}>
 										<RevisionGraph
 											ref={revisionGraphRef}
@@ -820,38 +772,33 @@ function AppShellWithProject() {
 											diffPanelRef={diffPanelRef}
 										/>
 									</Profiler>
-								</section>
-							</ResizablePanel>
-							<ResizableHandle
-								withHandle
-								orientation={isNarrowScreen ? "vertical" : "horizontal"}
-							/>
-							<ResizablePanel
-								id="app-shell-diff"
-								defaultSize={isNarrowScreen ? "60%" : `${100 - sidebarWidth}%`}
-								minSize="30%"
-							>
-								<aside className="h-full" aria-label="Diff viewer">
-									<Profiler id="DiffPanel" onRender={onRenderCallback}>
-										<PrerenderedDiffPanel
-											ref={diffPanelRef}
-											repoPath={activeProject?.path ?? null}
-											revisions={orderedRevisions}
-											selectedChangeId={debouncedChangeId}
-											revisionsPanelRef={revisionsPanelRef}
-											onDescribe={handleDescribe}
-										/>
-									</Profiler>
-								</aside>
-							</ResizablePanel>
-						</ResizablePanelGroup>
-					)}
+								</div>
+							</section>
+						</ResizablePanel>
+						<ResizableHandle
+							withHandle
+							orientation={isNarrowScreen ? "vertical" : "horizontal"}
+						/>
+						<ResizablePanel
+							id="app-shell-diff"
+							defaultSize={isNarrowScreen ? "60%" : `${100 - sidebarWidth}%`}
+							minSize="30%"
+						>
+							<aside className="h-full" aria-label="Diff viewer">
+								<Profiler id="DiffPanel" onRender={onRenderCallback}>
+									<PrerenderedDiffPanel
+										ref={diffPanelRef}
+										repoPath={activeProject?.path ?? null}
+										revisions={orderedRevisions}
+										selectedChangeId={debouncedChangeId}
+										revisionsPanelRef={revisionsPanelRef}
+										onDescribe={handleDescribe}
+									/>
+								</Profiler>
+							</aside>
+						</ResizablePanel>
+					</ResizablePanelGroup>
 				</div>
-				<StatusBar
-					branch={closestBookmark}
-					isConnected={!!activeProject}
-					hasConflict={workingCopyStatus?.has_conflict ?? false}
-				/>
 			</div>
 		</>
 	);

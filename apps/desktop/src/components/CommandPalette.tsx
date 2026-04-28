@@ -1,4 +1,13 @@
-import { Folder, History, Settings, SlidersHorizontal, type LucideIcon } from "lucide-react";
+import {
+	Folder,
+	History,
+	Laptop,
+	Moon,
+	Settings,
+	SlidersHorizontal,
+	Sun,
+	type LucideIcon,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import {
 	CommandDialog,
@@ -10,6 +19,7 @@ import {
 	CommandShortcut,
 } from "@/components/ui/command";
 import { useKeyboardShortcut } from "@/hooks/useKeyboard";
+import { useTheme } from "@/hooks/useTheme";
 
 interface CommandPaletteProps {
 	onOpenRepo: () => void;
@@ -27,7 +37,7 @@ interface PaletteAction {
 	onSelect: () => void;
 	disabled?: boolean;
 	shortcut?: string;
-	group: "repository" | "tools" | "app";
+	group: "repository" | "tools" | "appearance" | "app";
 }
 
 export function CommandPalette({
@@ -38,6 +48,7 @@ export function CommandPalette({
 	onOpenOperationsLog,
 }: CommandPaletteProps) {
 	const [open, setOpen] = useState(false);
+	const { theme, setTheme } = useTheme();
 
 	useKeyboardShortcut({
 		key: "k",
@@ -91,11 +102,50 @@ export function CommandPalette({
 			});
 		}
 
+		baseActions.push(
+			{
+				id: "theme-light",
+				label: "Theme: Light",
+				keywords: ["theme", "appearance", "light", "color"],
+				icon: Sun,
+				onSelect: () => setTheme("light"),
+				disabled: theme === "light",
+				group: "appearance",
+			},
+			{
+				id: "theme-dark",
+				label: "Theme: Dark",
+				keywords: ["theme", "appearance", "dark", "color"],
+				icon: Moon,
+				onSelect: () => setTheme("dark"),
+				disabled: theme === "dark",
+				group: "appearance",
+			},
+			{
+				id: "theme-system",
+				label: "Theme: System",
+				keywords: ["theme", "appearance", "system", "auto", "color"],
+				icon: Laptop,
+				onSelect: () => setTheme("system"),
+				disabled: theme === "system",
+				group: "appearance",
+			},
+		);
+
 		return baseActions;
-	}, [canOpenOperationsLog, onOpenOperationsLog, onOpenProjects, onOpenRepo, onOpenSettings]);
+	}, [
+		canOpenOperationsLog,
+		onOpenOperationsLog,
+		onOpenProjects,
+		onOpenRepo,
+		onOpenSettings,
+		setTheme,
+		theme,
+	]);
 
 	const repoActions = actions.filter((a) => a.group === "repository");
 	const toolsActions = actions.filter((a) => a.group === "tools");
+	const appearanceActions = actions.filter((a) => a.group === "appearance");
 	const appActions = actions.filter((a) => a.group === "app");
 
 	return (
@@ -122,6 +172,22 @@ export function CommandPalette({
 				{toolsActions.length > 0 && (
 					<CommandGroup heading="Tools">
 						{toolsActions.map((action) => (
+							<CommandItem
+								key={action.id}
+								onSelect={() => select(action.onSelect)}
+								keywords={action.keywords}
+								disabled={action.disabled}
+							>
+								<action.icon className="mr-2 h-4 w-4" />
+								<span>{action.label}</span>
+								{action.shortcut && <CommandShortcut>{action.shortcut}</CommandShortcut>}
+							</CommandItem>
+						))}
+					</CommandGroup>
+				)}
+				{appearanceActions.length > 0 && (
+					<CommandGroup heading="Appearance">
+						{appearanceActions.map((action) => (
 							<CommandItem
 								key={action.id}
 								onSelect={() => select(action.onSelect)}

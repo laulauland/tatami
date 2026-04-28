@@ -84,7 +84,6 @@ type MockAppLayout = {
 	active_project_id: string | null;
 	selected_change_id: string | null;
 	sidebar_width: number;
-	view_mode: 1 | 2;
 };
 
 let mockProjects: Repository[] = [
@@ -108,7 +107,6 @@ const mockLayout: MockAppLayout = {
 	active_project_id: mockProjects[0]?.id ?? null,
 	selected_change_id: null,
 	sidebar_width: 25,
-	view_mode: 1,
 };
 
 // Complex mock revision graph representing realistic development workflow
@@ -952,9 +950,6 @@ const handlers: Record<string, MockHandler> = {
 		}
 		if (typeof updates.sidebar_width === "number" && updates.sidebar_width !== 0) {
 			mockLayout.sidebar_width = Math.max(15, Math.min(70, Math.round(updates.sidebar_width)));
-		}
-		if (typeof updates.view_mode === "number") {
-			mockLayout.view_mode = updates.view_mode === 2 ? 2 : 1;
 		}
 		return undefined;
 	},

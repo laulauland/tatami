@@ -1,4 +1,5 @@
-# FP CLI Configuration
-
 project_id = "proj_01KEEPF3D0PK78G737MFXHGEKM"
 prefix = "TAT"
+
+[extensions.labels]
+enabled = false

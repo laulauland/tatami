@@ -41,3 +41,33 @@ export type Revision = typeof Revision.Type;
 
 export const Revisions = Schema.Array(Revision);
 export type Revisions = typeof Revisions.Type;
+
+export const ChangedFileStatus = Schema.Literal("modified", "added", "deleted");
+export type ChangedFileStatus = typeof ChangedFileStatus.Type;
+
+export const ChangedFile = Schema.Struct({
+	path: Schema.String,
+	status: ChangedFileStatus,
+});
+export type ChangedFile = typeof ChangedFile.Type;
+
+export const ChangedFiles = Schema.Array(ChangedFile);
+export type ChangedFiles = typeof ChangedFiles.Type;
+
+export const RevisionDiff = Schema.Struct({
+	change_id: Schema.String,
+	diff: Schema.String,
+});
+export type RevisionDiff = typeof RevisionDiff.Type;
+
+export const RevisionDiffs = Schema.Array(RevisionDiff);
+export type RevisionDiffs = typeof RevisionDiffs.Type;
+
+export const RevisionChanges = Schema.Struct({
+	change_id: Schema.String,
+	files: Schema.Array(ChangedFile),
+});
+export type RevisionChanges = typeof RevisionChanges.Type;
+
+export const RevisionChangesBatch = Schema.Array(RevisionChanges);
+export type RevisionChangesBatch = typeof RevisionChangesBatch.Type;

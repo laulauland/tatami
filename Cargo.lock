@@ -5486,9 +5486,14 @@ dependencies = [
 name = "tatami-jj-native"
 version = "0.1.0"
 dependencies = [
+ "futures",
+ "jj-lib",
  "napi",
  "napi-build",
  "napi-derive",
+ "pollster",
+ "rayon",
+ "serde",
  "serde_json",
  "tatami-desktop",
 ]

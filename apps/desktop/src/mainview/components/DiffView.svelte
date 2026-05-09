@@ -15,7 +15,7 @@
 	let { patch, displayMode = "unified", large = false }: Props = $props();
 
 	let containerElement: HTMLDivElement;
-	let renderStatus = $state("Waiting to render fixture diff…");
+	let renderStatus = $state("Waiting to render diff…");
 	let workerStatus = $state("Worker pool not initialized");
 
 	const createWorkerManager = (): {
@@ -58,9 +58,7 @@
 	onMount(() => {
 		const { workerManager, unsubscribe } = createWorkerManager();
 		const parsedPatch = processPatch(patch);
-		const firstFile = parsedPatch.files[0];
-
-		if (!firstFile) {
+		if (parsedPatch.files.length === 0) {
 			renderStatus = "Patch parser returned no files.";
 			return () => {
 				unsubscribe?.();
@@ -88,16 +86,20 @@
 			`,
 		};
 
-		const fileDiff = new FileDiff(options, workerManager, true);
+		const fileDiffs: FileDiff[] = [];
 		const startedAt = performance.now();
-		fileDiff.render({
-			fileDiff: firstFile,
-			containerWrapper: containerElement,
-		});
+		for (const parsedFile of parsedPatch.files) {
+			const fileDiff = new FileDiff(options, workerManager, true);
+			fileDiff.render({
+				fileDiff: parsedFile,
+				containerWrapper: containerElement,
+			});
+			fileDiffs.push(fileDiff);
+		}
 		const elapsedMs = Math.round(performance.now() - startedAt);
-		renderStatus = `Rendered ${firstFile.name} (${displayMode}, ${large ? "large" : "moderate"} fixture) in ${elapsedMs}ms`;
-		console.info("@pierre/diffs fixture rendered", {
-			fileName: firstFile.name,
+		renderStatus = `Rendered ${parsedPatch.files.length} file${parsedPatch.files.length === 1 ? "" : "s"} (${displayMode}) in ${elapsedMs}ms`;
+		console.info("@pierre/diffs rendered", {
+			fileCount: parsedPatch.files.length,
 			displayMode,
 			fixture: large ? "large" : "moderate",
 			elapsedMs,
@@ -106,7 +108,7 @@
 
 		return () => {
 			unsubscribe?.();
-			fileDiff.cleanUp();
+			for (const fileDiff of fileDiffs) fileDiff.cleanUp();
 		};
 	});
 </script>
@@ -116,7 +118,7 @@
 		<span>{renderStatus}</span>
 		<span>{workerStatus}</span>
 	</div>
-	<div bind:this={containerElement} class="diff-container" aria-label="Fixture text diff"></div>
+	<div bind:this={containerElement} class="diff-container" aria-label="Text diff"></div>
 </div>
 
 <style>

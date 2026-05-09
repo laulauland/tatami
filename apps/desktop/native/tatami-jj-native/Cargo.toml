@@ -10,7 +10,12 @@ crate-type = ["cdylib"]
 tatami_desktop_lib = { package = "tatami-desktop", path = "../../src-tauri" }
 napi = { version = "3", features = ["serde-json"] }
 napi-derive = "3"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+futures = "0.3.31"
+jj-lib = "0.35.0"
+pollster = "0.4.0"
+rayon = "1.11.0"
 
 [build-dependencies]
 napi-build = "2"

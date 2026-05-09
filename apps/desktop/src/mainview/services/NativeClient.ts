@@ -1,8 +1,11 @@
 import { Context, Data, Effect, Layer } from "effect";
 import type {
 	AppLayout,
+	ChangedFile,
 	GetRevisionsParams,
 	Project,
+	RevisionChanges,
+	RevisionDiff,
 	RevisionStub,
 	UpsertProjectParams,
 } from "../../../src-electrobun/shared/rpc.ts";
@@ -11,6 +14,10 @@ import { appRpc } from "../rpc.ts";
 export class NativeClientError extends Data.TaggedError("NativeClientError")<{
 	readonly operation:
 		| "getRevisions"
+		| "getRevisionChanges"
+		| "getRevisionDiff"
+		| "getChangesBatch"
+		| "getDiffsBatch"
 		| "getProjects"
 		| "upsertProject"
 		| "removeProject"
@@ -26,6 +33,22 @@ export class NativeClient extends Context.Tag("tatami/NativeClient")<
 		readonly getRevisions: (
 			params: GetRevisionsParams,
 		) => Effect.Effect<RevisionStub[], NativeClientError>;
+		readonly getRevisionChanges: (params: {
+			repoPath: string;
+			changeId: string;
+		}) => Effect.Effect<ChangedFile[], NativeClientError>;
+		readonly getRevisionDiff: (params: {
+			repoPath: string;
+			changeId: string;
+		}) => Effect.Effect<string, NativeClientError>;
+		readonly getChangesBatch: (params: {
+			repoPath: string;
+			changeIds: string[];
+		}) => Effect.Effect<RevisionChanges[], NativeClientError>;
+		readonly getDiffsBatch: (params: {
+			repoPath: string;
+			changeIds: string[];
+		}) => Effect.Effect<RevisionDiff[], NativeClientError>;
 		readonly getProjects: () => Effect.Effect<Project[], NativeClientError>;
 		readonly upsertProject: (
 			params: UpsertProjectParams,
@@ -43,6 +66,26 @@ export class NativeClient extends Context.Tag("tatami/NativeClient")<
 				Effect.tryPromise({
 					try: () => appRpc.request.getRevisions(params),
 					catch: (cause) => new NativeClientError({ operation: "getRevisions", cause }),
+				}),
+			getRevisionChanges: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.getRevisionChanges(params),
+					catch: (cause) => new NativeClientError({ operation: "getRevisionChanges", cause }),
+				}),
+			getRevisionDiff: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.getRevisionDiff(params),
+					catch: (cause) => new NativeClientError({ operation: "getRevisionDiff", cause }),
+				}),
+			getChangesBatch: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.getChangesBatch(params),
+					catch: (cause) => new NativeClientError({ operation: "getChangesBatch", cause }),
+				}),
+			getDiffsBatch: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.getDiffsBatch(params),
+					catch: (cause) => new NativeClientError({ operation: "getDiffsBatch", cause }),
 				}),
 			getProjects: () =>
 				Effect.tryPromise({

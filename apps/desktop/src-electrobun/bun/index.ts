@@ -3,8 +3,11 @@ import { Effect } from "effect";
 import type {
 	AppLayout,
 	AppRPC,
+	ChangedFile,
 	GetRevisionsParams,
 	Project,
+	RevisionChanges,
+	RevisionDiff,
 	RevisionStub,
 	UpsertProjectParams,
 } from "../shared/rpc.ts";
@@ -71,6 +74,42 @@ async function getRevisions(params: GetRevisionsParams): Promise<RevisionStub[]>
 	}
 }
 
+async function getRevisionChanges(params: { repoPath: string; changeId: string }): Promise<ChangedFile[]> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.getRevisionChanges(params);
+		}),
+	);
+}
+
+async function getRevisionDiff(params: { repoPath: string; changeId: string }): Promise<string> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.getRevisionDiff(params);
+		}),
+	);
+}
+
+async function getChangesBatch(params: { repoPath: string; changeIds: string[] }): Promise<RevisionChanges[]> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.getChangesBatch(params);
+		}),
+	);
+}
+
+async function getDiffsBatch(params: { repoPath: string; changeIds: string[] }): Promise<RevisionDiff[]> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.getDiffsBatch(params);
+		}),
+	);
+}
+
 async function getProjects(): Promise<Project[]> {
 	return BackendRuntime.runPromise(
 		Effect.gen(function* () {
@@ -130,6 +169,10 @@ const appRpc = BrowserView.defineRPC<AppRPC>({
 	handlers: {
 		requests: {
 			getRevisions,
+			getRevisionChanges,
+			getRevisionDiff,
+			getChangesBatch,
+			getDiffsBatch,
 			getProjects,
 			upsertProject,
 			removeProject,

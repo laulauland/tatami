@@ -9,6 +9,10 @@ export type NativeAddon = {
 		revset?: string | null,
 		preset?: string | null,
 	) => string;
+	getRevisionChangesJson: (repoPath: string, changeId: string) => string;
+	getRevisionDiffJson: (repoPath: string, changeId: string) => string;
+	getChangesBatchJson: (repoPath: string, changeIds: string[]) => string;
+	getDiffsBatchJson: (repoPath: string, changeIds: string[]) => string;
 };
 
 const require = createRequire(import.meta.url);
@@ -86,8 +90,17 @@ export function loadNativeAddon(): NativeAddon {
 	try {
 		const addon = require(loadPath) as NativeAddon;
 
-		if (typeof addon.getRevisionsJson !== "function") {
-			throw new Error("Native addon is missing getRevisionsJson");
+		const expectedExports = [
+			"getRevisionsJson",
+			"getRevisionChangesJson",
+			"getRevisionDiffJson",
+			"getChangesBatchJson",
+			"getDiffsBatchJson",
+		] as const;
+		for (const exportName of expectedExports) {
+			if (typeof addon[exportName] !== "function") {
+				throw new Error(`Native addon is missing ${exportName}`);
+			}
 		}
 
 		console.log(`Loaded tatami-jj-native addon from ${loadPath}`);

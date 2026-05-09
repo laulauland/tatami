@@ -36,6 +36,23 @@ export type GetRevisionsParams = {
 	limit?: number;
 };
 
+export type ChangedFileStatus = "modified" | "added" | "deleted";
+
+export type ChangedFile = {
+	path: string;
+	status: ChangedFileStatus;
+};
+
+export type RevisionDiff = {
+	change_id: string;
+	diff: string;
+};
+
+export type RevisionChanges = {
+	change_id: string;
+	files: ChangedFile[];
+};
+
 export type Project = {
 	id: string;
 	path: string;
@@ -62,6 +79,22 @@ export type AppRPC = {
 			getRevisions: {
 				params: GetRevisionsParams;
 				response: RevisionStub[];
+			};
+			getRevisionChanges: {
+				params: { repoPath: string; changeId: string };
+				response: ChangedFile[];
+			};
+			getRevisionDiff: {
+				params: { repoPath: string; changeId: string };
+				response: string;
+			};
+			getChangesBatch: {
+				params: { repoPath: string; changeIds: string[] };
+				response: RevisionChanges[];
+			};
+			getDiffsBatch: {
+				params: { repoPath: string; changeIds: string[] };
+				response: RevisionDiff[];
 			};
 			getProjects: {
 				params: {};

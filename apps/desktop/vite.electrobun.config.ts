@@ -10,6 +10,9 @@ export default defineConfig({
 		outDir: "../../dist-electrobun",
 		emptyOutDir: true,
 	},
+	worker: {
+		format: "es",
+	},
 	server: {
 		port: 5174,
 		strictPort: true,

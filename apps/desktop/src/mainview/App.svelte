@@ -2,8 +2,10 @@
 	import { useLiveQuery } from "@tanstack/svelte-db";
 	import { Effect } from "effect";
 	import { onMount } from "svelte";
+	import DiffView from "./components/DiffView.svelte";
 	import FileTreeView from "./components/FileTreeView.svelte";
 	import { populateRevisions, revisionsCollection } from "./data/revisions.ts";
+	import { FIXTURE_PATCH, FIXTURE_PATCH_LARGE } from "./fixtures/diff-fixture.ts";
 	import { FrontendRuntime } from "./runtime.ts";
 	import { NativeClient } from "./services/NativeClient.ts";
 
@@ -21,9 +23,15 @@
 		"vite.electrobun.config.ts",
 	] as const;
 
+	type DiffDisplayMode = "unified" | "split";
+
 	let clickCount = $state(0);
+	let currentDiffDisplayMode = $state<DiffDisplayMode>("unified");
+	let isLargeDiffFixture = $state(false);
 	let errorMessage = $state<string | null>(null);
 	let selectedTreePaths = $state<readonly string[]>([]);
+
+	const currentDiffPatch = $derived(isLargeDiffFixture ? FIXTURE_PATCH_LARGE : FIXTURE_PATCH);
 
 	const revisionsQuery = useLiveQuery((query) =>
 		query.from({ revisions: revisionsCollection }).select(({ revisions }) => revisions),
@@ -110,6 +118,48 @@
 		{/if}
 	</section>
 
+	<section class="diff-panel" aria-labelledby="diff-title">
+		<div class="panel-heading">
+			<div>
+				<p class="eyebrow">@pierre/diffs fixture</p>
+				<h2 id="diff-title">Diff view</h2>
+			</div>
+			<span class="status">{currentDiffDisplayMode} · {isLargeDiffFixture ? "large" : "moderate"}</span>
+		</div>
+
+		<div class="diff-actions" aria-label="Diff fixture controls">
+			<button
+				type="button"
+				class:secondary={currentDiffDisplayMode !== "unified"}
+				onclick={() => currentDiffDisplayMode = "unified"}
+			>
+				Unified
+			</button>
+			<button
+				type="button"
+				class:secondary={currentDiffDisplayMode !== "split"}
+				onclick={() => currentDiffDisplayMode = "split"}
+			>
+				Split
+			</button>
+			<button
+				type="button"
+				class="secondary"
+				onclick={() => isLargeDiffFixture = !isLargeDiffFixture}
+			>
+				Use {isLargeDiffFixture ? "moderate" : "large"} fixture
+			</button>
+		</div>
+
+		{#key `${currentDiffDisplayMode}:${isLargeDiffFixture}`}
+			<DiffView
+				patch={currentDiffPatch}
+				displayMode={currentDiffDisplayMode}
+				large={isLargeDiffFixture}
+			/>
+		{/key}
+	</section>
+
 	<section class="tree-panel" aria-labelledby="tree-title">
 		<div class="panel-heading">
 			<div>
@@ -192,6 +242,7 @@
 	.hero > div,
 	.rune-card,
 	.rpc-panel,
+	.diff-panel,
 	.tree-panel {
 		border: 1px solid rgba(255, 255, 255, 0.1);
 		border-radius: 24px;
@@ -249,6 +300,7 @@
 	}
 
 	.rpc-panel,
+	.diff-panel,
 	.tree-panel {
 		margin-top: 24px;
 	}
@@ -262,9 +314,17 @@
 	}
 
 	.rpc-panel h2,
+	.diff-panel h2,
 	.tree-panel h2 {
 		font-size: 2rem;
 		letter-spacing: -0.04em;
+	}
+
+	.diff-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+		margin-bottom: 16px;
 	}
 
 	.muted,

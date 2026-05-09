@@ -155,7 +155,7 @@
 		display: grid;
 		place-items: center;
 		padding: 24px;
-		background: rgba(0, 0, 0, 0.58);
+		background: color-mix(in oklab, var(--background) 60%, rgb(0 0 0 / 50%));
 	}
 
 	.operations-dialog {
@@ -163,11 +163,11 @@
 		max-height: min(680px, 90vh);
 		display: flex;
 		flex-direction: column;
-		border: 1px solid rgba(255, 255, 255, 0.14);
-		border-radius: 22px;
-		background: #151720;
-		box-shadow: 0 32px 90px rgba(0, 0, 0, 0.48);
-		color: #f6f2ea;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--popover);
+		color: var(--popover-foreground);
+		box-shadow: var(--shadow-md);
 	}
 
 	.dialog-header,
@@ -175,20 +175,20 @@
 	.dialog-actions {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: 8px;
 	}
 
 	.dialog-header {
 		justify-content: space-between;
-		padding: 20px;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+		padding: 14px 16px;
+		border-bottom: 1px solid var(--border);
 	}
 
 	.eyebrow,
 	.meta {
 		margin: 0;
-		color: #b8b3a7;
-		font-size: 0.78rem;
+		color: var(--muted-foreground);
+		font-size: 0.75rem;
 	}
 
 	.eyebrow {
@@ -203,9 +203,11 @@
 		margin: 0;
 	}
 
+	h3 { font-size: 1rem; font-weight: 600; }
+
 	.operation-list {
 		overflow: auto;
-		padding: 10px;
+		padding: 6px;
 	}
 
 	ul {
@@ -219,12 +221,15 @@
 		align-items: flex-start;
 		justify-content: space-between;
 		gap: 16px;
-		padding: 14px;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+		padding: 10px 12px;
+		border-bottom: 1px solid var(--border);
 	}
 
+	li:last-child { border-bottom: 0; }
+
 	.description {
-		font-weight: 700;
+		font-size: 0.875rem;
+		font-weight: 600;
 		line-height: 1.4;
 	}
 
@@ -233,20 +238,18 @@
 	}
 
 	button {
-		border: 0;
-		border-radius: 12px;
-		padding: 8px 12px;
-		background: #ece5d8;
-		color: #15151d;
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 2px);
+		padding: 6px 10px;
+		background: var(--card);
+		color: var(--card-foreground);
 		font: inherit;
-		font-weight: 700;
+		font-size: 0.85rem;
 		cursor: pointer;
 	}
 
-	button.secondary {
-		background: rgba(255, 255, 255, 0.1);
-		color: #f6f2ea;
-	}
+	button.secondary { background: transparent; }
+	button:hover:not(:disabled) { background: var(--muted); }
 
 	button:disabled {
 		opacity: 0.55;
@@ -254,17 +257,20 @@
 	}
 
 	code {
-		color: #c8c0b2;
+		color: var(--muted-foreground);
+		font-family: var(--font-mono);
 		font-size: 0.75rem;
 	}
 
 	.muted {
 		padding: 14px;
-		color: #c8c0b2;
+		color: var(--muted-foreground);
+		font-size: 0.85rem;
 	}
 
 	.error {
 		padding: 14px;
-		color: #ffb4a8;
+		color: var(--destructive);
+		font-size: 0.85rem;
 	}
 </style>

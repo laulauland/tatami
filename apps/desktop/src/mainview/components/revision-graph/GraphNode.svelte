@@ -18,43 +18,52 @@
 	const x = $derived(laneToX(lane));
 	const y = ROW_HEIGHT / 2;
 	const color = $derived(laneColor(lane));
+	const selectedRingRadius = $derived(isWorkingCopy ? NODE_RADIUS + 6 : NODE_RADIUS + 4);
 </script>
 
-<g class:selected={isSelected} class:conflict={hasConflict}>
-	{#if isImmutable}
+<g>
+	{#if isSelected}
+		<circle cx={x} cy={y} r={selectedRingRadius} fill={color} fill-opacity="0.3" />
+	{/if}
+	{#if hasConflict}
+		<circle
+			cx={x}
+			cy={y}
+			r={NODE_RADIUS + 3}
+			stroke="var(--destructive)"
+			stroke-width="2"
+			stroke-dasharray="3 2"
+			fill="none"
+		/>
+	{/if}
+	{#if isWorkingCopy}
+		<circle cx={x} cy={y} r={NODE_RADIUS + 3} fill={color} fill-opacity="0.2" />
+		<text
+			x={x}
+			y={y}
+			text-anchor="middle"
+			dominant-baseline="central"
+			fill={color}
+			font-weight="bold"
+			font-size="12">@</text
+		>
+	{:else if isImmutable}
 		<rect
 			x={x - NODE_RADIUS}
 			y={y - NODE_RADIUS}
 			width={NODE_RADIUS * 2}
 			height={NODE_RADIUS * 2}
 			transform={`rotate(45 ${x} ${y})`}
-			fill={isWorkingCopy ? color : "#101116"}
-			stroke={color}
-			stroke-width={isSelected ? 3 : 2}
+			fill={color}
 		/>
 	{:else}
-		<circle
-			cx={x}
-			cy={y}
-			r={isSelected ? NODE_RADIUS + 1 : NODE_RADIUS}
-			fill={isWorkingCopy ? color : "#101116"}
-			stroke={hasConflict ? "#ffb4a8" : color}
-			stroke-width={isSelected ? 3 : 2}
-		/>
-	{/if}
-	{#if isWorkingCopy}
-		<text x={x} y={y - 10} text-anchor="middle" aria-hidden="true">@</text>
+		<circle cx={x} cy={y} r={NODE_RADIUS} fill={color} />
 	{/if}
 </g>
 
 <style>
 	text {
-		fill: #ece5d8;
-		font-size: 11px;
-		font-weight: 800;
-	}
-
-	.selected {
-		filter: drop-shadow(0 0 6px rgba(236, 229, 216, 0.45));
+		pointer-events: none;
+		user-select: none;
 	}
 </style>

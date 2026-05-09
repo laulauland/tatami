@@ -105,13 +105,69 @@
 {/if}
 
 <style>
-	.modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: start center; padding-top: 12vh; background: rgba(0,0,0,.55); }
-	.dialog { width: min(640px, calc(100vw - 32px)); border: 1px solid rgba(255,255,255,.14); border-radius: 18px; background: #15161f; color: #f6f2ea; box-shadow: 0 30px 120px rgba(0,0,0,.55); overflow: hidden; }
-	.dialog-input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid rgba(255,255,255,.1); padding: 16px; background: rgba(255,255,255,.06); color: inherit; font: inherit; outline: none; }
-	.action-list { max-height: 420px; overflow: auto; padding: 8px; }
-	.group-heading, .empty { margin: 8px 8px 6px; color: #b8b3a7; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
-	.action { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; border-radius: 10px; background: transparent; color: inherit; text-align: left; font-weight: 600; }
-	.action.selected, .action:hover { background: rgba(119,114,255,.22); }
-	.action:disabled { opacity: .45; cursor: not-allowed; }
-	kbd { border: 1px solid rgba(255,255,255,.16); border-radius: 6px; padding: 2px 6px; color: #c8c0b2; font-size: .75rem; }
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: grid;
+		place-items: start center;
+		padding-top: 12vh;
+		background: color-mix(in oklab, var(--background) 60%, rgb(0 0 0 / 50%));
+	}
+	.dialog {
+		width: min(640px, calc(100vw - 32px));
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--popover);
+		color: var(--popover-foreground);
+		box-shadow: var(--shadow-md);
+		overflow: hidden;
+	}
+	.dialog-input {
+		width: 100%;
+		box-sizing: border-box;
+		border: 0;
+		border-bottom: 1px solid var(--border);
+		padding: 12px 14px;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		outline: none;
+	}
+	.action-list { max-height: 420px; overflow: auto; padding: 6px; }
+	.group-heading, .empty {
+		margin: 8px 8px 6px;
+		color: var(--muted-foreground);
+		font-size: 0.72rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+	.action {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 8px 10px;
+		border: 0;
+		border-radius: calc(var(--radius) - 4px);
+		background: transparent;
+		color: inherit;
+		text-align: left;
+		font-size: 0.875rem;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.action.selected, .action:hover:not(:disabled) {
+		background: color-mix(in oklab, var(--accent) 18%, transparent);
+	}
+	.action:disabled { opacity: 0.45; cursor: not-allowed; }
+	kbd {
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 4px);
+		padding: 2px 6px;
+		background: var(--muted);
+		color: var(--muted-foreground);
+		font-size: 0.72rem;
+	}
 </style>

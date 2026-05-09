@@ -1,120 +1,68 @@
 <script lang="ts">
-	import type { Project } from "../../../src-electrobun/shared/rpc.ts";
-
 	type Props = {
-		projects: readonly Project[];
-		activeProjectId: string | null;
+		projectName: string | null;
 		busy?: boolean;
-		onAdd: () => void | Promise<void>;
-		onSelect: (project: Project) => void | Promise<void>;
-		onRemove: (project: Project) => void | Promise<void>;
+		onOpen: () => void;
 	};
 
-	const { projects, activeProjectId, busy = false, onAdd, onSelect, onRemove }: Props = $props();
-
-	const activeProject = $derived(projects.find((project) => project.id === activeProjectId) ?? null);
+	const { projectName, busy = false, onOpen }: Props = $props();
 </script>
 
-<div class="project-picker" aria-label="Repository picker">
-	<label>
-		<span>Repository</span>
-		<select
-			value={activeProjectId ?? ""}
-			disabled={busy || projects.length === 0}
-			onchange={(event) => {
-				const selectedId = event.currentTarget.value;
-				const selectedProject = projects.find((project) => project.id === selectedId);
-				if (selectedProject) void onSelect(selectedProject);
-			}}
-		>
-			<option value="" disabled>{projects.length === 0 ? "No repositories" : "Select repository"}</option>
-			{#each projects as project}
-				<option value={project.id}>{project.name}</option>
-			{/each}
-		</select>
-	</label>
-
-	{#if activeProject}
-		<p title={activeProject.path}>{activeProject.path}</p>
-	{/if}
-
-	<div class="actions">
-		<button type="button" disabled={busy} onclick={() => void onAdd()}>Add repository</button>
-		{#if activeProject}
-			<button
-				type="button"
-				class="secondary"
-				disabled={busy}
-				title={`Remove ${activeProject.name}`}
-				onclick={() => void onRemove(activeProject)}
-			>
-				Remove
-			</button>
-		{/if}
-	</div>
-</div>
+<button
+	type="button"
+	class="trigger"
+	disabled={busy}
+	aria-label="Open repository"
+	title={projectName ?? "Open repository"}
+	onclick={onOpen}
+>
+	<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+		<path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />
+	</svg>
+	<span>{projectName ?? "Open Repository"}</span>
+</button>
 
 <style>
-	.project-picker {
-		display: grid;
-		min-width: min(420px, 100%);
-		gap: 8px;
-		justify-items: end;
-	}
-
-	label,
-	.actions {
-		display: flex;
+	.trigger {
+		flex: 1;
+		min-width: 0;
+		display: inline-flex;
 		align-items: center;
-		gap: 10px;
-	}
-
-	span {
-		color: #b8b3a7;
-		font-size: 0.78rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-
-	select {
-		max-width: 220px;
-		border: 1px solid rgba(255, 255, 255, 0.14);
-		border-radius: 12px;
-		padding: 9px 12px;
-		background: rgba(255, 255, 255, 0.08);
-		color: #f6f2ea;
-		font: inherit;
-	}
-
-	p {
-		max-width: 420px;
-		margin: 0;
-		overflow: hidden;
-		color: #c8c0b2;
-		font-size: 0.82rem;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-
-	button {
+		gap: 6px;
+		height: 28px;
+		padding: 0 8px;
 		border: 0;
-		border-radius: 12px;
-		padding: 9px 12px;
-		background: #ece5d8;
-		color: #15151d;
-		font: inherit;
-		font-weight: 700;
+		border-radius: calc(var(--radius) - 2px);
+		background: transparent;
+		color: var(--foreground);
+		font-size: 0.875rem;
+		font-weight: 500;
+		text-align: left;
 		cursor: pointer;
+		transition: background 120ms ease;
 	}
 
-	button.secondary {
-		background: rgba(255, 255, 255, 0.1);
-		color: #f6f2ea;
+	.trigger:hover:not(:disabled),
+	.trigger:focus-visible {
+		background: color-mix(in oklab, var(--accent) 14%, transparent);
+		outline: none;
 	}
 
-	button:disabled,
-	select:disabled {
+	.trigger:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	.trigger svg {
+		flex-shrink: 0;
+		color: var(--muted-foreground);
+	}
+
+	.trigger span {
+		flex: 1;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 </style>

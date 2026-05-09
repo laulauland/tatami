@@ -124,30 +124,19 @@
 <style>
 	.diff-view {
 		display: grid;
-		gap: 12px;
+		gap: 8px;
 	}
 
 	.diff-status {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-		color: #c8c0b2;
-		font-size: 0.82rem;
-	}
-
-	.diff-status span {
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		border-radius: 999px;
-		padding: 5px 9px;
-		background: rgba(255, 255, 255, 0.045);
+		display: none;
 	}
 
 	.diff-container {
 		min-height: 360px;
 		max-height: 620px;
 		overflow: auto;
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		border-radius: 16px;
-		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 2px);
+		background: var(--background);
 	}
 </style>

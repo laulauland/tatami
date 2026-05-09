@@ -26,6 +26,9 @@
 	let panelElement = $state<HTMLElement | null>(null);
 
 	const selectedChangeId = $derived(getSelectedRevisionId());
+	const selectedRevision = $derived(
+		selectedChangeId == null ? null : revisions.find((revision) => revision.change_id === selectedChangeId) ?? null,
+	);
 	const filePaths = $derived(files.map((file) => file.path));
 	const selectedFile = $derived(files.find((file) => file.path === selectedFilePath) ?? null);
 	const visiblePatch = $derived(
@@ -155,13 +158,36 @@
 </script>
 
 <section class="diff-panel" aria-labelledby="diff-title" tabindex="0" bind:this={panelElement} onkeydown={handleKeydown}>
-	<div class="panel-heading">
-		<div>
-			<p class="eyebrow">Read-only jj diff</p>
-			<h2 id="diff-title">Changed files</h2>
-		</div>
-		<span class="status">{selectedChangeId ? selectedChangeId.slice(0, 8) : "no revision"}</span>
-	</div>
+	{#if selectedRevision}
+		<header class="revision-header" id="diff-title">
+			<div class="meta-line">
+				<span class="meta-item">
+					<span class="meta-label">Change ID:</span>
+					<strong class="meta-value mono">{selectedRevision.change_id_short}</strong>
+				</span>
+				<span class="meta-item">
+					<span class="meta-label">Commit ID:</span>
+					<span class="meta-value mono">{selectedRevision.commit_id.slice(0, 12)}</span>
+				</span>
+			</div>
+			<div class="meta-line">
+				<span class="meta-label">Author:</span>
+				<span class="meta-value">{selectedRevision.author}</span>
+				<span class="meta-label meta-at">at</span>
+				<span class="meta-value">{selectedRevision.timestamp}</span>
+			</div>
+			{#if selectedRevision.description.trim().length > 0}
+				<pre class="description">{selectedRevision.description}</pre>
+			{/if}
+			{#if selectedRevision.has_conflict}
+				<div class="conflict-callout" role="alert">⚠ This revision has conflicts.</div>
+			{/if}
+		</header>
+	{:else}
+		<header class="revision-header revision-header-empty" id="diff-title">
+			<span class="meta-label">No revision selected</span>
+		</header>
+	{/if}
 
 	{#if activeProject == null}
 		<p class="muted">Add or select a repository to inspect revision diffs.</p>
@@ -171,8 +197,8 @@
 		<p class="error">Diff failed: {errorMessage}</p>
 	{:else}
 		<div class="diff-toolbar" aria-label="Diff display controls">
-			<button type="button" class:secondary={displayMode !== "unified"} onclick={() => displayMode = "unified"}>Unified</button>
-			<button type="button" class:secondary={displayMode !== "split"} onclick={() => displayMode = "split"}>Split</button>
+			<button type="button" class:active={displayMode === "unified"} onclick={() => displayMode = "unified"}>Unified</button>
+			<button type="button" class:active={displayMode === "split"} onclick={() => displayMode = "split"}>Split</button>
 			<span class="muted">{isLoading ? "Loading…" : `${files.length} changed file${files.length === 1 ? "" : "s"}`}</span>
 		</div>
 
@@ -185,20 +211,6 @@
 							onSelectionChange={(paths) => selectedFilePath = paths[0] ?? selectedFilePath}
 						/>
 					{/key}
-					<div class="status-list" aria-label="Changed file statuses">
-						{#each files as file (file.path)}
-							<button
-								type="button"
-								class="file-status"
-								class:selected={file.path === selectedFilePath}
-								data-status={file.status}
-								onclick={() => selectedFilePath = file.path}
-							>
-								<span>{statusLabel(file.status)}</span>
-								{file.path}
-							</button>
-						{/each}
-					</div>
 				{:else if isLoading}
 					<p class="muted">Loading changed files…</p>
 				{:else}
@@ -229,33 +241,100 @@
 
 <style>
 	.diff-panel {
-		margin-top: 0;
-		max-height: 78vh;
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
 		overflow: auto;
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		border-radius: 24px;
-		padding: 28px;
-		background: rgba(19, 20, 29, 0.82);
-		box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+		padding: 0 16px 16px;
+		background: var(--background);
+		color: var(--foreground);
 		outline: none;
 	}
 
 	.diff-panel:focus-visible {
-		box-shadow: 0 0 0 2px rgba(119, 114, 255, 0.45);
+		outline: 2px solid color-mix(in oklab, var(--ring) 60%, transparent);
+		outline-offset: -2px;
 	}
 
-	.panel-heading,
+	.revision-header {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		margin: 0 -16px 12px;
+		padding: 12px 16px;
+		border-bottom: 1px solid var(--border);
+		font-family: var(--font-mono);
+		font-size: 0.78rem;
+		color: var(--foreground);
+	}
+
+	.revision-header-empty {
+		font-family: var(--font-sans);
+		color: var(--muted-foreground);
+	}
+
+	.meta-line {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 16px;
+		align-items: baseline;
+	}
+
+	.meta-item {
+		display: inline-flex;
+		gap: 6px;
+		align-items: baseline;
+	}
+
+	.meta-label {
+		color: var(--muted-foreground);
+	}
+
+	.meta-at {
+		margin-left: 8px;
+	}
+
+	.meta-value {
+		color: var(--foreground);
+		font-weight: 400;
+	}
+
+	.meta-value.mono {
+		font-family: var(--font-mono);
+	}
+
+	strong.meta-value {
+		font-weight: 600;
+	}
+
+	.description {
+		margin: 4px 0 0;
+		padding: 0;
+		font-family: var(--font-sans);
+		font-size: 0.85rem;
+		color: var(--foreground);
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	.conflict-callout {
+		margin-top: 4px;
+		padding: 8px;
+		border: 1px solid color-mix(in oklab, var(--destructive) 30%, transparent);
+		border-radius: calc(var(--radius) - 2px);
+		background: color-mix(in oklab, var(--destructive) 10%, transparent);
+		color: var(--destructive);
+		font-family: var(--font-sans);
+		font-size: 0.8rem;
+	}
+
 	.diff-toolbar {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: 16px;
-		margin-bottom: 16px;
-	}
-
-	.diff-toolbar {
-		justify-content: flex-start;
+		gap: 8px;
 		flex-wrap: wrap;
+		margin-bottom: 12px;
 	}
 
 	.diff-layout {
@@ -269,57 +348,29 @@
 		min-width: 0;
 	}
 
-	.status-list {
-		display: grid;
-		gap: 6px;
-		margin-top: 12px;
-	}
-
-	.file-status {
-		display: grid;
-		grid-template-columns: 24px minmax(0, 1fr);
-		gap: 8px;
-		align-items: center;
-		width: 100%;
-		border-radius: 10px;
-		padding: 7px 8px;
-		background: rgba(255, 255, 255, 0.055);
-		color: #f6f2ea;
-		font-size: 0.82rem;
-		font-weight: 500;
-		text-align: left;
-	}
-
-	.file-status.selected {
-		background: rgba(119, 114, 255, 0.28);
-	}
-
-	.file-status span,
 	.selected-file span {
 		display: inline-grid;
 		place-items: center;
-		border-radius: 6px;
-		padding: 2px 5px;
-		font-size: 0.72rem;
-		font-weight: 800;
+		border-radius: calc(var(--radius) - 4px);
+		padding: 1px 4px;
+		font-size: 0.65rem;
+		font-weight: 700;
+		line-height: 1;
 	}
 
-	[data-status="added"] span,
 	.selected-file span[data-status="added"] {
-		background: rgba(82, 196, 107, 0.22);
-		color: #9af0ad;
+		background: var(--diff-add-bg);
+		color: var(--diff-add-fg);
 	}
 
-	[data-status="deleted"] span,
 	.selected-file span[data-status="deleted"] {
-		background: rgba(255, 99, 99, 0.22);
-		color: #ffb4a8;
+		background: var(--diff-remove-bg);
+		color: var(--diff-remove-fg);
 	}
 
-	[data-status="modified"] span,
 	.selected-file span[data-status="modified"] {
-		background: rgba(255, 204, 102, 0.2);
-		color: #ffe09a;
+		background: var(--diff-hunk-header-bg);
+		color: var(--diff-hunk-header-fg);
 	}
 
 	.selected-file {
@@ -327,64 +378,39 @@
 		gap: 8px;
 		align-items: center;
 		margin: 0 0 10px;
-		color: #d9d1c4;
-		font-size: 0.9rem;
-	}
-
-	button {
-		border: 0;
-		border-radius: 12px;
-		padding: 10px 14px;
-		background: #ece5d8;
-		color: #15151d;
-		font: inherit;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	button.secondary {
-		background: rgba(255, 255, 255, 0.1);
-		color: #f6f2ea;
-	}
-
-	.eyebrow {
-		margin: 0 0 6px;
-		color: #b8b3a7;
-		font-size: 0.78rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-
-	h2,
-	p {
-		margin: 0;
-	}
-
-	h2 {
-		font-size: 2rem;
-		letter-spacing: -0.04em;
-	}
-
-	.status {
-		border: 1px solid rgba(255, 255, 255, 0.14);
-		border-radius: 999px;
-		padding: 7px 12px;
-		color: #d9d1c4;
+		color: var(--muted-foreground);
 		font-size: 0.85rem;
 	}
 
+	button {
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 2px);
+		padding: 4px 10px;
+		background: var(--card);
+		color: var(--card-foreground);
+		font: inherit;
+		font-size: 0.8rem;
+		cursor: pointer;
+	}
+
+	button:hover:not(.active) { background: var(--muted); }
+	button.active {
+		background: var(--accent);
+		color: var(--accent-foreground);
+		border-color: var(--accent);
+	}
+
+	p { margin: 0; }
+
 	.muted,
 	.error {
-		color: #c8c0b2;
+		color: var(--muted-foreground);
+		font-size: 0.85rem;
 	}
 
-	.error {
-		color: #ffb4a8;
-	}
+	.error { color: var(--destructive); }
 
 	@media (max-width: 900px) {
-		.diff-layout {
-			grid-template-columns: 1fr;
-		}
+		.diff-layout { grid-template-columns: 1fr; }
 	}
 </style>

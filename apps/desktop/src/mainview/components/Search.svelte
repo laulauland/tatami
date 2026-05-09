@@ -131,14 +131,68 @@
 {/if}
 
 <style>
-	.modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: start center; padding-top: 12vh; background: rgba(0,0,0,.55); }
-	.dialog { width: min(760px, calc(100vw - 32px)); border: 1px solid rgba(255,255,255,.14); border-radius: 18px; background: #15161f; color: #f6f2ea; box-shadow: 0 30px 120px rgba(0,0,0,.55); overflow: hidden; }
-	.dialog-input { width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid rgba(255,255,255,.1); padding: 16px; background: rgba(255,255,255,.06); color: inherit; font: inherit; outline: none; }
-	.hint, .empty { margin: 0; padding: 12px 16px; color: #c8c0b2; }
-	.result-list { max-height: 460px; overflow: auto; padding: 8px; }
-	.result { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 10px; background: transparent; color: inherit; text-align: left; font-weight: 500; }
-	.result.selected, .result:hover { background: rgba(119,114,255,.22); }
-	.result code { color: #a8c7ff; }
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: grid;
+		place-items: start center;
+		padding-top: 12vh;
+		background: color-mix(in oklab, var(--background) 60%, rgb(0 0 0 / 50%));
+	}
+	.dialog {
+		width: min(760px, calc(100vw - 32px));
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--popover);
+		color: var(--popover-foreground);
+		box-shadow: var(--shadow-md);
+		overflow: hidden;
+	}
+	.dialog-input {
+		width: 100%;
+		box-sizing: border-box;
+		border: 0;
+		border-bottom: 1px solid var(--border);
+		padding: 12px 14px;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		outline: none;
+	}
+	.hint, .empty { margin: 0; padding: 12px 14px; color: var(--muted-foreground); font-size: 0.85rem; }
+	.result-list { max-height: 460px; overflow: auto; padding: 6px; }
+	.result {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 8px 10px;
+		border: 0;
+		border-radius: calc(var(--radius) - 4px);
+		background: transparent;
+		color: inherit;
+		text-align: left;
+		font-size: 0.875rem;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.result.selected, .result:hover {
+		background: color-mix(in oklab, var(--accent) 18%, transparent);
+	}
+	.result code {
+		color: var(--muted-foreground);
+		font-family: var(--font-mono);
+		font-size: 0.78rem;
+	}
 	.result span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.result em { color: #f6d365; font-style: normal; font-size: .8rem; }
+	.result em {
+		color: var(--primary);
+		font-style: normal;
+		font-size: 0.78rem;
+	}
+	.result strong {
+		color: var(--primary);
+		font-weight: 700;
+	}
 </style>

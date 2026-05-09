@@ -18,14 +18,40 @@
 {/if}
 
 <style>
-	.modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(0,0,0,.55); }
-	.dialog { width: min(560px, calc(100vw - 32px)); border: 1px solid rgba(255,255,255,.14); border-radius: 18px; padding: 22px; background: #15161f; color: #f6f2ea; box-shadow: 0 30px 120px rgba(0,0,0,.55); }
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: grid;
+		place-items: center;
+		background: color-mix(in oklab, var(--background) 60%, rgb(0 0 0 / 50%));
+	}
+	.dialog {
+		width: min(560px, calc(100vw - 32px));
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 18px;
+		background: var(--popover);
+		color: var(--popover-foreground);
+		box-shadow: var(--shadow-md);
+	}
 	header, .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-	header { margin-bottom: 18px; }
+	header { margin-bottom: 14px; }
 	h2, h3, p { margin: 0; }
-	h2 { font-size: 1.3rem; }
-	p { margin-top: 6px; color: #c8c0b2; }
-	label { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
-	button { border: 0; border-radius: 12px; padding: 8px 12px; font: inherit; font-weight: 700; cursor: pointer; }
-	button.secondary { background: rgba(255,255,255,.1); color: #f6f2ea; }
+	h2 { font-size: 1.05rem; font-weight: 600; }
+	h3 { font-size: 0.875rem; font-weight: 600; }
+	p { margin-top: 4px; color: var(--muted-foreground); font-size: 0.85rem; }
+	label { display: flex; align-items: center; gap: 8px; white-space: nowrap; font-size: 0.875rem; }
+	button {
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 2px);
+		padding: 6px 10px;
+		background: var(--card);
+		color: var(--card-foreground);
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
+	}
+	button.secondary { background: transparent; }
+	button:hover:not(:disabled) { background: var(--muted); }
 </style>

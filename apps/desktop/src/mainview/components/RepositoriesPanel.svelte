@@ -59,19 +59,72 @@
 {/if}
 
 <style>
-	.modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(0,0,0,.55); }
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: grid;
+		place-items: center;
+		background: color-mix(in oklab, var(--background) 60%, rgb(0 0 0 / 50%));
+	}
 	.modal-backdrop.top { z-index: 60; }
-	.dialog, .confirm { width: min(760px, calc(100vw - 32px)); border: 1px solid rgba(255,255,255,.14); border-radius: 18px; padding: 22px; background: #15161f; color: #f6f2ea; box-shadow: 0 30px 120px rgba(0,0,0,.55); }
+	.dialog, .confirm {
+		width: min(760px, calc(100vw - 32px));
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 18px;
+		background: var(--popover);
+		color: var(--popover-foreground);
+		box-shadow: var(--shadow-md);
+	}
 	.confirm { width: min(420px, calc(100vw - 32px)); }
 	header, header div, .repo-row, .confirm div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-	header { margin-bottom: 18px; }
-	h2, h3, p { margin: 0; }
-	.repo-list { display: grid; gap: 8px; max-height: 440px; overflow: auto; }
-	.repo-row { border: 1px solid rgba(255,255,255,.1); border-radius: 14px; padding: 8px; background: rgba(255,255,255,.04); }
-	.repo-row.active { border-color: rgba(119,114,255,.65); }
-	.repo-main { flex: 1; display: grid; gap: 4px; text-align: left; background: transparent; color: inherit; }
-	.repo-main span, .empty, .confirm p { color: #c8c0b2; font-size: .85rem; }
-	button { border: 0; border-radius: 12px; padding: 8px 12px; font: inherit; font-weight: 700; cursor: pointer; background: #ece5d8; color: #15151d; }
-	button.secondary { background: rgba(255,255,255,.1); color: #f6f2ea; }
-	button.danger { background: #ffb4a8; color: #2b1110; }
+	header { margin-bottom: 14px; }
+	h2 { font-size: 1.05rem; font-weight: 600; margin: 0; }
+	h3 { font-size: 0.95rem; font-weight: 600; margin: 0; }
+	p { margin: 0; }
+	.repo-list { display: grid; gap: 6px; max-height: 440px; overflow: auto; }
+	.repo-row {
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 2px);
+		padding: 8px;
+		background: var(--card);
+	}
+	.repo-row.active {
+		border-color: color-mix(in oklab, var(--ring) 60%, var(--border));
+	}
+	.repo-main {
+		flex: 1;
+		display: grid;
+		gap: 4px;
+		text-align: left;
+		background: transparent;
+		color: inherit;
+		border: 0;
+		padding: 4px 6px;
+		cursor: pointer;
+	}
+	.repo-main strong { font-size: 0.875rem; font-weight: 600; }
+	.repo-main span, .empty, .confirm p { color: var(--muted-foreground); font-size: 0.8rem; }
+	button {
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 2px);
+		padding: 6px 10px;
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
+		background: var(--card);
+		color: var(--card-foreground);
+	}
+	button:hover:not(:disabled) { background: var(--muted); }
+	button:disabled { opacity: 0.55; cursor: not-allowed; }
+	button.secondary { background: transparent; }
+	button.danger {
+		border-color: color-mix(in oklab, var(--destructive) 50%, var(--border));
+		background: color-mix(in oklab, var(--destructive) 10%, transparent);
+		color: var(--destructive);
+	}
+	button.danger:hover:not(:disabled) {
+		background: color-mix(in oklab, var(--destructive) 18%, transparent);
+	}
 </style>

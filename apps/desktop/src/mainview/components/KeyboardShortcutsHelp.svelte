@@ -28,15 +28,62 @@
 {/if}
 
 <style>
-	.modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(0,0,0,.55); }
-	.dialog { width: min(760px, calc(100vw - 32px)); border: 1px solid rgba(255,255,255,.14); border-radius: 18px; padding: 22px; background: #15161f; color: #f6f2ea; box-shadow: 0 30px 120px rgba(0,0,0,.55); }
-	header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+	.modal-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 50;
+		display: grid;
+		place-items: center;
+		background: color-mix(in oklab, var(--background) 60%, rgb(0 0 0 / 50%));
+	}
+	.dialog {
+		width: min(760px, calc(100vw - 32px));
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		padding: 18px;
+		background: var(--popover);
+		color: var(--popover-foreground);
+		box-shadow: var(--shadow-md);
+	}
+	header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 	h2, h3 { margin: 0; }
-	h2 { font-size: 1.3rem; }
-	h3 { margin-bottom: 8px; color: #b8b3a7; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; }
-	.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 28px; }
-	.shortcut { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 5px 0; color: #e6ded2; font-size: .9rem; }
-	kbd { border: 1px solid rgba(255,255,255,.16); border-radius: 6px; padding: 2px 6px; color: #c8c0b2; font-size: .75rem; white-space: nowrap; }
-	button { border: 0; border-radius: 12px; padding: 8px 12px; font: inherit; font-weight: 700; cursor: pointer; }
-	button.secondary { background: rgba(255,255,255,.1); color: #f6f2ea; }
+	h2 { font-size: 1.05rem; font-weight: 600; }
+	h3 {
+		margin-bottom: 6px;
+		color: var(--muted-foreground);
+		font-size: 0.72rem;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+	}
+	.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+	.shortcut {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 4px 0;
+		color: var(--foreground);
+		font-size: 0.85rem;
+	}
+	kbd {
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 4px);
+		padding: 2px 6px;
+		background: var(--muted);
+		color: var(--muted-foreground);
+		font-size: 0.72rem;
+		white-space: nowrap;
+	}
+	button {
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 2px);
+		padding: 6px 10px;
+		font: inherit;
+		font-size: 0.85rem;
+		cursor: pointer;
+		background: var(--card);
+		color: var(--card-foreground);
+	}
+	button:hover:not(:disabled) { background: var(--muted); }
+	button.secondary { background: transparent; }
 </style>

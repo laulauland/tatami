@@ -45,10 +45,10 @@
 			unsafeCSS: `
 				:host {
 					--file-tree-background: transparent;
-					--file-tree-foreground: #f6f2ea;
-					--file-tree-muted-foreground: #b8b3a7;
-					--file-tree-accent: rgba(119, 114, 255, 0.28);
-					--file-tree-border: rgba(255, 255, 255, 0.1);
+					--file-tree-foreground: var(--foreground);
+					--file-tree-muted-foreground: var(--muted-foreground);
+					--file-tree-accent: color-mix(in oklab, var(--accent) 22%, transparent);
+					--file-tree-border: var(--border);
 				}
 			`,
 			onSelectionChange: (nextSelectedPaths) => {
@@ -76,21 +76,19 @@
 <style>
 	.file-tree-view {
 		display: grid;
-		gap: 12px;
+		gap: 8px;
 	}
 
 	.file-tree-container {
-		min-height: 320px;
+		min-height: 200px;
 		max-height: 420px;
 		overflow: hidden;
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		border-radius: 16px;
-		background: rgba(255, 255, 255, 0.04);
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 2px);
+		background: var(--background);
 	}
 
 	.selection-summary {
-		margin: 0;
-		color: #c8c0b2;
-		font-size: 0.85rem;
+		display: none;
 	}
 </style>

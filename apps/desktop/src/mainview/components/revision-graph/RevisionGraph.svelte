@@ -16,6 +16,7 @@
 	let {
 		revisions = [],
 		mutationsDisabled = false,
+		pendingAbandonChangeId = null,
 		onselect,
 		onnew,
 		onedit,
@@ -26,6 +27,7 @@
 	}: {
 		revisions?: RevisionStub[];
 		mutationsDisabled?: boolean;
+		pendingAbandonChangeId?: string | null;
 		onselect?: (revision: RevisionStub) => void;
 		onnew?: (parentChangeIds: string[]) => void;
 		onedit?: (changeId: string) => void;
@@ -184,6 +186,7 @@
 							lane={row.lane}
 							{graphWidth}
 							isSelected={row.revision.change_id === selectedRevisionId}
+							isPendingAbandon={pendingAbandonChangeId === row.revision.change_id}
 							{mutationsDisabled}
 							onselect={selectRevision}
 							onnew={onnew}
@@ -202,22 +205,22 @@
 
 <style>
 	.revision-graph {
-		min-height: 320px;
-		max-height: 70vh;
+		flex: 1;
+		min-height: 0;
+		height: 100%;
 		overflow: auto;
-		border: 1px solid rgba(255, 255, 255, 0.09);
-		border-radius: 16px;
-		background: rgba(255, 255, 255, 0.035);
+		background: var(--background);
 		outline: none;
 	}
 
 	.revision-graph:focus-visible {
-		box-shadow: 0 0 0 2px rgba(119, 114, 255, 0.45);
+		outline: 2px solid color-mix(in oklab, var(--ring) 60%, transparent);
+		outline-offset: -2px;
 	}
 
 	.spacer {
 		position: relative;
-		min-width: 620px;
+		min-width: 100%;
 	}
 
 	.virtual-row {
@@ -231,6 +234,7 @@
 	.empty {
 		margin: 0;
 		padding: 18px;
-		color: #c8c0b2;
+		color: var(--muted-foreground);
+		font-size: 0.85rem;
 	}
 </style>

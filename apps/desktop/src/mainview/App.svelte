@@ -30,7 +30,6 @@
 	import { createKeyboardShortcut, createKeySequence, isEditableElement } from "./keyboard.svelte.ts";
 	import type { Project } from "../../src-electrobun/shared/rpc.ts";
 
-	let clickCount = $state(0);
 	let errorMessage = $state<string | null>(null);
 	let projectMessage = $state<string | null>(null);
 	let activeProjectId = $state<string | null>(null);
@@ -515,111 +514,119 @@
 </script>
 
 <main class="shell">
-	<header class="titlebar">
-		<div>
-			<p class="eyebrow">Electrobun + Svelte 5</p>
-			<h1>Tatami</h1>
-		</div>
-		<ProjectPicker
-			{projects}
-			{activeProjectId}
-			busy={isProjectBusy}
-			onAdd={addRepository}
-			onSelect={selectProject}
-			onRemove={removeProject}
-		/>
-	</header>
-
-	<section class="hero" aria-labelledby="welcome-title">
-		<div>
-			<h2 id="welcome-title">A new desktop shell is opening.</h2>
-			<p>
-				This minimal Svelte view lives beside the existing React/Tauri app while the rewrite is
-				validated slice by slice.
-			</p>
-		</div>
-
-		<div class="rune-card">
-			<p>Svelte rune interaction</p>
-			<strong>{clickCount}</strong>
-			<div class="actions">
-				<button type="button" onclick={() => clickCount += 1}>Increment</button>
-				<button type="button" class="secondary" onclick={() => clickCount = 0}>Reset</button>
-			</div>
-		</div>
-	</section>
-
-	<div class="workspace-split" bind:this={splitContainer} style:grid-template-columns={`${sidebarWidth}% 10px minmax(0, 1fr)`}>
-		<section class="rpc-panel" aria-labelledby="rpc-title">
-			<div class="panel-heading">
-				<div>
-					<p class="eyebrow">Electrobun RPC native smoke test</p>
-					<h2 id="rpc-title">Real jj revisions</h2>
-				</div>
-				<div class="toolbar-actions">
-					<button type="button" class="secondary" onclick={() => searchOpen = true} disabled={!activeProject}>Search</button>
-					<button type="button" class="secondary" onclick={() => operationsLogOpen = true} disabled={!activeProject}>Operations</button>
-					<button type="button" onclick={() => void runSync()} disabled={!activeProject || isSyncing}>
-						{isSyncing ? "Syncing…" : "Sync"}
-					</button>
-					<span class="status">{activeProject ? activeProject.name : "no repository"}</span>
-				</div>
+	<div class="workspace" bind:this={splitContainer} style:grid-template-columns={activeProject ? `${sidebarWidth}% 6px minmax(0, 1fr)` : "1fr"}>
+		<section class="revisions-pane" aria-label="Revision list">
+			<div class="toolbar">
+				<ProjectPicker
+					projectName={activeProject?.name ?? null}
+					busy={isProjectBusy}
+					onOpen={() => repositoriesOpen = true}
+				/>
+				<button
+					type="button"
+					class="icon-button"
+					aria-label="Search revisions"
+					title="Search revisions (/)"
+					disabled={!activeProject}
+					onclick={() => searchOpen = true}
+				>
+					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<circle cx="11" cy="11" r="8" />
+						<path d="m21 21-4.3-4.3" />
+					</svg>
+				</button>
+				<button
+					type="button"
+					class="icon-button"
+					aria-label="Sync repository"
+					title="Sync repository"
+					disabled={!activeProject || isSyncing}
+					onclick={() => void runSync()}
+				>
+					<svg class:spinning={isSyncing} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+						<path d="M21 3v5h-5" />
+						<path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+						<path d="M8 16H3v5" />
+					</svg>
+				</button>
 			</div>
 
 			{#if errorMessage}
-				<p class="error">RPC failed: {errorMessage}</p>
-			{:else if projectMessage && !activeProject}
-				<p class="muted">{projectMessage}</p>
-			{:else if !activeProject}
-				<div class="empty-state">
-					<h3>Add a repository to begin</h3>
-					<p class="muted">Pick a folder containing a jj repository. The active repository will persist across restarts.</p>
-					<button type="button" onclick={() => void addRepository()} disabled={isProjectBusy}>Add repository</button>
-				</div>
-			{:else if isProjectBusy || isLoading}
-				<p class="muted">Loading jj revisions through typed webview-to-Bun RPC…</p>
-			{:else}
-				{#if projectMessage}
-					<p class="muted status-line">{projectMessage}</p>
-				{/if}
-				{#if mutationInFlight}
-					<p class="muted status-line">Running {mutationInFlight}…</p>
-				{/if}
-				{#if pendingAbandon}
-					<div class="keyboard-confirmation" role="alert">
-						<span>Abandon selected revision?</span>
-						<button type="button" onclick={() => void confirmAbandonRevision()} disabled={mutationInFlight != null}>Yes <kbd>y</kbd></button>
-						<button type="button" class="secondary" onclick={cancelAbandonRevision}>No <kbd>n</kbd></button>
-					</div>
-				{/if}
-				{#if rebaseSourceChangeId}
-					<div class="keyboard-confirmation" role="status">
-						<span>Select destination, then press <kbd>Enter</kbd> to rebase. <kbd>Esc</kbd>/<kbd>r</kbd> cancels.</span>
-						<button type="button" onclick={() => void confirmRebaseRevision()} disabled={mutationInFlight != null || selectedRevision == null || selectedRevision.change_id === rebaseSourceChangeId}>Rebase here</button>
-						<button type="button" class="secondary" onclick={cancelRebaseRevision}>Cancel</button>
-					</div>
-				{/if}
-				{#if isSyncing}
-					<p class="muted status-line">Sync in progress…</p>
-				{/if}
-				<RevisionGraph
-					bind:this={revisionGraph}
-					{revisions}
-					mutationsDisabled={mutationInFlight != null}
-					onselect={onGraphSelect}
-					onnew={newRevision}
-					onedit={editRevision}
-					onabandon={abandonRevision}
-					ondescribe={describeRevision}
-					onsquash={squashRevision}
-					onrebase={rebaseRevision}
-				/>
+				<p class="error-bar" role="alert">{errorMessage}</p>
 			{/if}
+
+			<div class="graph-area">
+				{#if !activeProject}
+					{#if isProjectBusy}
+						<p class="muted-center">Loading…</p>
+					{:else}
+						<div class="empty-wrap">
+						<div class="empty-card">
+							<div class="empty-card-header">
+								<h2>Welcome to Tatami</h2>
+								<p>A desktop client for Jujutsu version control</p>
+							</div>
+							<div class="empty-card-body">
+								<div class="empty-row">
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2" />
+									</svg>
+									<span>Open a repository to get started</span>
+									<button type="button" class="empty-button" disabled={isProjectBusy} onclick={() => void addRepository()}>Add Repository</button>
+								</div>
+								<div class="empty-row">
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<path d="m3 16 4 4 4-4" />
+										<path d="M7 20V4" />
+										<path d="m21 8-4-4-4 4" />
+										<path d="M17 4v16" />
+									</svg>
+									<span>Navigate revisions with j/k keys</span>
+								</div>
+								<button type="button" class="empty-row empty-row-button" onclick={() => shortcutsHelpOpen = true}>
+									<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />
+									</svg>
+									<span>Press ? to view all keyboard shortcuts</span>
+								</button>
+							</div>
+						</div>
+						</div>
+					{/if}
+				{:else if isLoading}
+					<p class="muted-center">Loading revisions…</p>
+				{:else}
+					<RevisionGraph
+						bind:this={revisionGraph}
+						{revisions}
+						mutationsDisabled={mutationInFlight != null}
+						pendingAbandonChangeId={pendingAbandon}
+						onselect={onGraphSelect}
+						onnew={newRevision}
+						onedit={editRevision}
+						onabandon={abandonRevision}
+						ondescribe={describeRevision}
+						onsquash={squashRevision}
+						onrebase={rebaseRevision}
+					/>
+				{/if}
+			</div>
 		</section>
 
-		<div class="resize-handle" role="separator" aria-orientation="vertical" tabindex="0" onpointerdown={startResize}></div>
+		{#if activeProject}
+			<div
+				class="resize-handle"
+				role="separator"
+				aria-orientation="vertical"
+				tabindex="0"
+				onpointerdown={startResize}
+			></div>
 
-		<DiffPanel {activeProject} revisions={revisions ?? []} onReturnFocus={() => revisionGraph?.focus()} />
+			<aside class="diff-pane" aria-label="Diff viewer">
+				<DiffPanel {activeProject} revisions={revisions ?? []} onReturnFocus={() => revisionGraph?.focus()} />
+			</aside>
+		{/if}
 	</div>
 
 	<OperationsLog
@@ -658,219 +665,224 @@
 
 <style>
 	.shell {
-		min-height: 100vh;
-		padding: 28px;
-		background:
-			radial-gradient(circle at top left, rgba(119, 114, 255, 0.22), transparent 30rem),
-			#101116;
-		color: #f6f2ea;
-	}
-
-	.titlebar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 20px;
-		padding: 18px 20px;
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		border-radius: 18px;
-		background: rgba(255, 255, 255, 0.06);
-		backdrop-filter: blur(18px);
-	}
-
-	.eyebrow,
-	.rune-card p {
-		margin: 0 0 6px;
-		color: #b8b3a7;
-		font-size: 0.78rem;
-		letter-spacing: 0.08em;
-		text-transform: uppercase;
-	}
-
-	h1,
-	h2,
-	h3,
-	p {
-		margin: 0;
-	}
-
-	h1 {
-		font-size: 1.35rem;
-	}
-
-	.status {
-		border: 1px solid rgba(255, 255, 255, 0.14);
-		border-radius: 999px;
-		padding: 7px 12px;
-		color: #d9d1c4;
-		font-size: 0.85rem;
-	}
-
-	.hero {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 260px;
-		gap: 24px;
-		align-items: stretch;
-		margin-top: 28px;
-	}
-
-	.hero > div,
-	.rune-card,
-	.rpc-panel {
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		border-radius: 24px;
-		padding: 28px;
-		background: rgba(19, 20, 29, 0.82);
-		box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
-	}
-
-	h2 {
-		max-width: 720px;
-		font-size: clamp(2rem, 5vw, 4rem);
-		line-height: 0.96;
-		letter-spacing: -0.05em;
-	}
-
-	h2 + p {
-		max-width: 620px;
-		margin-top: 18px;
-		color: #c8c0b2;
-		font-size: 1rem;
-		line-height: 1.7;
-	}
-
-	.rune-card {
 		display: flex;
 		flex-direction: column;
-		justify-content: space-between;
-		gap: 20px;
+		height: 100vh;
+		overflow: hidden;
+		background: var(--background);
+		color: var(--foreground);
 	}
 
-	.rune-card strong {
-		font-size: 5rem;
-		line-height: 1;
-	}
-
-	.actions,
-	.toolbar-actions {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-	}
-
-	button {
-		border: 0;
-		border-radius: 12px;
-		padding: 10px 14px;
-		background: #ece5d8;
-		color: #15151d;
-		font: inherit;
-		font-weight: 700;
-		cursor: pointer;
-	}
-
-	button.secondary {
-		background: rgba(255, 255, 255, 0.1);
-		color: #f6f2ea;
-	}
-
-	.workspace-split {
+	.workspace {
+		flex: 1;
+		min-height: 0;
 		display: grid;
 		gap: 0;
 		align-items: stretch;
-		margin-top: 24px;
 	}
 
-	.rpc-panel {
+	.revisions-pane {
+		display: flex;
+		flex-direction: column;
+		min-width: 0;
+		min-height: 0;
+		outline: none;
+	}
+
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		padding: 8px;
+		flex-shrink: 0;
+	}
+
+	.icon-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		height: 28px;
+		width: 28px;
+		border: 0;
+		border-radius: calc(var(--radius) - 2px);
+		background: transparent;
+		color: var(--muted-foreground);
+		cursor: pointer;
+		transition: background 120ms ease, color 120ms ease;
+	}
+
+	.icon-button:hover:not(:disabled),
+	.icon-button:focus-visible {
+		background: color-mix(in oklab, var(--accent) 14%, transparent);
+		color: var(--foreground);
+		outline: none;
+	}
+
+	.icon-button:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.spinning {
+		animation: spin 1s linear infinite;
+	}
+
+	@keyframes spin {
+		to { transform: rotate(360deg); }
+	}
+
+	.error-bar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 8px;
+		margin: 0 8px 8px;
+		padding: 8px 10px;
+		border: 1px solid color-mix(in oklab, var(--destructive) 50%, transparent);
+		border-radius: calc(var(--radius) - 2px);
+		background: color-mix(in oklab, var(--destructive) 12%, transparent);
+		color: var(--destructive-foreground);
+		font-size: 0.85rem;
+	}
+
+	.graph-area {
+		flex: 1;
+		min-height: 0;
+		position: relative;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.muted-center {
+		margin: 0;
+		padding: 24px;
+		color: var(--muted-foreground);
+		text-align: center;
+	}
+
+	.empty-wrap {
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 16px;
+	}
+
+	.empty-card {
+		width: min(28rem, calc(100% - 32px));
+		display: flex;
+		flex-direction: column;
+		gap: 16px;
+		padding: 24px;
+		border: 1px solid var(--border);
+		border-radius: var(--radius);
+		background: var(--card);
+		color: var(--card-foreground);
+		box-shadow: var(--shadow-sm);
+	}
+
+	.empty-card-header {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		text-align: center;
+	}
+
+	.empty-card-header h2 {
+		margin: 0;
+		font-size: 1.05rem;
+		font-weight: 600;
+		letter-spacing: -0.01em;
+	}
+
+	.empty-card-header p {
+		margin: 0;
+		color: var(--muted-foreground);
+		font-size: 0.85rem;
+	}
+
+	.empty-card-body {
+		display: flex;
+		flex-direction: column;
+		gap: 12px;
+	}
+
+	.empty-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		font-size: 0.78rem;
+		color: var(--foreground);
+	}
+
+	.empty-row svg {
+		flex-shrink: 0;
+		color: var(--muted-foreground);
+	}
+
+	.empty-row span {
+		flex: 1;
 		min-width: 0;
 		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.empty-button {
+		margin-left: auto;
+		height: 24px;
+		padding: 0 8px;
+		border: 1px solid var(--border);
+		border-radius: calc(var(--radius) - 4px);
+		background: var(--card);
+		color: var(--card-foreground);
+		font-size: 0.75rem;
+		cursor: pointer;
+	}
+
+	.empty-button:hover:not(:disabled) {
+		background: var(--muted);
+	}
+
+	.empty-button:disabled {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
+	.empty-row-button {
+		margin: 0 -8px;
+		padding: 4px 8px;
+		border: 0;
+		border-radius: calc(var(--radius) - 4px);
+		background: transparent;
+		color: inherit;
+		text-align: left;
+		cursor: pointer;
+		transition: background 120ms ease;
+	}
+
+	.empty-row-button:hover {
+		background: color-mix(in oklab, var(--muted) 60%, transparent);
 	}
 
 	.resize-handle {
 		align-self: stretch;
 		cursor: col-resize;
-		border-radius: 999px;
-		background: rgba(255, 255, 255, 0.08);
+		background: var(--border);
 		transition: background 120ms ease;
 	}
 
 	.resize-handle:hover,
 	.resize-handle:focus-visible {
-		background: rgba(119, 114, 255, 0.5);
+		background: color-mix(in oklab, var(--ring) 50%, var(--border));
 		outline: none;
 	}
 
-	.panel-heading {
+	.diff-pane {
+		min-width: 0;
+		min-height: 0;
 		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 20px;
-		margin-bottom: 20px;
-	}
-
-	.rpc-panel h2 {
-		font-size: 2rem;
-		letter-spacing: -0.04em;
-	}
-
-	.empty-state {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 10px;
-		margin-bottom: 16px;
-	}
-
-	.empty-state {
-		align-items: center;
-		justify-content: space-between;
-		border: 1px solid rgba(255, 255, 255, 0.09);
-		border-radius: 16px;
-		padding: 16px;
-		background: rgba(255, 255, 255, 0.045);
-	}
-
-	.empty-state h3 {
-		width: 100%;
-		font-size: 1.2rem;
-	}
-
-	.muted,
-	.error {
-		color: #c8c0b2;
-	}
-
-	.status-line {
-		margin-bottom: 10px;
-	}
-
-	.keyboard-confirmation {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		margin-bottom: 10px;
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		border-radius: 14px;
-		padding: 10px 12px;
-		background: rgba(119, 114, 255, 0.14);
-		color: #f6f2ea;
-	}
-
-	kbd {
-		border: 1px solid rgba(255, 255, 255, 0.22);
-		border-radius: 6px;
-		padding: 1px 5px;
-		background: rgba(255, 255, 255, 0.1);
-		font: inherit;
-		font-size: 0.82em;
-	}
-
-	.error {
-		color: #ffb4a8;
-	}
-
-	@media (max-width: 760px) {
-		.hero {
-			grid-template-columns: 1fr;
-		}
+		flex-direction: column;
 	}
 </style>

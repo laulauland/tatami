@@ -4,10 +4,13 @@
 	import { onMount } from "svelte";
 	import DiffView from "./components/DiffView.svelte";
 	import FileTreeView from "./components/FileTreeView.svelte";
+	import ProjectPicker from "./components/ProjectPicker.svelte";
+	import { populateRepositories, repositoriesCollection } from "./data/repositories.ts";
 	import { populateRevisions, revisionsCollection } from "./data/revisions.ts";
 	import { FIXTURE_PATCH, FIXTURE_PATCH_LARGE } from "./fixtures/diff-fixture.ts";
 	import { FrontendRuntime } from "./runtime.ts";
 	import { NativeClient } from "./services/NativeClient.ts";
+	import type { Project } from "../../src-electrobun/shared/rpc.ts";
 
 	const fixturePaths = [
 		"src/mainview/App.svelte",
@@ -29,6 +32,9 @@
 	let currentDiffDisplayMode = $state<DiffDisplayMode>("unified");
 	let isLargeDiffFixture = $state(false);
 	let errorMessage = $state<string | null>(null);
+	let projectMessage = $state<string | null>(null);
+	let activeProjectId = $state<string | null>(null);
+	let isProjectBusy = $state(false);
 	let selectedTreePaths = $state<readonly string[]>([]);
 
 	const currentDiffPatch = $derived(isLargeDiffFixture ? FIXTURE_PATCH_LARGE : FIXTURE_PATCH);
@@ -38,18 +44,148 @@
 	);
 	const { data: revisions, isLoading } = $derived(revisionsQuery);
 
-	onMount(async () => {
+	const repositoriesQuery = useLiveQuery((query) =>
+		query.from({ repositories: repositoriesCollection }).select(({ repositories }) => repositories),
+	);
+	const { data: projects } = $derived(repositoriesQuery);
+	const activeProject = $derived(projects.find((project) => project.id === activeProjectId) ?? null);
+
+	async function refreshProjects(): Promise<Project[]> {
+		const loadedProjects = await FrontendRuntime.runPromise(
+			Effect.gen(function* () {
+				const nativeClient = yield* NativeClient;
+				return yield* nativeClient.getProjects();
+			}),
+		);
+		await populateRepositories(loadedProjects);
+		return loadedProjects;
+	}
+
+	async function loadRevisionsForProject(project: Project | null): Promise<void> {
+		if (project == null) {
+			await populateRevisions([]);
+			return;
+		}
+
+		const loadedRevisions = await FrontendRuntime.runPromise(
+			Effect.gen(function* () {
+				const nativeClient = yield* NativeClient;
+				return yield* nativeClient.getRevisions({ repoPath: project.path, limit: 50 });
+			}),
+		);
+		await populateRevisions(loadedRevisions);
+	}
+
+	async function selectProject(project: Project): Promise<void> {
+		isProjectBusy = true;
+		errorMessage = null;
+		projectMessage = null;
 		try {
-			const loadedRevisions = await FrontendRuntime.runPromise(
+			await FrontendRuntime.runPromise(
 				Effect.gen(function* () {
 					const nativeClient = yield* NativeClient;
-					return yield* nativeClient.getRevisions({ limit: 50 });
+					return yield* nativeClient.updateLayout({ active_project_id: project.id });
 				}),
 			);
-			await populateRevisions(loadedRevisions);
+			activeProjectId = project.id;
+			await loadRevisionsForProject(project);
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : String(error);
-			console.error("Failed to load revisions through NativeClient", error);
+			console.error("Failed to select repository", error);
+		} finally {
+			isProjectBusy = false;
+		}
+	}
+
+	async function addRepository(): Promise<void> {
+		isProjectBusy = true;
+		errorMessage = null;
+		projectMessage = null;
+		try {
+			const project = await FrontendRuntime.runPromise(
+				Effect.gen(function* () {
+					const nativeClient = yield* NativeClient;
+					const repoPath = yield* nativeClient.openRepositoryDialog();
+					if (repoPath == null) return null;
+					return yield* nativeClient.upsertProject({ path: repoPath });
+				}),
+			);
+
+			if (project == null) {
+				projectMessage = "No jj repository selected.";
+				return;
+			}
+
+			await refreshProjects();
+			await selectProject(project);
+		} catch (error) {
+			errorMessage = error instanceof Error ? error.message : String(error);
+			console.error("Failed to add repository", error);
+		} finally {
+			isProjectBusy = false;
+		}
+	}
+
+	async function removeProject(project: Project): Promise<void> {
+		isProjectBusy = true;
+		errorMessage = null;
+		projectMessage = null;
+		try {
+			await FrontendRuntime.runPromise(
+				Effect.gen(function* () {
+					const nativeClient = yield* NativeClient;
+					return yield* nativeClient.removeProject(project.id);
+				}),
+			);
+			const nextProjects = (await refreshProjects()).filter((nextProject) => nextProject.id !== project.id);
+			const nextActiveProject = nextProjects[0] ?? null;
+			activeProjectId = nextActiveProject?.id ?? null;
+			await FrontendRuntime.runPromise(
+				Effect.gen(function* () {
+					const nativeClient = yield* NativeClient;
+					return yield* nativeClient.updateLayout({ active_project_id: nextActiveProject?.id ?? null });
+				}),
+			);
+			await loadRevisionsForProject(nextActiveProject);
+		} catch (error) {
+			errorMessage = error instanceof Error ? error.message : String(error);
+			console.error("Failed to remove repository", error);
+		} finally {
+			isProjectBusy = false;
+		}
+	}
+
+	onMount(async () => {
+		isProjectBusy = true;
+		try {
+			const [loadedProjects, layout] = await FrontendRuntime.runPromise(
+				Effect.gen(function* () {
+					const nativeClient = yield* NativeClient;
+					const loadedProjects = yield* nativeClient.getProjects();
+					const layout = yield* nativeClient.getLayout();
+					return [loadedProjects, layout] as const;
+				}),
+			);
+			await populateRepositories(loadedProjects);
+			const project =
+				loadedProjects.find((candidate) => candidate.id === layout.active_project_id) ??
+				loadedProjects[0] ??
+				null;
+			activeProjectId = project?.id ?? null;
+			if (project != null && project.id !== layout.active_project_id) {
+				await FrontendRuntime.runPromise(
+					Effect.gen(function* () {
+						const nativeClient = yield* NativeClient;
+						return yield* nativeClient.updateLayout({ active_project_id: project.id });
+					}),
+				);
+			}
+			await loadRevisionsForProject(project);
+		} catch (error) {
+			errorMessage = error instanceof Error ? error.message : String(error);
+			console.error("Failed to load project state", error);
+		} finally {
+			isProjectBusy = false;
 		}
 	});
 </script>
@@ -60,7 +196,14 @@
 			<p class="eyebrow">Electrobun + Svelte 5</p>
 			<h1>Tatami</h1>
 		</div>
-		<span class="status">Derisk shell</span>
+		<ProjectPicker
+			{projects}
+			{activeProjectId}
+			busy={isProjectBusy}
+			onAdd={addRepository}
+			onSelect={selectProject}
+			onRemove={removeProject}
+		/>
 	</header>
 
 	<section class="hero" aria-labelledby="welcome-title">
@@ -88,12 +231,20 @@
 				<p class="eyebrow">Electrobun RPC native smoke test</p>
 				<h2 id="rpc-title">Real jj revisions</h2>
 			</div>
-			<span class="status">getRevisions</span>
+			<span class="status">{activeProject ? activeProject.name : "no repository"}</span>
 		</div>
 
 		{#if errorMessage}
 			<p class="error">RPC failed: {errorMessage}</p>
-		{:else if isLoading || revisions.length === 0}
+		{:else if projectMessage}
+			<p class="muted">{projectMessage}</p>
+		{:else if !activeProject}
+			<div class="empty-state">
+				<h3>Add a repository to begin</h3>
+				<p class="muted">Pick a folder containing a jj repository. The active repository will persist across restarts.</p>
+				<button type="button" onclick={() => void addRepository()} disabled={isProjectBusy}>Add repository</button>
+			</div>
+		{:else if isProjectBusy || isLoading || revisions.length === 0}
 			<p class="muted">Loading jj revisions through typed webview-to-Bun RPC…</p>
 		{:else}
 			<ul class="revision-list">
@@ -215,6 +366,7 @@
 
 	h1,
 	h2,
+	h3,
 	p {
 		margin: 0;
 	}
@@ -320,11 +472,26 @@
 		letter-spacing: -0.04em;
 	}
 
-	.diff-actions {
+	.diff-actions,
+	.empty-state {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 10px;
 		margin-bottom: 16px;
+	}
+
+	.empty-state {
+		align-items: center;
+		justify-content: space-between;
+		border: 1px solid rgba(255, 255, 255, 0.09);
+		border-radius: 16px;
+		padding: 16px;
+		background: rgba(255, 255, 255, 0.045);
+	}
+
+	.empty-state h3 {
+		width: 100%;
+		font-size: 1.2rem;
 	}
 
 	.muted,

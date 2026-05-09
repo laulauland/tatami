@@ -1,36 +1,20 @@
 import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import { Effect } from "effect";
-import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import type { AppRPC, GetRevisionsParams, RevisionStub } from "../shared/rpc.ts";
+import type {
+	AppLayout,
+	AppRPC,
+	GetRevisionsParams,
+	Project,
+	RevisionStub,
+	UpsertProjectParams,
+} from "../shared/rpc.ts";
 import { BackendRuntime } from "./runtime.ts";
+import { DesktopService } from "./services/DesktopService.ts";
 import { RepoService } from "./services/RepoService.ts";
+import { StorageService } from "./services/StorageService.ts";
 
 const DEV_SERVER_PORT = 5174;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
-// Dev-only repo path for this spike. Replace with repo picker/persistence in a later revision.
-function findDevRepoPath(): string {
-	for (const startPath of [process.cwd(), import.meta.dir]) {
-		let currentPath = resolve(startPath);
-
-		for (;;) {
-			if (existsSync(join(currentPath, ".jj"))) {
-				return currentPath;
-			}
-
-			const parentPath = dirname(currentPath);
-			if (parentPath === currentPath) {
-				break;
-			}
-
-			currentPath = parentPath;
-		}
-	}
-
-	return resolve(import.meta.dir, "../../../..");
-}
-
-const DEV_REPO_PATH = findDevRepoPath();
 const DEFAULT_REVISION_LIMIT = 50;
 
 async function getMainViewUrl(): Promise<string> {
@@ -50,9 +34,27 @@ async function getMainViewUrl(): Promise<string> {
 	return "views://mainview/index.html";
 }
 
+async function getActiveRepoPath(): Promise<string | undefined> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const storage = yield* StorageService;
+			const layout = yield* storage.getLayout();
+			if (layout.active_project_id == null) return undefined;
+
+			const projects = yield* storage.getProjects();
+			return projects.find((project) => project.id === layout.active_project_id)?.path;
+		}),
+	);
+}
+
 async function getRevisions(params: GetRevisionsParams): Promise<RevisionStub[]> {
+	const repoPath = params.repoPath ?? (await getActiveRepoPath());
+	if (repoPath == null) {
+		return [];
+	}
+
 	const request = {
-		repoPath: params.repoPath ?? DEV_REPO_PATH,
+		repoPath,
 		limit: params.limit ?? DEFAULT_REVISION_LIMIT,
 	};
 
@@ -69,11 +71,71 @@ async function getRevisions(params: GetRevisionsParams): Promise<RevisionStub[]>
 	}
 }
 
+async function getProjects(): Promise<Project[]> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const storage = yield* StorageService;
+			return yield* storage.getProjects();
+		}),
+	);
+}
+
+async function upsertProject(params: UpsertProjectParams): Promise<Project> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const storage = yield* StorageService;
+			return yield* storage.upsertProject(params);
+		}),
+	);
+}
+
+async function removeProject({ id }: { id: string }): Promise<void> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const storage = yield* StorageService;
+			return yield* storage.removeProject(id);
+		}),
+	);
+}
+
+async function getLayout(): Promise<AppLayout> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const storage = yield* StorageService;
+			return yield* storage.getLayout();
+		}),
+	);
+}
+
+async function updateLayout(layout: Partial<AppLayout>): Promise<void> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const storage = yield* StorageService;
+			return yield* storage.updateLayout(layout);
+		}),
+	);
+}
+
+async function openRepositoryDialog(): Promise<string | null> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const desktop = yield* DesktopService;
+			return yield* desktop.openFolderDialog();
+		}),
+	);
+}
+
 const appRpc = BrowserView.defineRPC<AppRPC>({
 	maxRequestTime: 5000,
 	handlers: {
 		requests: {
 			getRevisions,
+			getProjects,
+			upsertProject,
+			removeProject,
+			getLayout,
+			updateLayout,
+			openRepositoryDialog,
 		},
 		messages: {},
 	},

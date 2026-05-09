@@ -9,9 +9,10 @@
 
 	onMount(async () => {
 		try {
-			revisions = await appRpc.request.getRevisions({});
+			revisions = await appRpc.request.getRevisions({ limit: 50 });
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : String(error);
+			console.error("Failed to load revisions through Electrobun RPC", error);
 		}
 	});
 </script>
@@ -47,8 +48,8 @@
 	<section class="rpc-panel" aria-labelledby="rpc-title">
 		<div class="panel-heading">
 			<div>
-				<p class="eyebrow">Electrobun RPC smoke test</p>
-				<h2 id="rpc-title">Fixture revisions</h2>
+				<p class="eyebrow">Electrobun RPC native smoke test</p>
+				<h2 id="rpc-title">Real jj revisions</h2>
 			</div>
 			<span class="status">getRevisions</span>
 		</div>
@@ -56,17 +57,22 @@
 		{#if errorMessage}
 			<p class="error">RPC failed: {errorMessage}</p>
 		{:else if revisions.length === 0}
-			<p class="muted">Loading fixture revisions through typed webview-to-Bun RPC…</p>
+			<p class="muted">Loading jj revisions through typed webview-to-Bun RPC…</p>
 		{:else}
 			<ul class="revision-list">
 				{#each revisions as revision}
 					<li>
 						<div>
-							<strong>{revision.description}</strong>
-							<p>{revision.author} · {new Date(revision.timestamp).toLocaleString()}</p>
+							<strong>{revision.description || "(no description)"}</strong>
+							<p>
+								{revision.author} · {revision.timestamp}
+								{#if revision.bookmarks.length > 0}
+									 · {revision.bookmarks.map((bookmark) => bookmark.name).join(", ")}
+								{/if}
+							</p>
 						</div>
-						<code>{revision.changeId}:{revision.commitId}</code>
-						{#if revision.isWorkingCopy}
+						<code>{revision.change_id_short}:{revision.commit_id}</code>
+						{#if revision.is_working_copy}
 							<span class="badge">working copy</span>
 						{/if}
 					</li>

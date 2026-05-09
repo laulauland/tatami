@@ -16,6 +16,7 @@ import type {
 	RevisionChanges,
 	RevisionDiff,
 	RevisionStub,
+	RevsetResult,
 	UpsertProjectParams,
 } from "../shared/rpc.ts";
 import { BackendRuntime } from "./runtime.ts";
@@ -176,6 +177,13 @@ async function getOperations(params: { repoPath: string; limit: number }): Promi
 	}));
 }
 
+async function resolveRevset(params: { repoPath: string; revset: string }): Promise<RevsetResult> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.resolveRevset(params);
+	})).catch((error) => ({ change_ids: [], error: error instanceof Error ? error.message : String(error) }));
+}
+
 async function undoOperation(params: { repoPath: string; operationId: string }): Promise<MutationResult> {
 	return BackendRuntime.runPromise(Effect.gen(function* () {
 		const repo = yield* RepoService;
@@ -331,6 +339,7 @@ const appRpc = BrowserView.defineRPC<AppRPC>({
 			jjSquash,
 			jjRebase,
 			getOperations,
+			resolveRevset,
 			undoOperation,
 			gitFetch,
 			gitPush,

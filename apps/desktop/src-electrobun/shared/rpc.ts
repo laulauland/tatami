@@ -106,6 +106,11 @@ export type AppLayout = {
 	sidebar_width: number | null;
 };
 
+export type RevsetResult = {
+	change_ids: string[];
+	error: string | null;
+};
+
 export type MessageBoxOptions = {
 	type?: "info" | "warning" | "error" | "question";
 	title?: string;
@@ -174,6 +179,10 @@ export type AppRPC = {
 			getOperations: {
 				params: { repoPath: string; limit: number };
 				response: Operation[];
+			};
+			resolveRevset: {
+				params: { repoPath: string; revset: string };
+				response: RevsetResult;
 			};
 			undoOperation: {
 				params: { repoPath: string; operationId: string };

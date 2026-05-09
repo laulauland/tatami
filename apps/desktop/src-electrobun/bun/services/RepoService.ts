@@ -10,6 +10,7 @@ import type {
 	RevisionChanges,
 	RevisionDiff,
 	RevisionStub,
+	RevsetResult,
 } from "../../shared/rpc.ts";
 import {
 	ChangeIds,
@@ -36,6 +37,7 @@ export type RepoOperation =
 	| "jjSquash"
 	| "jjRebase"
 	| "getOperations"
+	| "resolveRevset"
 	| "undoOperation"
 	| "gitFetch"
 	| "gitPush";
@@ -103,6 +105,7 @@ export class RepoService extends Context.Tag("tatami/RepoService")<
 		readonly jjSquash: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, RepoError>;
 		readonly jjRebase: (params: JjRebaseParams) => Effect.Effect<MutationResult, RepoError>;
 		readonly getOperations: (params: { repoPath: string; limit: number }) => Effect.Effect<Operation[], RepoError>;
+		readonly resolveRevset: (params: { repoPath: string; revset: string }) => Effect.Effect<RevsetResult, RepoError>;
 		readonly undoOperation: (params: { repoPath: string; operationId: string }) => Effect.Effect<MutationResult, RepoError>;
 		readonly gitFetch: (params: { repoPath: string; remote?: string | null }) => Effect.Effect<MutationResult, RepoError>;
 		readonly gitPush: (params: { repoPath: string; bookmarkNames: string[]; remote?: string | null }) => Effect.Effect<MutationResult, RepoError>;
@@ -199,6 +202,13 @@ export class RepoService extends Context.Tag("tatami/RepoService")<
 						Effect.flatMap((json) => parseJson("getOperations", json)),
 						Effect.flatMap((input) => decodeWith("getOperations", Operations, input)),
 						Effect.map((operations) => [...operations] as Operation[]),
+					),
+				resolveRevset: ({ repoPath, revset }) =>
+					addon.getRevisionsJson(repoPath, 500, revset, null).pipe(
+						Effect.mapError((cause) => nativeError("resolveRevset", cause)),
+						Effect.flatMap((json) => parseJson("resolveRevset", json)),
+						Effect.flatMap((input) => decodeWith("resolveRevset", Revisions, input)),
+						Effect.map((resolved) => ({ change_ids: resolved.map((revision) => revision.change_id), error: null })),
 					),
 				undoOperation: ({ repoPath, operationId }) =>
 					addon.undoOperation(repoPath, operationId).pipe(

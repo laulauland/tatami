@@ -62,10 +62,7 @@
 	});
 
 	$effect(() => {
-		if (graphData.rows.length === 0) {
-			if (selectedRevisionId != null) setSelectedRevisionId(null);
-			return;
-		}
+		if (graphData.rows.length === 0) return;
 		if (selectedIndex === -1) {
 			selectRevision(graphData.rows[0].revision as RevisionStub, false);
 		}
@@ -90,21 +87,65 @@
 		if (row) selectRevision(row.revision as RevisionStub);
 	}
 
+	export function focus(): void {
+		scrollElement?.focus();
+	}
+
+	export function jumpTo(changeId: string): void {
+		const revision = revisions.find((candidate) => candidate.change_id === changeId);
+		if (revision) selectRevision(revision);
+	}
+
+	function selectWorkingCopy(): void {
+		const index = graphData.rows.findIndex((row) => row.revision.is_working_copy);
+		if (index >= 0) selectIndex(index);
+	}
+
+	function selectParentOrChild(direction: "parent" | "child"): void {
+		const row = graphData.rows[selectedIndex >= 0 ? selectedIndex : 0];
+		if (!row) return;
+		const targetCommitId = direction === "parent"
+			? row.revision.parent_edges.find((edge) => edge.edge_type !== "missing")?.parent_id
+			: row.revision.children_ids[0];
+		if (targetCommitId == null) return;
+		const targetIndex = commitToRow.get(targetCommitId);
+		if (targetIndex != null) selectIndex(targetIndex);
+	}
+
+	let gPressedAt = 0;
 	function handleKeydown(event: KeyboardEvent): void {
 		if (graphData.rows.length === 0) return;
 		const currentIndex = selectedIndex >= 0 ? selectedIndex : 0;
-		if (event.key === "ArrowDown") {
+		if (event.key === "ArrowDown" || event.key === "j") {
 			event.preventDefault();
 			selectIndex(currentIndex + 1);
-		} else if (event.key === "ArrowUp") {
+		} else if (event.key === "ArrowUp" || event.key === "k") {
 			event.preventDefault();
 			selectIndex(currentIndex - 1);
 		} else if (event.key === "Home") {
 			event.preventDefault();
 			selectIndex(0);
-		} else if (event.key === "End") {
+		} else if (event.key === "End" || event.key === "G") {
 			event.preventDefault();
 			selectIndex(graphData.rows.length - 1);
+		} else if (event.key === "@") {
+			event.preventDefault();
+			selectWorkingCopy();
+		} else if (event.key === "-" || event.key === "J") {
+			event.preventDefault();
+			selectParentOrChild("parent");
+		} else if (event.key === "+" || event.key === "=" || event.key === "K") {
+			event.preventDefault();
+			selectParentOrChild("child");
+		} else if (event.key === "g") {
+			const now = Date.now();
+			if (now - gPressedAt < 500) {
+				event.preventDefault();
+				selectIndex(0);
+				gPressedAt = 0;
+			} else {
+				gPressedAt = now;
+			}
 		}
 	}
 

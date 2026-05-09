@@ -12,9 +12,10 @@
 	type Props = {
 		activeProject: Project | null;
 		revisions: readonly RevisionStub[];
+		onReturnFocus?: () => void;
 	};
 
-	let { activeProject, revisions }: Props = $props();
+	let { activeProject, revisions, onReturnFocus }: Props = $props();
 
 	let displayMode = $state<DiffDisplayMode>("unified");
 	let files = $state<ChangedFile[]>([]);
@@ -22,6 +23,7 @@
 	let diffPatch = $state("");
 	let isLoading = $state(false);
 	let errorMessage = $state<string | null>(null);
+	let panelElement = $state<HTMLElement | null>(null);
 
 	const selectedChangeId = $derived(getSelectedRevisionId());
 	const filePaths = $derived(files.map((file) => file.path));
@@ -128,6 +130,16 @@
 		}
 	}
 
+	function handleKeydown(event: KeyboardEvent): void {
+		if (event.key === "j" || event.key === "k") {
+			event.preventDefault();
+			panelElement?.scrollBy({ top: event.key === "j" ? 90 : -90, behavior: "smooth" });
+		} else if (event.key === "h") {
+			event.preventDefault();
+			onReturnFocus?.();
+		}
+	}
+
 	$effect(() => {
 		const changeId = selectedChangeId;
 		if (activeProject == null || changeId == null) {
@@ -142,7 +154,7 @@
 	});
 </script>
 
-<section class="diff-panel" aria-labelledby="diff-title">
+<section class="diff-panel" aria-labelledby="diff-title" tabindex="0" bind:this={panelElement} onkeydown={handleKeydown}>
 	<div class="panel-heading">
 		<div>
 			<p class="eyebrow">Read-only jj diff</p>
@@ -217,12 +229,19 @@
 
 <style>
 	.diff-panel {
-		margin-top: 24px;
+		margin-top: 0;
+		max-height: 78vh;
+		overflow: auto;
 		border: 1px solid rgba(255, 255, 255, 0.1);
 		border-radius: 24px;
 		padding: 28px;
 		background: rgba(19, 20, 29, 0.82);
 		box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+		outline: none;
+	}
+
+	.diff-panel:focus-visible {
+		box-shadow: 0 0 0 2px rgba(119, 114, 255, 0.45);
 	}
 
 	.panel-heading,

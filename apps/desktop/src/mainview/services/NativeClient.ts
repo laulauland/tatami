@@ -14,6 +14,7 @@ import type {
 	RevisionChanges,
 	RevisionDiff,
 	RevisionStub,
+	RevsetResult,
 	UpsertProjectParams,
 } from "../../../src-electrobun/shared/rpc.ts";
 import { appRpc } from "../rpc.ts";
@@ -33,6 +34,7 @@ export class NativeClientError extends Data.TaggedError("NativeClientError")<{
 		| "jjSquash"
 		| "jjRebase"
 		| "getOperations"
+		| "resolveRevset"
 		| "undoOperation"
 		| "gitFetch"
 		| "gitPush"
@@ -98,6 +100,10 @@ export class NativeClient extends Context.Tag("tatami/NativeClient")<
 			repoPath: string;
 			limit: number;
 		}) => Effect.Effect<Operation[], NativeClientError>;
+		readonly resolveRevset: (params: {
+			repoPath: string;
+			revset: string;
+		}) => Effect.Effect<RevsetResult, NativeClientError>;
 		readonly undoOperation: (params: {
 			repoPath: string;
 			operationId: string;
@@ -196,6 +202,11 @@ export class NativeClient extends Context.Tag("tatami/NativeClient")<
 				Effect.tryPromise({
 					try: () => appRpc.request.getOperations(params),
 					catch: (cause) => new NativeClientError({ operation: "getOperations", cause }),
+				}),
+			resolveRevset: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.resolveRevset(params),
+					catch: (cause) => new NativeClientError({ operation: "resolveRevset", cause }),
 				}),
 			undoOperation: (params) =>
 				Effect.tryPromise({

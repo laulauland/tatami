@@ -1,12 +1,36 @@
 import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
-import { resolve } from "node:path";
-import { nativeAddon } from "./native.ts";
+import { Effect } from "effect";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type { AppRPC, GetRevisionsParams, RevisionStub } from "../shared/rpc.ts";
+import { BackendRuntime } from "./runtime.ts";
+import { RepoService } from "./services/RepoService.ts";
 
 const DEV_SERVER_PORT = 5174;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
 // Dev-only repo path for this spike. Replace with repo picker/persistence in a later revision.
-const DEV_REPO_PATH = resolve(import.meta.dir, "../../../..");
+function findDevRepoPath(): string {
+	for (const startPath of [process.cwd(), import.meta.dir]) {
+		let currentPath = resolve(startPath);
+
+		for (;;) {
+			if (existsSync(join(currentPath, ".jj"))) {
+				return currentPath;
+			}
+
+			const parentPath = dirname(currentPath);
+			if (parentPath === currentPath) {
+				break;
+			}
+
+			currentPath = parentPath;
+		}
+	}
+
+	return resolve(import.meta.dir, "../../../..");
+}
+
+const DEV_REPO_PATH = findDevRepoPath();
 const DEFAULT_REVISION_LIMIT = 50;
 
 async function getMainViewUrl(): Promise<string> {
@@ -26,21 +50,21 @@ async function getMainViewUrl(): Promise<string> {
 	return "views://mainview/index.html";
 }
 
-function getRevisions(params: GetRevisionsParams): RevisionStub[] {
-	const repoPath = params.repoPath ?? DEV_REPO_PATH;
-	const limit = params.limit ?? DEFAULT_REVISION_LIMIT;
+async function getRevisions(params: GetRevisionsParams): Promise<RevisionStub[]> {
+	const request = {
+		repoPath: params.repoPath ?? DEV_REPO_PATH,
+		limit: params.limit ?? DEFAULT_REVISION_LIMIT,
+	};
 
 	try {
-		const revisionsJson = nativeAddon.getRevisionsJson(repoPath, limit, null, null);
-		const revisions = JSON.parse(revisionsJson) as unknown;
-
-		if (!Array.isArray(revisions)) {
-			throw new Error("getRevisionsJson did not return a JSON array");
-		}
-
-		return revisions as RevisionStub[];
+		return await BackendRuntime.runPromise(
+			Effect.gen(function* () {
+				const repo = yield* RepoService;
+				return yield* repo.getRevisions(request);
+			}),
+		);
 	} catch (error) {
-		console.error(`Failed to get revisions for ${repoPath}`, error);
+		console.error(`Failed to get revisions for ${request.repoPath}`, error);
 		throw error;
 	}
 }

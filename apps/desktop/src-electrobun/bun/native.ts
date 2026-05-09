@@ -13,9 +13,30 @@ export type NativeAddon = {
 
 const require = createRequire(import.meta.url);
 const WORKSPACE_ROOT = resolve(import.meta.dir, "../../../..");
+
+function getAncestorTargetDirs(startPath: string): string[] {
+	const targetDirs: string[] = [];
+	let currentPath = resolve(startPath);
+
+	for (;;) {
+		targetDirs.push(join(currentPath, "target/debug"));
+
+		const parentPath = dirname(currentPath);
+		if (parentPath === currentPath) {
+			break;
+		}
+
+		currentPath = parentPath;
+	}
+
+	return targetDirs;
+}
+
 const targetDirCandidates = [
 	resolve(process.cwd(), "target/debug"),
 	resolve(WORKSPACE_ROOT, "target/debug"),
+	...getAncestorTargetDirs(process.cwd()),
+	...getAncestorTargetDirs(import.meta.dir),
 ];
 
 function getPlatformArtifactName(): string {
@@ -59,7 +80,7 @@ function resolveAddonPath(): string {
 	);
 }
 
-function loadNativeAddon(): NativeAddon {
+export function loadNativeAddon(): NativeAddon {
 	const loadPath = resolveAddonPath();
 
 	try {
@@ -76,5 +97,3 @@ function loadNativeAddon(): NativeAddon {
 		throw error;
 	}
 }
-
-export const nativeAddon = loadNativeAddon();

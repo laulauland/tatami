@@ -1,18 +1,31 @@
 <script lang="ts">
+	import { useLiveQuery } from "@tanstack/svelte-db";
+	import { Effect } from "effect";
 	import { onMount } from "svelte";
-	import { appRpc } from "./rpc.ts";
-	import type { RevisionStub } from "../../src-electrobun/shared/rpc.ts";
+	import { populateRevisions, revisionsCollection } from "./data/revisions.ts";
+	import { FrontendRuntime } from "./runtime.ts";
+	import { NativeClient } from "./services/NativeClient.ts";
 
 	let clickCount = $state(0);
-	let revisions = $state<RevisionStub[]>([]);
 	let errorMessage = $state<string | null>(null);
+
+	const revisionsQuery = useLiveQuery((query) =>
+		query.from({ revisions: revisionsCollection }).select(({ revisions }) => revisions),
+	);
+	const { data: revisions, isLoading } = $derived(revisionsQuery);
 
 	onMount(async () => {
 		try {
-			revisions = await appRpc.request.getRevisions({ limit: 50 });
+			const loadedRevisions = await FrontendRuntime.runPromise(
+				Effect.gen(function* () {
+					const nativeClient = yield* NativeClient;
+					return yield* nativeClient.getRevisions({ limit: 50 });
+				}),
+			);
+			await populateRevisions(loadedRevisions);
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : String(error);
-			console.error("Failed to load revisions through Electrobun RPC", error);
+			console.error("Failed to load revisions through NativeClient", error);
 		}
 	});
 </script>
@@ -56,7 +69,7 @@
 
 		{#if errorMessage}
 			<p class="error">RPC failed: {errorMessage}</p>
-		{:else if revisions.length === 0}
+		{:else if isLoading || revisions.length === 0}
 			<p class="muted">Loading jj revisions through typed webview-to-Bun RPC…</p>
 		{:else}
 			<ul class="revision-list">

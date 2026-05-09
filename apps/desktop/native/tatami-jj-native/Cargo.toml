@@ -1,0 +1,16 @@
+[package]
+name = "tatami-jj-native"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tatami_desktop_lib = { package = "tatami-desktop", path = "../../src-tauri" }
+napi = { version = "3", features = ["serde-json"] }
+napi-derive = "3"
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"

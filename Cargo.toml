@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "apps/desktop/src-tauri",
+    "apps/desktop/native/tatami-jj-native",
 ]
 
 [workspace.package]

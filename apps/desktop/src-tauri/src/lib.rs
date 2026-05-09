@@ -1,4 +1,4 @@
-mod repo;
+pub mod repo;
 mod storage;
 mod watcher;
 

@@ -2,12 +2,18 @@ import { Context, Data, Effect, Layer, Schema } from "effect";
 import type {
 	ChangedFile,
 	GetRevisionsParams,
+	JjDescribeParams,
+	JjNewParams,
+	JjRebaseParams,
+	MutationResult,
 	RevisionChanges,
 	RevisionDiff,
 	RevisionStub,
 } from "../../shared/rpc.ts";
 import {
+	ChangeIds,
 	ChangedFiles,
+	MutationResult as MutationResultSchema,
 	RevisionChangesBatch,
 	RevisionDiffs,
 	Revisions,
@@ -19,7 +25,14 @@ export type RepoOperation =
 	| "getRevisionChanges"
 	| "getRevisionDiff"
 	| "getChangesBatch"
-	| "getDiffsBatch";
+	| "getDiffsBatch"
+	| "generateChangeIds"
+	| "jjNew"
+	| "jjEdit"
+	| "jjAbandon"
+	| "jjDescribe"
+	| "jjSquash"
+	| "jjRebase";
 
 export class RepoError extends Data.TaggedError("RepoError")<{
 	readonly operation: RepoOperation;
@@ -45,6 +58,12 @@ const decodeWith = <A, I, R>(operation: RepoOperation, schema: Schema.Schema<A, 
 const nativeError = (operation: RepoOperation, cause: JjNativeAddonError) =>
 	new RepoError({ operation, reason: "native", cause });
 
+const decodeMutationResult = (operation: RepoOperation, json: string) =>
+	parseJson(operation, json).pipe(
+		Effect.flatMap((input) => decodeWith(operation, MutationResultSchema, input)),
+		Effect.map((result) => ({ ...result }) as MutationResult),
+	);
+
 export class RepoService extends Context.Tag("tatami/RepoService")<
 	RepoService,
 	{
@@ -67,6 +86,16 @@ export class RepoService extends Context.Tag("tatami/RepoService")<
 			repoPath: string;
 			changeIds: string[];
 		}) => Effect.Effect<RevisionDiff[], RepoError>;
+		readonly generateChangeIds: (params: {
+			repoPath: string;
+			count: number;
+		}) => Effect.Effect<string[], RepoError>;
+		readonly jjNew: (params: JjNewParams) => Effect.Effect<MutationResult, RepoError>;
+		readonly jjEdit: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, RepoError>;
+		readonly jjAbandon: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, RepoError>;
+		readonly jjDescribe: (params: JjDescribeParams) => Effect.Effect<MutationResult, RepoError>;
+		readonly jjSquash: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, RepoError>;
+		readonly jjRebase: (params: JjRebaseParams) => Effect.Effect<MutationResult, RepoError>;
 	}
 >() {
 	static readonly Live = Layer.effect(
@@ -117,6 +146,42 @@ export class RepoService extends Context.Tag("tatami/RepoService")<
 						Effect.flatMap((json) => parseJson("getDiffsBatch", json)),
 						Effect.flatMap((input) => decodeWith("getDiffsBatch", RevisionDiffs, input)),
 						Effect.map((diffs) => [...diffs] as RevisionDiff[]),
+					),
+				generateChangeIds: ({ repoPath, count }) =>
+					addon.generateChangeIds(repoPath, count).pipe(
+						Effect.mapError((cause) => nativeError("generateChangeIds", cause)),
+						Effect.flatMap((input) => decodeWith("generateChangeIds", ChangeIds, input)),
+						Effect.map((changeIds) => [...changeIds]),
+					),
+				jjNew: ({ repoPath, parentChangeIds, changeId = null }) =>
+					addon.jjNew(repoPath, parentChangeIds, changeId).pipe(
+						Effect.mapError((cause) => nativeError("jjNew", cause)),
+						Effect.flatMap((json) => decodeMutationResult("jjNew", json)),
+					),
+				jjEdit: ({ repoPath, changeId }) =>
+					addon.jjEdit(repoPath, changeId).pipe(
+						Effect.mapError((cause) => nativeError("jjEdit", cause)),
+						Effect.flatMap((json) => decodeMutationResult("jjEdit", json)),
+					),
+				jjAbandon: ({ repoPath, changeId }) =>
+					addon.jjAbandon(repoPath, changeId).pipe(
+						Effect.mapError((cause) => nativeError("jjAbandon", cause)),
+						Effect.flatMap((json) => decodeMutationResult("jjAbandon", json)),
+					),
+				jjDescribe: ({ repoPath, changeId, description }) =>
+					addon.jjDescribe(repoPath, changeId, description).pipe(
+						Effect.mapError((cause) => nativeError("jjDescribe", cause)),
+						Effect.flatMap((json) => decodeMutationResult("jjDescribe", json)),
+					),
+				jjSquash: ({ repoPath, changeId }) =>
+					addon.jjSquash(repoPath, changeId).pipe(
+						Effect.mapError((cause) => nativeError("jjSquash", cause)),
+						Effect.flatMap((json) => decodeMutationResult("jjSquash", json)),
+					),
+				jjRebase: ({ repoPath, sourceChangeId, destinationChangeId }) =>
+					addon.jjRebase(repoPath, sourceChangeId, destinationChangeId).pipe(
+						Effect.mapError((cause) => nativeError("jjRebase", cause)),
+						Effect.flatMap((json) => decodeMutationResult("jjRebase", json)),
 					),
 			});
 		}),

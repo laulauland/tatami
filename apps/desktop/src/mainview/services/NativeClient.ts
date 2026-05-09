@@ -3,6 +3,10 @@ import type {
 	AppLayout,
 	ChangedFile,
 	GetRevisionsParams,
+	JjDescribeParams,
+	JjNewParams,
+	JjRebaseParams,
+	MutationResult,
 	Project,
 	RevisionChanges,
 	RevisionDiff,
@@ -18,6 +22,13 @@ export class NativeClientError extends Data.TaggedError("NativeClientError")<{
 		| "getRevisionDiff"
 		| "getChangesBatch"
 		| "getDiffsBatch"
+		| "generateChangeIds"
+		| "jjNew"
+		| "jjEdit"
+		| "jjAbandon"
+		| "jjDescribe"
+		| "jjSquash"
+		| "jjRebase"
 		| "getProjects"
 		| "upsertProject"
 		| "removeProject"
@@ -49,6 +60,13 @@ export class NativeClient extends Context.Tag("tatami/NativeClient")<
 			repoPath: string;
 			changeIds: string[];
 		}) => Effect.Effect<RevisionDiff[], NativeClientError>;
+		readonly generateChangeIds: (params: { repoPath: string; count: number }) => Effect.Effect<string[], NativeClientError>;
+		readonly jjNew: (params: JjNewParams) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly jjEdit: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly jjAbandon: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly jjDescribe: (params: JjDescribeParams) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly jjSquash: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly jjRebase: (params: JjRebaseParams) => Effect.Effect<MutationResult, NativeClientError>;
 		readonly getProjects: () => Effect.Effect<Project[], NativeClientError>;
 		readonly upsertProject: (
 			params: UpsertProjectParams,
@@ -86,6 +104,41 @@ export class NativeClient extends Context.Tag("tatami/NativeClient")<
 				Effect.tryPromise({
 					try: () => appRpc.request.getDiffsBatch(params),
 					catch: (cause) => new NativeClientError({ operation: "getDiffsBatch", cause }),
+				}),
+			generateChangeIds: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.generateChangeIds(params),
+					catch: (cause) => new NativeClientError({ operation: "generateChangeIds", cause }),
+				}),
+			jjNew: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.jjNew(params),
+					catch: (cause) => new NativeClientError({ operation: "jjNew", cause }),
+				}),
+			jjEdit: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.jjEdit(params),
+					catch: (cause) => new NativeClientError({ operation: "jjEdit", cause }),
+				}),
+			jjAbandon: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.jjAbandon(params),
+					catch: (cause) => new NativeClientError({ operation: "jjAbandon", cause }),
+				}),
+			jjDescribe: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.jjDescribe(params),
+					catch: (cause) => new NativeClientError({ operation: "jjDescribe", cause }),
+				}),
+			jjSquash: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.jjSquash(params),
+					catch: (cause) => new NativeClientError({ operation: "jjSquash", cause }),
+				}),
+			jjRebase: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.jjRebase(params),
+					catch: (cause) => new NativeClientError({ operation: "jjRebase", cause }),
 				}),
 			getProjects: () =>
 				Effect.tryPromise({

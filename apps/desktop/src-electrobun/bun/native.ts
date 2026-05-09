@@ -13,6 +13,13 @@ export type NativeAddon = {
 	getRevisionDiffJson: (repoPath: string, changeId: string) => string;
 	getChangesBatchJson: (repoPath: string, changeIds: string[]) => string;
 	getDiffsBatchJson: (repoPath: string, changeIds: string[]) => string;
+	generateChangeIds: (repoPath: string, count: number) => string[];
+	jjNew: (repoPath: string, parentChangeIds: string[], changeId?: string | null) => string;
+	jjEdit: (repoPath: string, changeId: string) => string;
+	jjAbandon: (repoPath: string, changeId: string) => string;
+	jjDescribe: (repoPath: string, changeId: string, description: string) => string;
+	jjSquash: (repoPath: string, changeId: string) => string;
+	jjRebase: (repoPath: string, sourceChangeId: string, destinationChangeId: string) => string;
 };
 
 const require = createRequire(import.meta.url);
@@ -96,6 +103,13 @@ export function loadNativeAddon(): NativeAddon {
 			"getRevisionDiffJson",
 			"getChangesBatchJson",
 			"getDiffsBatchJson",
+			"generateChangeIds",
+			"jjNew",
+			"jjEdit",
+			"jjAbandon",
+			"jjDescribe",
+			"jjSquash",
+			"jjRebase",
 		] as const;
 		for (const exportName of expectedExports) {
 			if (typeof addon[exportName] !== "function") {

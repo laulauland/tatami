@@ -42,6 +42,15 @@ export type Revision = typeof Revision.Type;
 export const Revisions = Schema.Array(Revision);
 export type Revisions = typeof Revisions.Type;
 
+export const MutationResult = Schema.Struct({
+	operation_id: Schema.String,
+	change_id: Schema.NullOr(Schema.String),
+});
+export type MutationResult = typeof MutationResult.Type;
+
+export const ChangeIds = Schema.Array(Schema.String);
+export type ChangeIds = typeof ChangeIds.Type;
+
 export const ChangedFileStatus = Schema.Literal("modified", "added", "deleted");
 export type ChangedFileStatus = typeof ChangedFileStatus.Type;
 

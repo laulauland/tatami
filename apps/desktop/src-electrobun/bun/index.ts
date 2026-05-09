@@ -5,6 +5,10 @@ import type {
 	AppRPC,
 	ChangedFile,
 	GetRevisionsParams,
+	JjDescribeParams,
+	JjNewParams,
+	JjRebaseParams,
+	MutationResult,
 	Project,
 	RevisionChanges,
 	RevisionDiff,
@@ -110,6 +114,57 @@ async function getDiffsBatch(params: { repoPath: string; changeIds: string[] }):
 	);
 }
 
+async function generateChangeIds(params: { repoPath: string; count: number }): Promise<string[]> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.generateChangeIds(params);
+		}),
+	);
+}
+
+async function jjNew(params: JjNewParams): Promise<MutationResult> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.jjNew(params);
+	}));
+}
+
+async function jjEdit(params: { repoPath: string; changeId: string }): Promise<MutationResult> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.jjEdit(params);
+	}));
+}
+
+async function jjAbandon(params: { repoPath: string; changeId: string }): Promise<MutationResult> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.jjAbandon(params);
+	}));
+}
+
+async function jjDescribe(params: JjDescribeParams): Promise<MutationResult> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.jjDescribe(params);
+	}));
+}
+
+async function jjSquash(params: { repoPath: string; changeId: string }): Promise<MutationResult> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.jjSquash(params);
+	}));
+}
+
+async function jjRebase(params: JjRebaseParams): Promise<MutationResult> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.jjRebase(params);
+	}));
+}
+
 async function getProjects(): Promise<Project[]> {
 	return BackendRuntime.runPromise(
 		Effect.gen(function* () {
@@ -165,7 +220,7 @@ async function openRepositoryDialog(): Promise<string | null> {
 }
 
 const appRpc = BrowserView.defineRPC<AppRPC>({
-	maxRequestTime: 5000,
+	maxRequestTime: 15000,
 	handlers: {
 		requests: {
 			getRevisions,
@@ -173,6 +228,13 @@ const appRpc = BrowserView.defineRPC<AppRPC>({
 			getRevisionDiff,
 			getChangesBatch,
 			getDiffsBatch,
+			generateChangeIds,
+			jjNew,
+			jjEdit,
+			jjAbandon,
+			jjDescribe,
+			jjSquash,
+			jjRebase,
 			getProjects,
 			upsertProject,
 			removeProject,

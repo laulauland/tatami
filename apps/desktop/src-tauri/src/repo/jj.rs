@@ -554,16 +554,16 @@ impl JjRepo {
         let new_repo = tx.commit("squash")?;
         let operation_id = new_repo.operation().id().clone();
 
-        if let Some(new_wc_commit_id) = new_repo.view().get_wc_commit_id(&workspace_name) {
-            if old_wc_commit_id.as_ref() != Some(new_wc_commit_id) {
-                let new_wc_commit = new_repo
-                    .store()
-                    .get_commit(new_wc_commit_id)
-                    .context("Failed to get new working copy commit")?;
-                self.workspace
-                    .check_out(operation_id.clone(), old_tree_id.as_ref(), &new_wc_commit)
-                    .context("Failed to update working copy after squash")?;
-            }
+        if let Some(new_wc_commit_id) = new_repo.view().get_wc_commit_id(&workspace_name)
+            && old_wc_commit_id.as_ref() != Some(new_wc_commit_id)
+        {
+            let new_wc_commit = new_repo
+                .store()
+                .get_commit(new_wc_commit_id)
+                .context("Failed to get new working copy commit")?;
+            self.workspace
+                .check_out(operation_id.clone(), old_tree_id.as_ref(), &new_wc_commit)
+                .context("Failed to update working copy after squash")?;
         }
 
         Ok(MutationResult {
@@ -626,16 +626,16 @@ impl JjRepo {
         let new_repo = tx.commit("rebase")?;
         let operation_id = new_repo.operation().id().clone();
 
-        if let Some(new_wc_commit_id) = new_repo.view().get_wc_commit_id(&workspace_name) {
-            if old_wc_commit_id.as_ref() != Some(new_wc_commit_id) {
-                let new_wc_commit = new_repo
-                    .store()
-                    .get_commit(new_wc_commit_id)
-                    .context("Failed to get new working copy commit")?;
-                self.workspace
-                    .check_out(operation_id.clone(), old_tree_id.as_ref(), &new_wc_commit)
-                    .context("Failed to update working copy after rebase")?;
-            }
+        if let Some(new_wc_commit_id) = new_repo.view().get_wc_commit_id(&workspace_name)
+            && old_wc_commit_id.as_ref() != Some(new_wc_commit_id)
+        {
+            let new_wc_commit = new_repo
+                .store()
+                .get_commit(new_wc_commit_id)
+                .context("Failed to get new working copy commit")?;
+            self.workspace
+                .check_out(operation_id.clone(), old_tree_id.as_ref(), &new_wc_commit)
+                .context("Failed to update working copy after rebase")?;
         }
 
         Ok(MutationResult {
@@ -915,16 +915,15 @@ impl JjRepo {
         if let Some(new_wc_commit_id) = new_repo
             .view()
             .get_wc_commit_id(self.workspace.workspace_name())
+            && old_wc_commit_id.as_ref() != Some(new_wc_commit_id)
         {
-            if old_wc_commit_id.as_ref() != Some(new_wc_commit_id) {
-                let new_wc_commit = new_repo
-                    .store()
-                    .get_commit(new_wc_commit_id)
-                    .context("Failed to get new working copy commit")?;
-                self.workspace
-                    .check_out(new_op_id, old_tree_id.as_ref(), &new_wc_commit)
-                    .context("Failed to check out after undo")?;
-            }
+            let new_wc_commit = new_repo
+                .store()
+                .get_commit(new_wc_commit_id)
+                .context("Failed to get new working copy commit")?;
+            self.workspace
+                .check_out(new_op_id, old_tree_id.as_ref(), &new_wc_commit)
+                .context("Failed to check out after undo")?;
         }
 
         Ok(())

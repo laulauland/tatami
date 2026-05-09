@@ -15,10 +15,24 @@
 
 	let {
 		revisions = [],
+		mutationsDisabled = false,
 		onselect,
+		onnew,
+		onedit,
+		onabandon,
+		ondescribe,
+		onsquash,
+		onrebase,
 	}: {
 		revisions?: RevisionStub[];
+		mutationsDisabled?: boolean;
 		onselect?: (revision: RevisionStub) => void;
+		onnew?: (parentChangeIds: string[]) => void;
+		onedit?: (changeId: string) => void;
+		onabandon?: (changeId: string) => void;
+		ondescribe?: (changeId: string, currentDescription: string) => void;
+		onsquash?: (changeId: string) => void;
+		onrebase?: (sourceChangeId: string) => void;
 	} = $props();
 
 	let scrollElement = $state<HTMLDivElement | null>(null);
@@ -129,7 +143,14 @@
 							lane={row.lane}
 							{graphWidth}
 							isSelected={row.revision.change_id === selectedRevisionId}
+							{mutationsDisabled}
 							onselect={selectRevision}
+							onnew={onnew}
+							onedit={onedit}
+							onabandon={onabandon}
+							ondescribe={ondescribe}
+							onsquash={onsquash}
+							onrebase={onrebase}
 						/>
 					</div>
 				{/if}

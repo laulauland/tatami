@@ -5,6 +5,15 @@
 	import DiffPanel from "./components/DiffPanel.svelte";
 	import ProjectPicker from "./components/ProjectPicker.svelte";
 	import RevisionGraph from "./components/revision-graph/RevisionGraph.svelte";
+	import {
+		jjAbandon,
+		jjDescribe,
+		jjEdit,
+		jjNew,
+		jjRebase,
+		jjSquash,
+		type RevisionMutationOperation,
+	} from "./data/mutations.ts";
 	import { populateRepositories, repositoriesCollection } from "./data/repositories.ts";
 	import { populateRevisions, revisionsCollection } from "./data/revisions.ts";
 	import { FrontendRuntime } from "./runtime.ts";
@@ -16,6 +25,7 @@
 	let projectMessage = $state<string | null>(null);
 	let activeProjectId = $state<string | null>(null);
 	let isProjectBusy = $state(false);
+	let mutationInFlight = $state<RevisionMutationOperation | null>(null);
 
 	const revisionsQuery = useLiveQuery((query) =>
 		query.from({ revisions: revisionsCollection }).select(({ revisions }) => revisions),
@@ -102,6 +112,61 @@
 		} finally {
 			isProjectBusy = false;
 		}
+	}
+
+	function formatError(error: unknown): string {
+		return error instanceof Error ? error.message : String(error);
+	}
+
+	async function runRevisionMutation(
+		operation: RevisionMutationOperation,
+		action: (repoPath: string) => Promise<unknown>,
+	): Promise<void> {
+		if (activeProject == null || mutationInFlight != null) return;
+		mutationInFlight = operation;
+		errorMessage = null;
+		try {
+			await action(activeProject.path);
+		} catch (error) {
+			errorMessage = `${operation} failed: ${formatError(error)}`;
+			console.error(`${operation} failed`, error);
+		} finally {
+			mutationInFlight = null;
+		}
+	}
+
+	async function describeRevision(changeId: string, currentDescription: string): Promise<void> {
+		const description = window.prompt("Describe revision", currentDescription);
+		if (description == null) return;
+		await runRevisionMutation("jjDescribe", (repoPath) => jjDescribe({ repoPath, changeId, description }));
+	}
+
+	async function newRevision(parentChangeIds: string[]): Promise<void> {
+		await runRevisionMutation("jjNew", (repoPath) => jjNew({ repoPath, parentChangeIds }));
+	}
+
+	async function editRevision(changeId: string): Promise<void> {
+		await runRevisionMutation("jjEdit", (repoPath) => jjEdit(repoPath, changeId));
+	}
+
+	async function abandonRevision(changeId: string): Promise<void> {
+		if (!window.confirm("Abandon this revision?")) return;
+		await runRevisionMutation("jjAbandon", (repoPath) => jjAbandon(repoPath, changeId));
+	}
+
+	async function squashRevision(changeId: string): Promise<void> {
+		if (!window.confirm("Squash this revision into its parent?")) return;
+		await runRevisionMutation("jjSquash", (repoPath) => jjSquash(repoPath, changeId));
+	}
+
+	async function rebaseRevision(sourceChangeId: string): Promise<void> {
+		const destinationChangeId = window.prompt("Destination change id");
+		if (destinationChangeId == null || destinationChangeId.trim() === "") return;
+		await runRevisionMutation("jjRebase", (repoPath) => jjRebase({
+			repoPath,
+			sourceChangeId,
+			destinationChangeId: destinationChangeId.trim(),
+		}));
 	}
 
 	async function removeProject(project: Project): Promise<void> {
@@ -225,7 +290,19 @@
 		{:else if isProjectBusy || isLoading}
 			<p class="muted">Loading jj revisions through typed webview-to-Bun RPC…</p>
 		{:else}
-			<RevisionGraph {revisions} />
+			{#if mutationInFlight}
+				<p class="muted">Running {mutationInFlight}…</p>
+			{/if}
+			<RevisionGraph
+				{revisions}
+				mutationsDisabled={mutationInFlight != null}
+				onnew={newRevision}
+				onedit={editRevision}
+				onabandon={abandonRevision}
+				ondescribe={describeRevision}
+				onsquash={squashRevision}
+				onrebase={rebaseRevision}
+			/>
 		{/if}
 	</section>
 

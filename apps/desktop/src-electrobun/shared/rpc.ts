@@ -36,6 +36,29 @@ export type GetRevisionsParams = {
 	limit?: number;
 };
 
+export type MutationResult = {
+	operation_id: string;
+	change_id: string | null;
+};
+
+export type JjNewParams = {
+	repoPath: string;
+	parentChangeIds: string[];
+	changeId?: string | null;
+};
+
+export type JjDescribeParams = {
+	repoPath: string;
+	changeId: string;
+	description: string;
+};
+
+export type JjRebaseParams = {
+	repoPath: string;
+	sourceChangeId: string;
+	destinationChangeId: string;
+};
+
 export type ChangedFileStatus = "modified" | "added" | "deleted";
 
 export type ChangedFile = {
@@ -95,6 +118,34 @@ export type AppRPC = {
 			getDiffsBatch: {
 				params: { repoPath: string; changeIds: string[] };
 				response: RevisionDiff[];
+			};
+			generateChangeIds: {
+				params: { repoPath: string; count: number };
+				response: string[];
+			};
+			jjNew: {
+				params: JjNewParams;
+				response: MutationResult;
+			};
+			jjEdit: {
+				params: { repoPath: string; changeId: string };
+				response: MutationResult;
+			};
+			jjAbandon: {
+				params: { repoPath: string; changeId: string };
+				response: MutationResult;
+			};
+			jjDescribe: {
+				params: JjDescribeParams;
+				response: MutationResult;
+			};
+			jjSquash: {
+				params: { repoPath: string; changeId: string };
+				response: MutationResult;
+			};
+			jjRebase: {
+				params: JjRebaseParams;
+				response: MutationResult;
 			};
 			getProjects: {
 				params: {};

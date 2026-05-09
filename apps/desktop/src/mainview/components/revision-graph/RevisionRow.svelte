@@ -9,13 +9,27 @@
 		lane,
 		graphWidth,
 		isSelected = false,
+		mutationsDisabled = false,
 		onselect,
+		onnew,
+		onedit,
+		onabandon,
+		ondescribe,
+		onsquash,
+		onrebase,
 	}: {
 		revision: RevisionStub;
 		lane: number;
 		graphWidth: number;
 		isSelected?: boolean;
+		mutationsDisabled?: boolean;
 		onselect?: (revision: RevisionStub) => void;
+		onnew?: (parentChangeIds: string[]) => void;
+		onedit?: (changeId: string) => void;
+		onabandon?: (changeId: string) => void;
+		ondescribe?: (changeId: string, currentDescription: string) => void;
+		onsquash?: (changeId: string) => void;
+		onrebase?: (sourceChangeId: string) => void;
 	} = $props();
 
 	const description = $derived(revision.description.trim() || "(no description)");
@@ -24,12 +38,17 @@
 	const nodeWidth = $derived(Math.max(graphWidth, LANE_PADDING * 2 + LANE_WIDTH));
 </script>
 
-<button
-	type="button"
+<div
 	class="revision-row"
 	class:selected={isSelected}
 	style:height={`${ROW_HEIGHT}px`}
+	role="option"
+	aria-selected={isSelected}
+	tabindex="-1"
 	onclick={() => onselect?.(revision)}
+	onkeydown={(event) => {
+		if (event.key === "Enter" || event.key === " ") onselect?.(revision);
+	}}
 >
 	<svg class="node-cell" width={nodeWidth} height={ROW_HEIGHT} aria-hidden="true">
 		<GraphNode
@@ -63,7 +82,16 @@
 			</div>
 		{/if}
 	</div>
-</button>
+
+	<div class="row-actions" onclick={(event) => event.stopPropagation()} onkeydown={(event) => event.stopPropagation()}>
+		<button type="button" disabled={mutationsDisabled} onclick={() => ondescribe?.(revision.change_id, revision.description)}>describe</button>
+		<button type="button" disabled={mutationsDisabled} onclick={() => onnew?.([revision.change_id])}>new</button>
+		<button type="button" disabled={mutationsDisabled || revision.is_immutable} onclick={() => onedit?.(revision.change_id)}>edit</button>
+		<button type="button" disabled={mutationsDisabled || revision.is_immutable || revision.is_working_copy} onclick={() => onsquash?.(revision.change_id)}>squash</button>
+		<button type="button" disabled={mutationsDisabled || revision.is_immutable || revision.is_working_copy} onclick={() => onrebase?.(revision.change_id)}>rebase</button>
+		<button type="button" disabled={mutationsDisabled || revision.is_immutable || revision.is_working_copy} onclick={() => onabandon?.(revision.change_id)}>abandon</button>
+	</div>
+</div>
 
 <style>
 	.revision-row {
@@ -105,6 +133,45 @@
 		padding: 8px 14px 8px 6px;
 		gap: 4px;
 		flex: 1 1 auto;
+	}
+
+	.row-actions {
+		position: relative;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		padding-right: 10px;
+		opacity: 0;
+		transition: opacity 120ms ease;
+	}
+
+	.revision-row:hover .row-actions,
+	.revision-row.selected .row-actions,
+	.revision-row:focus-within .row-actions {
+		opacity: 1;
+	}
+
+	.row-actions button {
+		border: 1px solid rgba(255, 255, 255, 0.12);
+		border-radius: 999px;
+		padding: 3px 7px;
+		background: rgba(255, 255, 255, 0.07);
+		color: #d9d1c4;
+		font: inherit;
+		font-size: 0.68rem;
+		cursor: pointer;
+	}
+
+	.row-actions button:hover:not(:disabled),
+	.row-actions button:focus-visible {
+		background: rgba(119, 114, 255, 0.24);
+		outline: none;
+	}
+
+	.row-actions button:disabled {
+		opacity: 0.42;
+		cursor: not-allowed;
 	}
 
 	.summary,

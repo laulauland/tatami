@@ -3,7 +3,7 @@ use napi_derive::napi;
 use serde::Serialize;
 use std::path::Path;
 use tatami_desktop_lib::repo::diff;
-use tatami_desktop_lib::repo::jj::JjRepo;
+use tatami_desktop_lib::repo::jj::{JjRepo, MutationResult};
 use tatami_desktop_lib::repo::log::fetch_log;
 
 #[derive(Serialize)]
@@ -264,4 +264,76 @@ pub fn get_diffs_batch_json(repo_path: String, change_ids: Vec<String>) -> Resul
         .collect();
 
     serde_json::to_string(&diffs).map_err(to_napi_error)
+}
+
+fn mutation_result_to_json(result: MutationResult) -> Result<String> {
+    serde_json::to_string(&result).map_err(to_napi_error)
+}
+
+#[napi]
+pub fn generate_change_ids(repo_path: String, count: u32) -> Result<Vec<String>> {
+    let jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    jj_repo
+        .generate_change_ids(count as usize)
+        .map_err(to_napi_error)
+}
+
+#[napi]
+pub fn jj_new(
+    repo_path: String,
+    parent_change_ids: Vec<String>,
+    change_id: Option<String>,
+) -> Result<String> {
+    let mut jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    let result = jj_repo
+        .new_revision(parent_change_ids, change_id)
+        .map_err(to_napi_error)?;
+    mutation_result_to_json(result)
+}
+
+#[napi]
+pub fn jj_edit(repo_path: String, change_id: String) -> Result<String> {
+    let mut jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    let result = jj_repo.edit_revision(change_id).map_err(to_napi_error)?;
+    mutation_result_to_json(result)
+}
+
+#[napi]
+pub fn jj_abandon(repo_path: String, change_id: String) -> Result<String> {
+    let mut jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    let result = jj_repo
+        .abandon_revision(&change_id)
+        .map_err(to_napi_error)?;
+    mutation_result_to_json(result)
+}
+
+#[napi]
+pub fn jj_describe(repo_path: String, change_id: String, description: String) -> Result<String> {
+    let mut jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    let result = jj_repo
+        .describe_revision(&change_id, description)
+        .map_err(to_napi_error)?;
+    mutation_result_to_json(result)
+}
+
+#[napi]
+pub fn jj_squash(repo_path: String, change_id: String) -> Result<String> {
+    let mut jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    let result = jj_repo
+        .squash_revision(&change_id)
+        .map_err(to_napi_error)?;
+    mutation_result_to_json(result)
+}
+
+#[napi]
+pub fn jj_rebase(
+    repo_path: String,
+    source_change_id: String,
+    destination_change_id: String,
+) -> Result<String> {
+    let mut jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    let result = jj_repo
+        .rebase_revision(&source_change_id, &destination_change_id)
+        .map_err(to_napi_error)?;
+    mutation_result_to_json(result)
 }

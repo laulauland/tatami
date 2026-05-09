@@ -2,12 +2,28 @@
 	import { useLiveQuery } from "@tanstack/svelte-db";
 	import { Effect } from "effect";
 	import { onMount } from "svelte";
+	import FileTreeView from "./components/FileTreeView.svelte";
 	import { populateRevisions, revisionsCollection } from "./data/revisions.ts";
 	import { FrontendRuntime } from "./runtime.ts";
 	import { NativeClient } from "./services/NativeClient.ts";
 
+	const fixturePaths = [
+		"src/mainview/App.svelte",
+		"src/mainview/components/FileTreeView.svelte",
+		"src/mainview/data/revisions.ts",
+		"src/mainview/services/NativeClient.ts",
+		"src-electrobun/bun/index.ts",
+		"src-electrobun/bun/native.ts",
+		"src-electrobun/bun/services/RepoService.ts",
+		"src-electrobun/shared/rpc.ts",
+		"src-electrobun/shared/schemas.ts",
+		"package.json",
+		"vite.electrobun.config.ts",
+	] as const;
+
 	let clickCount = $state(0);
 	let errorMessage = $state<string | null>(null);
+	let selectedTreePaths = $state<readonly string[]>([]);
 
 	const revisionsQuery = useLiveQuery((query) =>
 		query.from({ revisions: revisionsCollection }).select(({ revisions }) => revisions),
@@ -93,6 +109,27 @@
 			</ul>
 		{/if}
 	</section>
+
+	<section class="tree-panel" aria-labelledby="tree-title">
+		<div class="panel-heading">
+			<div>
+				<p class="eyebrow">@pierre/trees fixture</p>
+				<h2 id="tree-title">File tree</h2>
+			</div>
+			<span class="status">hardcoded paths</span>
+		</div>
+
+		<FileTreeView
+			paths={fixturePaths}
+			onSelectionChange={(paths) => selectedTreePaths = paths}
+		/>
+
+		{#if selectedTreePaths.length > 0}
+			<p class="tree-selection">Selected: {selectedTreePaths.join(", ")}</p>
+		{:else}
+			<p class="muted tree-selection">Select a file in the fixture tree to prove Svelte receives tree events.</p>
+		{/if}
+	</section>
 </main>
 
 <style>
@@ -154,7 +191,8 @@
 
 	.hero > div,
 	.rune-card,
-	.rpc-panel {
+	.rpc-panel,
+	.tree-panel {
 		border: 1px solid rgba(255, 255, 255, 0.1);
 		border-radius: 24px;
 		padding: 28px;
@@ -210,7 +248,8 @@
 		color: #f6f2ea;
 	}
 
-	.rpc-panel {
+	.rpc-panel,
+	.tree-panel {
 		margin-top: 24px;
 	}
 
@@ -222,14 +261,16 @@
 		margin-bottom: 20px;
 	}
 
-	.rpc-panel h2 {
+	.rpc-panel h2,
+	.tree-panel h2 {
 		font-size: 2rem;
 		letter-spacing: -0.04em;
 	}
 
 	.muted,
 	.error,
-	.revision-list p {
+	.revision-list p,
+	.tree-selection {
 		color: #c8c0b2;
 	}
 

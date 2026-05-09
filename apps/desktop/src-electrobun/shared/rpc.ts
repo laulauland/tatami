@@ -106,6 +106,20 @@ export type AppLayout = {
 	sidebar_width: number | null;
 };
 
+export type MessageBoxOptions = {
+	type?: "info" | "warning" | "error" | "question";
+	title?: string;
+	message?: string;
+	detail?: string;
+	buttons?: string[];
+	defaultId?: number;
+	cancelId?: number;
+};
+
+export type MessageBoxResponse = {
+	response: number;
+};
+
 export type AppRPC = {
 	bun: {
 		requests: {
@@ -197,13 +211,39 @@ export type AppRPC = {
 				params: {};
 				response: string | null;
 			};
+			watchRepository: {
+				params: { repoPath: string };
+				response: void;
+			};
+			unwatchRepository: {
+				params: { repoPath: string };
+				response: void;
+			};
+			openExternal: {
+				params: { url: string };
+				response: boolean;
+			};
+			openPath: {
+				params: { path: string };
+				response: boolean;
+			};
+			showItemInFolder: {
+				params: { path: string };
+				response: void;
+			};
+			showMessageBox: {
+				params: MessageBoxOptions;
+				response: MessageBoxResponse;
+			};
 		};
 		messages: {};
 	};
 	webview: {
 		requests: {};
 		messages: {
-			repoChanged: { timestamp: number };
+			repoChanged: { repoPath: string; timestamp: number };
+			openRepositoryRequested: {};
+			deepLink: { url: string };
 		};
 	};
 };

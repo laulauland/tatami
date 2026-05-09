@@ -5,6 +5,7 @@ export default {
 		name: "Tatami",
 		identifier: "dev.tatami.app",
 		version: "0.1.0",
+		urlSchemes: ["tatami"],
 	},
 	build: {
 		bun: {

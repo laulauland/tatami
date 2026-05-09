@@ -6,8 +6,16 @@ const rpc = Electroview.defineRPC<AppRPC>({
 	handlers: {
 		requests: {},
 		messages: {
-			repoChanged: ({ timestamp }) => {
-				window.dispatchEvent(new CustomEvent("tatami:repo-changed", { detail: { timestamp } }));
+			repoChanged: ({ repoPath, timestamp }) => {
+				window.dispatchEvent(
+					new CustomEvent("tatami:repo-changed", { detail: { repoPath, timestamp } }),
+				);
+			},
+			openRepositoryRequested: () => {
+				window.dispatchEvent(new CustomEvent("tatami:open-repository-requested"));
+			},
+			deepLink: ({ url }) => {
+				window.dispatchEvent(new CustomEvent("tatami:deep-link", { detail: { url } }));
 			},
 		},
 	},

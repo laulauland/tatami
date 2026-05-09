@@ -6,6 +6,8 @@ import type {
 	JjDescribeParams,
 	JjNewParams,
 	JjRebaseParams,
+	MessageBoxOptions,
+	MessageBoxResponse,
 	MutationResult,
 	Operation,
 	Project,
@@ -39,7 +41,13 @@ export class NativeClientError extends Data.TaggedError("NativeClientError")<{
 		| "removeProject"
 		| "getLayout"
 		| "updateLayout"
-		| "openRepositoryDialog";
+		| "openRepositoryDialog"
+		| "watchRepository"
+		| "unwatchRepository"
+		| "openExternal"
+		| "openPath"
+		| "showItemInFolder"
+		| "showMessageBox";
 	readonly cause: unknown;
 }> {}
 
@@ -111,6 +119,14 @@ export class NativeClient extends Context.Tag("tatami/NativeClient")<
 		readonly getLayout: () => Effect.Effect<AppLayout, NativeClientError>;
 		readonly updateLayout: (layout: Partial<AppLayout>) => Effect.Effect<void, NativeClientError>;
 		readonly openRepositoryDialog: () => Effect.Effect<string | null, NativeClientError>;
+		readonly watchRepository: (repoPath: string) => Effect.Effect<void, NativeClientError>;
+		readonly unwatchRepository: (repoPath: string) => Effect.Effect<void, NativeClientError>;
+		readonly openExternal: (url: string) => Effect.Effect<boolean, NativeClientError>;
+		readonly openPath: (path: string) => Effect.Effect<boolean, NativeClientError>;
+		readonly showItemInFolder: (path: string) => Effect.Effect<void, NativeClientError>;
+		readonly showMessageBox: (
+			options: MessageBoxOptions,
+		) => Effect.Effect<MessageBoxResponse, NativeClientError>;
 	}
 >() {
 	static readonly Live = Layer.succeed(
@@ -225,6 +241,36 @@ export class NativeClient extends Context.Tag("tatami/NativeClient")<
 				Effect.tryPromise({
 					try: () => appRpc.request.openRepositoryDialog({}),
 					catch: (cause) => new NativeClientError({ operation: "openRepositoryDialog", cause }),
+				}),
+			watchRepository: (repoPath) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.watchRepository({ repoPath }),
+					catch: (cause) => new NativeClientError({ operation: "watchRepository", cause }),
+				}),
+			unwatchRepository: (repoPath) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.unwatchRepository({ repoPath }),
+					catch: (cause) => new NativeClientError({ operation: "unwatchRepository", cause }),
+				}),
+			openExternal: (url) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.openExternal({ url }),
+					catch: (cause) => new NativeClientError({ operation: "openExternal", cause }),
+				}),
+			openPath: (path) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.openPath({ path }),
+					catch: (cause) => new NativeClientError({ operation: "openPath", cause }),
+				}),
+			showItemInFolder: (path) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.showItemInFolder({ path }),
+					catch: (cause) => new NativeClientError({ operation: "showItemInFolder", cause }),
+				}),
+			showMessageBox: (options) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.showMessageBox(options),
+					catch: (cause) => new NativeClientError({ operation: "showMessageBox", cause }),
 				}),
 		}),
 	);

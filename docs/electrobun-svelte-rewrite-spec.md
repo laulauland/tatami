@@ -530,7 +530,7 @@ Implementation options:
 - Keep watcher in Rust native addon if easiest to reuse existing `notify` code.
 - Implement watcher in Bun if adequate and cross-platform behavior is acceptable.
 
-Prefer preserving the existing Rust watcher initially.
+Revision 13 implements the initial Electrobun watcher in Bun with `fs.watch` on `<repo>/.jj/repo`, normalized-path deduplication, and a 500ms debounce. This avoids adding a native-addon callback bridge before parity is proven. Revisit Rust `notify` if Bun watcher behavior is inadequate on supported platforms.
 
 ## Storage plan
 
@@ -566,6 +566,8 @@ Plan:
 - Preserve deep-link parsing in shared TypeScript.
 - Wire macOS Electrobun `open-url` first.
 - Document Windows/Linux gap before Tauri removal.
+
+Revision 13 registers the `tatami` scheme with Electrobun and forwards supported `tatami://` URLs to the webview. Electrobun deep-link delivery is treated as macOS-only for now; Windows/Linux parity remains a documented platform gap before Tauri removal.
 
 ## Build/package plan
 

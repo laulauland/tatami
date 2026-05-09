@@ -1,4 +1,4 @@
-import { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
+import Electrobun, { BrowserView, BrowserWindow, Updater } from "electrobun/bun";
 import { Effect } from "effect";
 import type {
 	AppLayout,
@@ -8,6 +8,8 @@ import type {
 	JjDescribeParams,
 	JjNewParams,
 	JjRebaseParams,
+	MessageBoxOptions,
+	MessageBoxResponse,
 	MutationResult,
 	Operation,
 	Project,
@@ -20,6 +22,7 @@ import { BackendRuntime } from "./runtime.ts";
 import { DesktopService } from "./services/DesktopService.ts";
 import { RepoService } from "./services/RepoService.ts";
 import { StorageService } from "./services/StorageService.ts";
+import { WatcherService } from "./services/WatcherService.ts";
 
 const DEV_SERVER_PORT = 5174;
 const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
@@ -248,6 +251,69 @@ async function openRepositoryDialog(): Promise<string | null> {
 	);
 }
 
+async function watchRepository(params: { repoPath: string }): Promise<void> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const watcher = yield* WatcherService;
+			return yield* watcher.watch(params.repoPath);
+		}),
+	);
+}
+
+async function unwatchRepository(params: { repoPath: string }): Promise<void> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const watcher = yield* WatcherService;
+			return yield* watcher.unwatch(params.repoPath);
+		}),
+	);
+}
+
+async function setupApplicationMenu(): Promise<void> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const desktop = yield* DesktopService;
+			return yield* desktop.setupApplicationMenu();
+		}),
+	);
+}
+
+async function openExternal(params: { url: string }): Promise<boolean> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const desktop = yield* DesktopService;
+			return yield* desktop.openExternal(params.url);
+		}),
+	);
+}
+
+async function openPath(params: { path: string }): Promise<boolean> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const desktop = yield* DesktopService;
+			return yield* desktop.openPath(params.path);
+		}),
+	);
+}
+
+async function showItemInFolder(params: { path: string }): Promise<void> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const desktop = yield* DesktopService;
+			return yield* desktop.showItemInFolder(params.path);
+		}),
+	);
+}
+
+async function showMessageBox(params: MessageBoxOptions): Promise<MessageBoxResponse> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const desktop = yield* DesktopService;
+			return yield* desktop.showMessageBox(params);
+		}),
+	);
+}
+
 const appRpc = BrowserView.defineRPC<AppRPC>({
 	maxRequestTime: 15000,
 	handlers: {
@@ -274,6 +340,12 @@ const appRpc = BrowserView.defineRPC<AppRPC>({
 			getLayout,
 			updateLayout,
 			openRepositoryDialog,
+			watchRepository,
+			unwatchRepository,
+			openExternal,
+			openPath,
+			showItemInFolder,
+			showMessageBox,
 		},
 		messages: {},
 	},
@@ -291,6 +363,41 @@ const mainWindow = new BrowserWindow({
 		x: 200,
 		y: 200,
 	},
+});
+
+await BackendRuntime.runPromise(
+	Effect.gen(function* () {
+		const watcher = yield* WatcherService;
+		yield* watcher.setRepoChangedHandler((event) => {
+			mainWindow.webview.rpc?.send.repoChanged(event);
+		});
+	}),
+);
+await setupApplicationMenu();
+
+Electrobun.events.on("application-menu-clicked", (event) => {
+	const action = event.data.action;
+	if (action === "open-repository") {
+		mainWindow.webview.rpc?.send.openRepositoryRequested({});
+	}
+});
+
+Electrobun.events.on("open-url", (event) => {
+	const url = event.data.url;
+	if (!url.startsWith("tatami://")) {
+		console.warn(`Unsupported deep link URL: ${url}`);
+		return;
+	}
+	mainWindow.webview.rpc?.send.deepLink({ url });
+});
+
+Electrobun.events.on("before-quit", () => {
+	void BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const watcher = yield* WatcherService;
+			return yield* watcher.unwatchAll();
+		}),
+	);
 });
 
 console.log("Tatami Electrobun shell started", mainWindow.id);

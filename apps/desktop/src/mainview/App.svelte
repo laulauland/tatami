@@ -31,6 +31,7 @@
 	let mutationInFlight = $state<RevisionMutationOperation | null>(null);
 	let isSyncing = $state(false);
 	let operationsLogOpen = $state(false);
+	let watchedRepoPath: string | null = null;
 
 	const revisionsQuery = useLiveQuery((query) =>
 		query.from({ revisions: revisionsCollection }).select(({ revisions }) => revisions),
@@ -62,13 +63,46 @@
 		}
 
 		await populateOperations([]);
-		const loadedRevisions = await FrontendRuntime.runPromise(
+		const [loadedRevisions, loadedOperations] = await FrontendRuntime.runPromise(
 			Effect.gen(function* () {
 				const nativeClient = yield* NativeClient;
-				return yield* nativeClient.getRevisions({ repoPath: project.path, limit: 50 });
+				const loadedRevisions = yield* nativeClient.getRevisions({ repoPath: project.path, limit: 50 });
+				const loadedOperations = yield* nativeClient.getOperations({ repoPath: project.path, limit: 50 });
+				return [loadedRevisions, loadedOperations] as const;
 			}),
 		);
 		await populateRevisions(loadedRevisions);
+		await populateOperations(loadedOperations);
+	}
+
+	async function watchProject(project: Project | null): Promise<void> {
+		const nextRepoPath = project?.path ?? null;
+		if (watchedRepoPath === nextRepoPath) return;
+
+		const previousRepoPath = watchedRepoPath;
+		watchedRepoPath = nextRepoPath;
+
+		await FrontendRuntime.runPromise(
+			Effect.gen(function* () {
+				const nativeClient = yield* NativeClient;
+				if (previousRepoPath != null) {
+					yield* nativeClient.unwatchRepository(previousRepoPath);
+				}
+				if (nextRepoPath != null) {
+					yield* nativeClient.watchRepository(nextRepoPath);
+				}
+			}),
+		);
+	}
+
+	async function refreshActiveRepository(reason: string): Promise<void> {
+		if (activeProject == null) return;
+		try {
+			await loadRevisionsForProject(activeProject);
+		} catch (error) {
+			errorMessage = `Failed to refresh repository after ${reason}: ${formatError(error)}`;
+			console.error("Failed to refresh repository", error);
+		}
 	}
 
 	async function selectProject(project: Project): Promise<void> {
@@ -83,6 +117,7 @@
 				}),
 			);
 			activeProjectId = project.id;
+			await watchProject(project);
 			await loadRevisionsForProject(project);
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : String(error);
@@ -208,6 +243,7 @@
 			const nextProjects = (await refreshProjects()).filter((nextProject) => nextProject.id !== project.id);
 			const nextActiveProject = nextProjects[0] ?? null;
 			activeProjectId = nextActiveProject?.id ?? null;
+			await watchProject(nextActiveProject);
 			await FrontendRuntime.runPromise(
 				Effect.gen(function* () {
 					const nativeClient = yield* NativeClient;
@@ -223,38 +259,78 @@
 		}
 	}
 
-	onMount(async () => {
-		isProjectBusy = true;
-		try {
-			const [loadedProjects, layout] = await FrontendRuntime.runPromise(
-				Effect.gen(function* () {
-					const nativeClient = yield* NativeClient;
-					const loadedProjects = yield* nativeClient.getProjects();
-					const layout = yield* nativeClient.getLayout();
-					return [loadedProjects, layout] as const;
-				}),
-			);
-			await populateRepositories(loadedProjects);
-			const project =
-				loadedProjects.find((candidate) => candidate.id === layout.active_project_id) ??
-				loadedProjects[0] ??
-				null;
-			activeProjectId = project?.id ?? null;
-			if (project != null && project.id !== layout.active_project_id) {
-				await FrontendRuntime.runPromise(
+	onMount(() => {
+		function handleRepoChanged(event: Event): void {
+			const { repoPath } = (event as CustomEvent<{ repoPath: string; timestamp: number }>).detail;
+			if (activeProject?.path !== repoPath) return;
+			void refreshActiveRepository("external change");
+		}
+
+		function handleOpenRepositoryRequested(): void {
+			void addRepository();
+		}
+
+		function handleDeepLink(event: Event): void {
+			const { url } = (event as CustomEvent<{ url: string }>).detail;
+			projectMessage = `Received deep link: ${url}`;
+		}
+
+		window.addEventListener("tatami:repo-changed", handleRepoChanged);
+		window.addEventListener("tatami:open-repository-requested", handleOpenRepositoryRequested);
+		window.addEventListener("tatami:deep-link", handleDeepLink);
+
+		async function loadInitialState(): Promise<void> {
+			isProjectBusy = true;
+			try {
+				const [loadedProjects, layout] = await FrontendRuntime.runPromise(
 					Effect.gen(function* () {
 						const nativeClient = yield* NativeClient;
-						return yield* nativeClient.updateLayout({ active_project_id: project.id });
+						const loadedProjects = yield* nativeClient.getProjects();
+						const layout = yield* nativeClient.getLayout();
+						return [loadedProjects, layout] as const;
+					}),
+				);
+				await populateRepositories(loadedProjects);
+				const project =
+					loadedProjects.find((candidate) => candidate.id === layout.active_project_id) ??
+					loadedProjects[0] ??
+					null;
+				activeProjectId = project?.id ?? null;
+				if (project != null && project.id !== layout.active_project_id) {
+					await FrontendRuntime.runPromise(
+						Effect.gen(function* () {
+							const nativeClient = yield* NativeClient;
+							return yield* nativeClient.updateLayout({ active_project_id: project.id });
+						}),
+					);
+				}
+				await watchProject(project);
+				await loadRevisionsForProject(project);
+			} catch (error) {
+				errorMessage = error instanceof Error ? error.message : String(error);
+				console.error("Failed to load project state", error);
+			} finally {
+				isProjectBusy = false;
+			}
+		}
+
+		void loadInitialState();
+
+		return () => {
+			window.removeEventListener("tatami:repo-changed", handleRepoChanged);
+			window.removeEventListener("tatami:open-repository-requested", handleOpenRepositoryRequested);
+			window.removeEventListener("tatami:deep-link", handleDeepLink);
+			if (watchedRepoPath != null) {
+				const repoPath = watchedRepoPath;
+				watchedRepoPath = null;
+				void FrontendRuntime.runPromise(
+					Effect.gen(function* () {
+						const nativeClient = yield* NativeClient;
+						return yield* nativeClient.unwatchRepository(repoPath);
 					}),
 				);
 			}
-			await loadRevisionsForProject(project);
-		} catch (error) {
-			errorMessage = error instanceof Error ? error.message : String(error);
-			console.error("Failed to load project state", error);
-		} finally {
-			isProjectBusy = false;
-		}
+		};
 	});
 </script>
 

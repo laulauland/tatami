@@ -11,12 +11,12 @@ export const MAX_LANES = 2;
  * Colors for lanes in the revision graph
  */
 export const LANE_COLORS = [
-	"var(--chart-1)",
-	"var(--chart-2)",
-	"var(--chart-3)",
-	"var(--chart-4)",
-	"var(--chart-5)",
-	"var(--primary)",
+	"var(--chart-1, #5f7cff)",
+	"var(--chart-2, #34c759)",
+	"var(--chart-3, #ffcc00)",
+	"var(--chart-4, #8b5cf6)",
+	"var(--chart-5, #ff5fd2)",
+	"var(--primary, #5f7cff)",
 ];
 
 /**

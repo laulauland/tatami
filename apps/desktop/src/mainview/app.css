@@ -4,6 +4,15 @@
 	box-sizing: border-box;
 }
 
+:root {
+	--primary: oklch(0.6243 0.2056 255.4861);
+	--chart-1: oklch(0.6243 0.2056 255.4861);
+	--chart-2: oklch(0.7556 0.2082 146.9836);
+	--chart-3: oklch(0.7824 0.1711 67.2231);
+	--chart-4: oklch(0.5564 0.2032 278.1485);
+	--chart-5: oklch(0.6560 0.2274 312.4157);
+}
+
 html,
 body,
 #app {

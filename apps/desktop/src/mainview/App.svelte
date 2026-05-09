@@ -5,6 +5,7 @@
 	import DiffView from "./components/DiffView.svelte";
 	import FileTreeView from "./components/FileTreeView.svelte";
 	import ProjectPicker from "./components/ProjectPicker.svelte";
+	import RevisionGraph from "./components/revision-graph/RevisionGraph.svelte";
 	import { populateRepositories, repositoriesCollection } from "./data/repositories.ts";
 	import { populateRevisions, revisionsCollection } from "./data/revisions.ts";
 	import { FIXTURE_PATCH, FIXTURE_PATCH_LARGE } from "./fixtures/diff-fixture.ts";
@@ -244,28 +245,10 @@
 				<p class="muted">Pick a folder containing a jj repository. The active repository will persist across restarts.</p>
 				<button type="button" onclick={() => void addRepository()} disabled={isProjectBusy}>Add repository</button>
 			</div>
-		{:else if isProjectBusy || isLoading || revisions.length === 0}
+		{:else if isProjectBusy || isLoading}
 			<p class="muted">Loading jj revisions through typed webview-to-Bun RPC…</p>
 		{:else}
-			<ul class="revision-list">
-				{#each revisions as revision}
-					<li>
-						<div>
-							<strong>{revision.description || "(no description)"}</strong>
-							<p>
-								{revision.author} · {revision.timestamp}
-								{#if revision.bookmarks.length > 0}
-									 · {revision.bookmarks.map((bookmark) => bookmark.name).join(", ")}
-								{/if}
-							</p>
-						</div>
-						<code>{revision.change_id_short}:{revision.commit_id}</code>
-						{#if revision.is_working_copy}
-							<span class="badge">working copy</span>
-						{/if}
-					</li>
-				{/each}
-			</ul>
+			<RevisionGraph {revisions} />
 		{/if}
 	</section>
 
@@ -496,50 +479,12 @@
 
 	.muted,
 	.error,
-	.revision-list p,
 	.tree-selection {
 		color: #c8c0b2;
 	}
 
 	.error {
 		color: #ffb4a8;
-	}
-
-	.revision-list {
-		display: grid;
-		gap: 12px;
-		margin: 0;
-		padding: 0;
-		list-style: none;
-	}
-
-	.revision-list li {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto auto;
-		gap: 14px;
-		align-items: center;
-		border: 1px solid rgba(255, 255, 255, 0.09);
-		border-radius: 16px;
-		padding: 14px 16px;
-		background: rgba(255, 255, 255, 0.045);
-	}
-
-	.revision-list strong {
-		display: block;
-		margin-bottom: 4px;
-	}
-
-	.revision-list code {
-		color: #c9c4ff;
-		font-size: 0.85rem;
-	}
-
-	.badge {
-		border-radius: 999px;
-		padding: 5px 9px;
-		background: rgba(119, 114, 255, 0.18);
-		color: #d7d3ff;
-		font-size: 0.78rem;
 	}
 
 	@media (max-width: 760px) {

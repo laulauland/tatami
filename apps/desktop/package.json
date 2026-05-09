@@ -12,7 +12,10 @@
     "lint": "biome check . && ast-grep scan",
     "format": "biome format --write .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "electrobun:dev": "vite build --config vite.electrobun.config.ts && electrobun dev",
+    "electrobun:dev:hmr": "concurrently \"vite --config vite.electrobun.config.ts --port 5174\" \"vite build --config vite.electrobun.config.ts && electrobun dev\"",
+    "electrobun:build": "vite build --config vite.electrobun.config.ts && electrobun build --env=canary"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",
@@ -71,6 +74,10 @@
     "typescript": "^5.6.3",
     "vite": "^7.3.1",
     "vite-plugin-agentation": "file:../../../agentation/vite-plugin/",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "@sveltejs/vite-plugin-svelte": "^5.0.1",
+    "concurrently": "^9.1.0",
+    "electrobun": "latest",
+    "svelte": "^5.14.1"
   }
 }

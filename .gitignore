@@ -3,6 +3,9 @@
 # FP snapshot directory (isolated git repo for workdir snapshots)
 .fp/snapshots/
 
+# Local source references for agent use
+.references/
+
 # Node.js
 node_modules/
 .pnp

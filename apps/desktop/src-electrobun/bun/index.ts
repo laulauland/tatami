@@ -37,9 +37,7 @@ async function getMainViewUrl(): Promise<string> {
 			console.log(`HMR enabled: using Vite dev server at ${DEV_SERVER_URL}`);
 			return DEV_SERVER_URL;
 		} catch {
-			console.log(
-				"Vite dev server not running. Run 'bun run electrobun:dev:hmr' for HMR support.",
-			);
+			console.log("Vite dev server not running. Run 'bun run electrobun:dev:hmr' for HMR support.");
 		}
 	}
 
@@ -83,7 +81,10 @@ async function getRevisions(params: GetRevisionsParams): Promise<RevisionStub[]>
 	}
 }
 
-async function getRevisionChanges(params: { repoPath: string; changeId: string }): Promise<ChangedFile[]> {
+async function getRevisionChanges(params: {
+	repoPath: string;
+	changeId: string;
+}): Promise<ChangedFile[]> {
 	return BackendRuntime.runPromise(
 		Effect.gen(function* () {
 			const repo = yield* RepoService;
@@ -101,7 +102,10 @@ async function getRevisionDiff(params: { repoPath: string; changeId: string }): 
 	);
 }
 
-async function getChangesBatch(params: { repoPath: string; changeIds: string[] }): Promise<RevisionChanges[]> {
+async function getChangesBatch(params: {
+	repoPath: string;
+	changeIds: string[];
+}): Promise<RevisionChanges[]> {
 	return BackendRuntime.runPromise(
 		Effect.gen(function* () {
 			const repo = yield* RepoService;
@@ -110,7 +114,10 @@ async function getChangesBatch(params: { repoPath: string; changeIds: string[] }
 	);
 }
 
-async function getDiffsBatch(params: { repoPath: string; changeIds: string[] }): Promise<RevisionDiff[]> {
+async function getDiffsBatch(params: {
+	repoPath: string;
+	changeIds: string[];
+}): Promise<RevisionDiff[]> {
 	return BackendRuntime.runPromise(
 		Effect.gen(function* () {
 			const repo = yield* RepoService;
@@ -129,80 +136,115 @@ async function generateChangeIds(params: { repoPath: string; count: number }): P
 }
 
 async function jjNew(params: JjNewParams): Promise<MutationResult> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.jjNew(params);
-	}));
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.jjNew(params);
+		}),
+	);
 }
 
 async function jjEdit(params: { repoPath: string; changeId: string }): Promise<MutationResult> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.jjEdit(params);
-	}));
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.jjEdit(params);
+		}),
+	);
 }
 
 async function jjAbandon(params: { repoPath: string; changeId: string }): Promise<MutationResult> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.jjAbandon(params);
-	}));
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.jjAbandon(params);
+		}),
+	);
 }
 
 async function jjDescribe(params: JjDescribeParams): Promise<MutationResult> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.jjDescribe(params);
-	}));
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.jjDescribe(params);
+		}),
+	);
 }
 
 async function jjSquash(params: { repoPath: string; changeId: string }): Promise<MutationResult> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.jjSquash(params);
-	}));
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.jjSquash(params);
+		}),
+	);
 }
 
 async function jjRebase(params: JjRebaseParams): Promise<MutationResult> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.jjRebase(params);
-	}));
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.jjRebase(params);
+		}),
+	);
 }
 
 async function getOperations(params: { repoPath: string; limit: number }): Promise<Operation[]> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.getOperations(params);
-	}));
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.getOperations(params);
+		}),
+	);
 }
 
 async function resolveRevset(params: { repoPath: string; revset: string }): Promise<RevsetResult> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.resolveRevset(params);
-	})).catch((error) => ({ change_ids: [], error: error instanceof Error ? error.message : String(error) }));
-}
-
-async function undoOperation(params: { repoPath: string; operationId: string }): Promise<MutationResult> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.undoOperation(params);
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.resolveRevset(params);
+		}),
+	).catch((error) => ({
+		change_ids: [],
+		error: error instanceof Error ? error.message : String(error),
 	}));
 }
 
-async function gitFetch(params: { repoPath: string; remote?: string | null }): Promise<MutationResult> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.gitFetch(params);
-	}));
+async function undoOperation(params: {
+	repoPath: string;
+	operationId: string;
+}): Promise<MutationResult> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.undoOperation(params);
+		}),
+	);
 }
 
-async function gitPush(params: { repoPath: string; bookmarkNames: string[]; remote?: string | null }): Promise<MutationResult> {
-	return BackendRuntime.runPromise(Effect.gen(function* () {
-		const repo = yield* RepoService;
-		return yield* repo.gitPush(params);
-	}));
+async function gitFetch(params: {
+	repoPath: string;
+	remote?: string | null;
+}): Promise<MutationResult> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.gitFetch(params);
+		}),
+	);
+}
+
+async function gitPush(params: {
+	repoPath: string;
+	bookmarkNames: string[];
+	remote?: string | null;
+}): Promise<MutationResult> {
+	return BackendRuntime.runPromise(
+		Effect.gen(function* () {
+			const repo = yield* RepoService;
+			return yield* repo.gitPush(params);
+		}),
+	);
 }
 
 async function getProjects(): Promise<Project[]> {
@@ -223,13 +265,14 @@ async function upsertProject(params: UpsertProjectParams): Promise<Project> {
 	);
 }
 
-async function removeProject({ id }: { id: string }): Promise<void> {
-	return BackendRuntime.runPromise(
+async function removeProject({ id }: { id: string }): Promise<undefined> {
+	await BackendRuntime.runPromise(
 		Effect.gen(function* () {
 			const storage = yield* StorageService;
 			return yield* storage.removeProject(id);
 		}),
 	);
+	return undefined;
 }
 
 async function getLayout(): Promise<AppLayout> {
@@ -241,13 +284,14 @@ async function getLayout(): Promise<AppLayout> {
 	);
 }
 
-async function updateLayout(layout: Partial<AppLayout>): Promise<void> {
-	return BackendRuntime.runPromise(
+async function updateLayout(layout: Partial<AppLayout>): Promise<undefined> {
+	await BackendRuntime.runPromise(
 		Effect.gen(function* () {
 			const storage = yield* StorageService;
 			return yield* storage.updateLayout(layout);
 		}),
 	);
+	return undefined;
 }
 
 async function openRepositoryDialog(): Promise<string | null> {
@@ -259,22 +303,24 @@ async function openRepositoryDialog(): Promise<string | null> {
 	);
 }
 
-async function watchRepository(params: { repoPath: string }): Promise<void> {
-	return BackendRuntime.runPromise(
+async function watchRepository(params: { repoPath: string }): Promise<undefined> {
+	await BackendRuntime.runPromise(
 		Effect.gen(function* () {
 			const watcher = yield* WatcherService;
 			return yield* watcher.watch(params.repoPath);
 		}),
 	);
+	return undefined;
 }
 
-async function unwatchRepository(params: { repoPath: string }): Promise<void> {
-	return BackendRuntime.runPromise(
+async function unwatchRepository(params: { repoPath: string }): Promise<undefined> {
+	await BackendRuntime.runPromise(
 		Effect.gen(function* () {
 			const watcher = yield* WatcherService;
 			return yield* watcher.unwatch(params.repoPath);
 		}),
 	);
+	return undefined;
 }
 
 async function setupApplicationMenu(): Promise<void> {
@@ -304,13 +350,14 @@ async function openPath(params: { path: string }): Promise<boolean> {
 	);
 }
 
-async function showItemInFolder(params: { path: string }): Promise<void> {
-	return BackendRuntime.runPromise(
+async function showItemInFolder(params: { path: string }): Promise<undefined> {
+	await BackendRuntime.runPromise(
 		Effect.gen(function* () {
 			const desktop = yield* DesktopService;
 			return yield* desktop.showItemInFolder(params.path);
 		}),
 	);
+	return undefined;
 }
 
 async function showMessageBox(params: MessageBoxOptions): Promise<MessageBoxResponse> {

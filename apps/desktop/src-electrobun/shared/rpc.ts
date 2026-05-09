@@ -1,3 +1,7 @@
+type EmptyParams = Record<string, never>;
+
+type EmptyMessages = Record<string, never>;
+
 export type BookmarkInfo = {
 	name: string;
 	is_tracked: boolean;
@@ -197,7 +201,7 @@ export type AppRPC = {
 				response: MutationResult;
 			};
 			getProjects: {
-				params: {};
+				params: EmptyParams;
 				response: Project[];
 			};
 			upsertProject: {
@@ -206,27 +210,27 @@ export type AppRPC = {
 			};
 			removeProject: {
 				params: { id: string };
-				response: void;
+				response: undefined;
 			};
 			getLayout: {
-				params: {};
+				params: EmptyParams;
 				response: AppLayout;
 			};
 			updateLayout: {
 				params: Partial<AppLayout>;
-				response: void;
+				response: undefined;
 			};
 			openRepositoryDialog: {
-				params: {};
+				params: EmptyParams;
 				response: string | null;
 			};
 			watchRepository: {
 				params: { repoPath: string };
-				response: void;
+				response: undefined;
 			};
 			unwatchRepository: {
 				params: { repoPath: string };
-				response: void;
+				response: undefined;
 			};
 			openExternal: {
 				params: { url: string };
@@ -238,20 +242,20 @@ export type AppRPC = {
 			};
 			showItemInFolder: {
 				params: { path: string };
-				response: void;
+				response: undefined;
 			};
 			showMessageBox: {
 				params: MessageBoxOptions;
 				response: MessageBoxResponse;
 			};
 		};
-		messages: {};
+		messages: EmptyMessages;
 	};
 	webview: {
-		requests: {};
+		requests: EmptyParams;
 		messages: {
 			repoChanged: { repoPath: string; timestamp: number };
-			openRepositoryRequested: {};
+			openRepositoryRequested: EmptyParams;
 			deepLink: { url: string };
 		};
 	};

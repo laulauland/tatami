@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { laneColor, laneToX, NODE_RADIUS, ROW_HEIGHT } from "../../../components/revision-graph/constants";
+	import { laneColor, laneToX, NODE_RADIUS, ROW_HEIGHT } from "../../graph/constants.ts";
 
 	let {
 		lane,

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { queryEdgeIntervalIndex } from "../../../components/revision-graph-utils";
-	import { ROW_HEIGHT } from "../../../components/revision-graph/constants";
-	import type { EdgeIntervalIndex } from "../../../components/revision-graph/types";
+	import { queryEdgeIntervalIndex } from "../../graph/utils.ts";
+	import { ROW_HEIGHT } from "../../graph/constants.ts";
+	import type { EdgeIntervalIndex } from "../../graph/types.ts";
 	import GraphEdge from "./GraphEdge.svelte";
 
 	let {

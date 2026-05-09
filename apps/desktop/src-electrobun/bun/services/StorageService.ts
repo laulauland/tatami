@@ -7,7 +7,13 @@ import { basename, join, resolve } from "node:path";
 import type { AppLayout, Project, UpsertProjectParams } from "../../shared/rpc.ts";
 
 export class StorageServiceError extends Data.TaggedError("StorageServiceError")<{
-	readonly operation: "init" | "getProjects" | "upsertProject" | "removeProject" | "getLayout" | "updateLayout";
+	readonly operation:
+		| "init"
+		| "getProjects"
+		| "upsertProject"
+		| "removeProject"
+		| "getLayout"
+		| "updateLayout";
 	readonly cause: unknown;
 }> {}
 
@@ -21,7 +27,11 @@ type ProjectRow = {
 
 type LayoutKey = keyof AppLayout;
 
-const layoutKeys = ["active_project_id", "selected_change_id", "sidebar_width"] as const satisfies readonly LayoutKey[];
+const layoutKeys = [
+	"active_project_id",
+	"selected_change_id",
+	"sidebar_width",
+] as const satisfies readonly LayoutKey[];
 
 function resolveDataDir(): string {
 	try {

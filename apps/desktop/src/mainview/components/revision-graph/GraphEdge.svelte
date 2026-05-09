@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { laneColor, laneToX } from "../../../components/revision-graph/constants";
-	import type { EdgeBinding } from "../../../components/revision-graph/types";
+	import { laneColor, laneToX } from "../../graph/constants.ts";
+	import type { EdgeBinding } from "../../graph/types.ts";
 
 	let {
 		binding,

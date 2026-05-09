@@ -1,10 +1,12 @@
+mod repo;
+
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
+use repo::diff;
+use repo::jj::{JjRepo, MutationResult};
+use repo::log::fetch_log;
 use serde::Serialize;
 use std::path::Path;
-use tatami_desktop_lib::repo::diff;
-use tatami_desktop_lib::repo::jj::{JjRepo, MutationResult};
-use tatami_desktop_lib::repo::log::fetch_log;
 
 #[derive(Serialize)]
 pub struct ChangedFile {

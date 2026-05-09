@@ -47,6 +47,13 @@ function getAncestorTargetDirs(startPath: string): string[] {
 	return targetDirs;
 }
 
+const bundledAddonCandidates = [
+	resolve(import.meta.dir, "../native/tatami_jj_native.node"),
+	resolve(import.meta.dir, "native/tatami_jj_native.node"),
+	resolve(process.cwd(), "native/tatami_jj_native.node"),
+	resolve(process.cwd(), "apps/desktop/native/tatami_jj_native.node"),
+];
+
 const targetDirCandidates = [
 	resolve(process.cwd(), "target/debug"),
 	resolve(WORKSPACE_ROOT, "target/debug"),
@@ -68,6 +75,11 @@ function getPlatformArtifactName(): string {
 }
 
 function resolveAddonPath(): string {
+	const bundledAddon = bundledAddonCandidates.find((path) => existsSync(path));
+	if (bundledAddon) {
+		return bundledAddon;
+	}
+
 	const platformArtifactName = getPlatformArtifactName();
 
 	for (const targetDir of targetDirCandidates) {
@@ -89,9 +101,9 @@ function resolveAddonPath(): string {
 	}
 
 	throw new Error(
-		`Could not find tatami-jj-native build artifact in ${targetDirCandidates.join(
+		`Could not find tatami-jj-native addon. Checked bundled paths ${bundledAddonCandidates.join(
 			", ",
-		)}. Run: cargo build -p tatami-jj-native`,
+		)} and build artifact directories ${targetDirCandidates.join(", ")}. Run: bun run build:native`,
 	);
 }
 

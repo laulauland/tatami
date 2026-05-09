@@ -1,6 +1,6 @@
 # Tatami
 
-Tatami is a desktop GUI client for [Jujutsu](https://github.com/martinvonz/jj) (`jj`). It’s built with Tauri v2 + React, with a Rust backend that integrates `jj-lib`.
+Tatami is a desktop GUI client for [Jujutsu](https://github.com/martinvonz/jj) (`jj`). The active app is built with Electrobun + Svelte 5, with Rust `jj-lib` integration exposed through a Rust Node-API addon.
 
 ![Tatami screenshot](assets/screenshot.png)
 
@@ -10,25 +10,24 @@ Tatami is a desktop GUI client for [Jujutsu](https://github.com/martinvonz/jj) (
 - File diff viewer (hunks/lines, syntax highlighting, line numbers)
 - Keyboard-first navigation (vim-ish movement + command palette)
 - Live updates via filesystem watching
-- Persists projects + UI layout state in SQLite (Tauri app data dir)
+- Persists projects + UI layout state in the Electrobun app data store
 
 ## Repo layout
 
-- `apps/desktop/` — Tauri + React desktop app
-- `apps/desktop/src/` — frontend (TanStack Router/Query/DB, effect-atom, shadcn/ui)
-- `apps/desktop/src-tauri/` — Rust backend + Tauri commands
+- `apps/desktop/` — active Electrobun + Svelte desktop app
+- `apps/desktop/src/mainview/` — Svelte UI
+- `apps/desktop/src-electrobun/` — Bun/Electrobun backend and shared RPC types
+- `apps/desktop/native/tatami-jj-native/` — Rust Node-API addon wrapping `jj-lib`
 - `assets/` — screenshots and other repo assets
 
 ## Quickstart
 
-Prereqs: `bun`, Rust toolchain, Tauri system deps, and `jj`.
+Prereqs: `bun`, Rust toolchain, and `jj`.
 
 ```bash
 bun install
-bun run tauri dev
+bun run dev
 ```
-
-Browser-only UI development is supported via mocks in `apps/desktop/src/mocks/`.
 
 ## Contributing
 
@@ -37,30 +36,26 @@ Keep dev commands short and prefer putting release notes in commit bodies.
 - Release notes: add a `## RN:` section to commit bodies (optional `RN-ID:` line for stable dedupe)
 
 ```bash
-# Frontend-only (Vite)
-bun run dev
-
-# Frontend checks (from apps/desktop/)
+# App checks (from apps/desktop/)
 cd apps/desktop
 bun run typecheck
 bun run lint
 bun run format
+
+# Package the desktop app
+bun run build
 ```
 
 ## Publishing
 
-Publishing is automated via GitHub Actions in `.github/workflows/release.yml`.
-
-- Trigger: every push to `main` (plus `workflow_dispatch`)
-- Artifacts: macOS-only build for now, published to a GitHub prerelease (`nightly-<run_number>` tags)
-- Concurrency: new pushes cancel in-progress builds
-- Release notes: collected from commit bodies under a `## RN:` heading; trailers are ignored; use `RN-ID:` for stable dedupe when `jj` history is rewritten
+Release automation is being updated for the Electrobun app. Existing Tauri-era CI is not authoritative for the new app.
 
 ## How it’s wired
 
-- Frontend calls Tauri commands via `apps/desktop/src/tauri-commands.ts`
-- Tauri commands live in `apps/desktop/src-tauri/src/lib.rs`
-- Backend uses `jj-lib` for repo access and emits repo change events for live refresh
+- Svelte components call typed Electrobun RPC helpers in `apps/desktop/src/mainview/rpc.ts`
+- The Bun backend handles RPC in `apps/desktop/src-electrobun/bun/index.ts`
+- Native jj operations are loaded from `apps/desktop/native/tatami-jj-native`
+- Backend services use `jj-lib` for repo access and watchers for live refresh
 
 ## Issues
 

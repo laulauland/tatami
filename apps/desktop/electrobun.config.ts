@@ -14,6 +14,7 @@ export default {
 		copy: {
 			"dist-electrobun/index.html": "views/mainview/index.html",
 			"dist-electrobun/assets": "views/mainview/assets",
+			"native/tatami_jj_native.node": "native/tatami_jj_native.node",
 		},
 		watchIgnore: ["dist-electrobun/**"],
 		mac: {

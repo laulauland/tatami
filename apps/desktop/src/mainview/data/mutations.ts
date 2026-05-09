@@ -1,5 +1,10 @@
 import { Data, Effect } from "effect";
-import type { JjDescribeParams, JjNewParams, JjRebaseParams, MutationResult } from "../../../src-electrobun/shared/rpc.ts";
+import type {
+	JjDescribeParams,
+	JjNewParams,
+	JjRebaseParams,
+	MutationResult,
+} from "../../../src-electrobun/shared/rpc.ts";
 import { FrontendRuntime } from "../runtime.ts";
 import { NativeClient } from "../services/NativeClient.ts";
 import { populateRevisions } from "./revisions.ts";
@@ -46,78 +51,78 @@ async function runMutation(
 }
 
 export async function generateChangeIds(repoPath: string, count: number): Promise<string[]> {
-	return await runMutation(
+	return (await runMutation(
 		"generateChangeIds",
 		repoPath,
 		Effect.gen(function* () {
 			const nativeClient = yield* NativeClient;
 			return yield* nativeClient.generateChangeIds({ repoPath, count });
 		}),
-	) as string[];
+	)) as string[];
 }
 
 export async function jjNew(params: JjNewParams): Promise<MutationResult> {
-	return await runMutation(
+	return (await runMutation(
 		"jjNew",
 		params.repoPath,
 		Effect.gen(function* () {
 			const nativeClient = yield* NativeClient;
 			return yield* nativeClient.jjNew(params);
 		}),
-	) as MutationResult;
+	)) as MutationResult;
 }
 
 export async function jjEdit(repoPath: string, changeId: string): Promise<MutationResult> {
-	return await runMutation(
+	return (await runMutation(
 		"jjEdit",
 		repoPath,
 		Effect.gen(function* () {
 			const nativeClient = yield* NativeClient;
 			return yield* nativeClient.jjEdit({ repoPath, changeId });
 		}),
-	) as MutationResult;
+	)) as MutationResult;
 }
 
 export async function jjAbandon(repoPath: string, changeId: string): Promise<MutationResult> {
-	return await runMutation(
+	return (await runMutation(
 		"jjAbandon",
 		repoPath,
 		Effect.gen(function* () {
 			const nativeClient = yield* NativeClient;
 			return yield* nativeClient.jjAbandon({ repoPath, changeId });
 		}),
-	) as MutationResult;
+	)) as MutationResult;
 }
 
 export async function jjDescribe(params: JjDescribeParams): Promise<MutationResult> {
-	return await runMutation(
+	return (await runMutation(
 		"jjDescribe",
 		params.repoPath,
 		Effect.gen(function* () {
 			const nativeClient = yield* NativeClient;
 			return yield* nativeClient.jjDescribe(params);
 		}),
-	) as MutationResult;
+	)) as MutationResult;
 }
 
 export async function jjSquash(repoPath: string, changeId: string): Promise<MutationResult> {
-	return await runMutation(
+	return (await runMutation(
 		"jjSquash",
 		repoPath,
 		Effect.gen(function* () {
 			const nativeClient = yield* NativeClient;
 			return yield* nativeClient.jjSquash({ repoPath, changeId });
 		}),
-	) as MutationResult;
+	)) as MutationResult;
 }
 
 export async function jjRebase(params: JjRebaseParams): Promise<MutationResult> {
-	return await runMutation(
+	return (await runMutation(
 		"jjRebase",
 		params.repoPath,
 		Effect.gen(function* () {
 			const nativeClient = yield* NativeClient;
 			return yield* nativeClient.jjRebase(params);
 		}),
-	) as MutationResult;
+	)) as MutationResult;
 }

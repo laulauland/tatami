@@ -15,6 +15,7 @@ node_modules/
 dist/
 **/dist-electrobun/
 apps/desktop/artifacts/
+apps/desktop/native/tatami_jj_native.node
 build/
 .turbo
 

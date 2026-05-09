@@ -6,6 +6,11 @@ import { StorageService } from "./services/StorageService.ts";
 import { WatcherService } from "./services/WatcherService.ts";
 
 const RepoLive = RepoService.Live.pipe(Layer.provide(JjNativeAddon.Live));
-const BackendLive = Layer.mergeAll(RepoLive, StorageService.Live, DesktopService.Live, WatcherService.Live);
+const BackendLive = Layer.mergeAll(
+	RepoLive,
+	StorageService.Live,
+	DesktopService.Live,
+	WatcherService.Live,
+);
 
 export const BackendRuntime = ManagedRuntime.make(BackendLive);

@@ -80,11 +80,7 @@ export class DesktopService extends Context.Tag("tatami/DesktopService")<
 							},
 							{
 								label: "Window",
-								submenu: [
-									{ role: "minimize" },
-									{ role: "zoom" },
-									{ role: "close" },
-								],
+								submenu: [{ role: "minimize" }, { role: "zoom" }, { role: "close" }],
 							},
 							{
 								label: "Help",

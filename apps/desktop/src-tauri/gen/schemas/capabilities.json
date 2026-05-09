@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Default permissions for the application","local":true,"windows":["main"],"permissions":["core:default","core:webview:allow-set-webview-zoom","shell:allow-open","dialog:default","store:default","sql:default","deep-link:default"]}}

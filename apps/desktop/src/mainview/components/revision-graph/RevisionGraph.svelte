@@ -2,8 +2,8 @@
 	import { createVirtualizer } from "@tanstack/svelte-virtual";
 	import { get } from "svelte/store";
 	import { onDestroy, onMount } from "svelte";
-	import { buildGraph } from "../../../components/revision-graph/build-graph";
-	import { LANE_PADDING, LANE_WIDTH, ROW_HEIGHT } from "../../../components/revision-graph/constants";
+	import { buildGraph } from "../../graph/build-graph.ts";
+	import { LANE_PADDING, LANE_WIDTH, ROW_HEIGHT } from "../../graph/constants.ts";
 	import type { RevisionStub } from "../../../../src-electrobun/shared/rpc.ts";
 	import {
 		getSelectedRevisionId,

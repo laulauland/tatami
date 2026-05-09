@@ -56,11 +56,13 @@ const parseJson = (operation: RepoOperation, input: string) =>
 		catch: (cause) => new RepoError({ operation, reason: "parse", cause }),
 	});
 
-const decodeWith = <A, I, R>(operation: RepoOperation, schema: Schema.Schema<A, I, R>, input: unknown) =>
+const decodeWith = <A, I, R>(
+	operation: RepoOperation,
+	schema: Schema.Schema<A, I, R>,
+	input: unknown,
+) =>
 	Schema.decodeUnknown(schema)(input).pipe(
-		Effect.mapError(
-			(cause) => new RepoError({ operation, reason: "validation", cause }),
-		),
+		Effect.mapError((cause) => new RepoError({ operation, reason: "validation", cause })),
 	);
 
 const nativeError = (operation: RepoOperation, cause: JjNativeAddonError) =>
@@ -75,9 +77,7 @@ const decodeMutationResult = (operation: RepoOperation, json: string) =>
 export class RepoService extends Context.Tag("tatami/RepoService")<
 	RepoService,
 	{
-		readonly getRevisions: (
-			params: GetRevisionsParams,
-		) => Effect.Effect<RevisionStub[], RepoError>;
+		readonly getRevisions: (params: GetRevisionsParams) => Effect.Effect<RevisionStub[], RepoError>;
 		readonly getRevisionChanges: (params: {
 			repoPath: string;
 			changeId: string;
@@ -99,16 +99,41 @@ export class RepoService extends Context.Tag("tatami/RepoService")<
 			count: number;
 		}) => Effect.Effect<string[], RepoError>;
 		readonly jjNew: (params: JjNewParams) => Effect.Effect<MutationResult, RepoError>;
-		readonly jjEdit: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, RepoError>;
-		readonly jjAbandon: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, RepoError>;
+		readonly jjEdit: (params: {
+			repoPath: string;
+			changeId: string;
+		}) => Effect.Effect<MutationResult, RepoError>;
+		readonly jjAbandon: (params: {
+			repoPath: string;
+			changeId: string;
+		}) => Effect.Effect<MutationResult, RepoError>;
 		readonly jjDescribe: (params: JjDescribeParams) => Effect.Effect<MutationResult, RepoError>;
-		readonly jjSquash: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, RepoError>;
+		readonly jjSquash: (params: {
+			repoPath: string;
+			changeId: string;
+		}) => Effect.Effect<MutationResult, RepoError>;
 		readonly jjRebase: (params: JjRebaseParams) => Effect.Effect<MutationResult, RepoError>;
-		readonly getOperations: (params: { repoPath: string; limit: number }) => Effect.Effect<Operation[], RepoError>;
-		readonly resolveRevset: (params: { repoPath: string; revset: string }) => Effect.Effect<RevsetResult, RepoError>;
-		readonly undoOperation: (params: { repoPath: string; operationId: string }) => Effect.Effect<MutationResult, RepoError>;
-		readonly gitFetch: (params: { repoPath: string; remote?: string | null }) => Effect.Effect<MutationResult, RepoError>;
-		readonly gitPush: (params: { repoPath: string; bookmarkNames: string[]; remote?: string | null }) => Effect.Effect<MutationResult, RepoError>;
+		readonly getOperations: (params: {
+			repoPath: string;
+			limit: number;
+		}) => Effect.Effect<Operation[], RepoError>;
+		readonly resolveRevset: (params: {
+			repoPath: string;
+			revset: string;
+		}) => Effect.Effect<RevsetResult, RepoError>;
+		readonly undoOperation: (params: {
+			repoPath: string;
+			operationId: string;
+		}) => Effect.Effect<MutationResult, RepoError>;
+		readonly gitFetch: (params: {
+			repoPath: string;
+			remote?: string | null;
+		}) => Effect.Effect<MutationResult, RepoError>;
+		readonly gitPush: (params: {
+			repoPath: string;
+			bookmarkNames: string[];
+			remote?: string | null;
+		}) => Effect.Effect<MutationResult, RepoError>;
 	}
 >() {
 	static readonly Live = Layer.effect(
@@ -143,15 +168,21 @@ export class RepoService extends Context.Tag("tatami/RepoService")<
 						Effect.map((files) => [...files] as ChangedFile[]),
 					),
 				getRevisionDiff: ({ repoPath, changeId }) =>
-					addon.getRevisionDiffJson(repoPath, changeId).pipe(
-						Effect.mapError((cause) => nativeError("getRevisionDiff", cause)),
-					),
+					addon
+						.getRevisionDiffJson(repoPath, changeId)
+						.pipe(Effect.mapError((cause) => nativeError("getRevisionDiff", cause))),
 				getChangesBatch: ({ repoPath, changeIds }) =>
 					addon.getChangesBatchJson(repoPath, changeIds).pipe(
 						Effect.mapError((cause) => nativeError("getChangesBatch", cause)),
 						Effect.flatMap((json) => parseJson("getChangesBatch", json)),
 						Effect.flatMap((input) => decodeWith("getChangesBatch", RevisionChangesBatch, input)),
-						Effect.map((changes) => changes.map((change) => ({ ...change, files: [...change.files] })) as RevisionChanges[]),
+						Effect.map(
+							(changes) =>
+								changes.map((change) => ({
+									...change,
+									files: [...change.files],
+								})) as RevisionChanges[],
+						),
 					),
 				getDiffsBatch: ({ repoPath, changeIds }) =>
 					addon.getDiffsBatchJson(repoPath, changeIds).pipe(
@@ -208,7 +239,10 @@ export class RepoService extends Context.Tag("tatami/RepoService")<
 						Effect.mapError((cause) => nativeError("resolveRevset", cause)),
 						Effect.flatMap((json) => parseJson("resolveRevset", json)),
 						Effect.flatMap((input) => decodeWith("resolveRevset", Revisions, input)),
-						Effect.map((resolved) => ({ change_ids: resolved.map((revision) => revision.change_id), error: null })),
+						Effect.map((resolved) => ({
+							change_ids: resolved.map((revision) => revision.change_id),
+							error: null,
+						})),
 					),
 				undoOperation: ({ repoPath, operationId }) =>
 					addon.undoOperation(repoPath, operationId).pipe(

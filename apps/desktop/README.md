@@ -1,12 +1,13 @@
 # Tatami Desktop
 
-Tauri v2 desktop application for Tatami - a Jujutsu GUI client.
+Electrobun + Svelte 5 desktop application for Tatami, a Jujutsu GUI client.
 
 ## Tech Stack
 
-- **Frontend**: React + TypeScript
-- **Bundler**: Vite
-- **Backend**: Tauri v2
+- **Frontend**: Svelte 5 + TypeScript
+- **App shell**: Electrobun
+- **Backend**: Bun services with Effect
+- **Native VCS layer**: Rust Node-API addon wrapping `jj-lib`
 - **Package Manager**: Bun
 
 ## Development
@@ -15,49 +16,46 @@ Tauri v2 desktop application for Tatami - a Jujutsu GUI client.
 # Install dependencies (from repository root)
 bun install
 
-# Run development server
+# Run the desktop app
 cd apps/desktop
 bun run dev
 
-# In a separate terminal, start Tauri
-bun run tauri dev
+# Optional HMR workflow
+bun run dev:hmr
 ```
 
 ## Build
 
 ```bash
-# Build frontend
+# Package the desktop app
 bun run build
 
-# Build desktop app
-bun run tauri build
-
-# Debug build
-bun run tauri build --debug
+# Compatibility alias
+bun run electrobun:build
 ```
+
+Artifacts are written to `apps/desktop/artifacts/` by Electrobun.
 
 ## Project Structure
 
-```
+```txt
 apps/desktop/
-├── src-tauri/          # Rust backend
-│   ├── src/
-│   │   ├── main.rs     # Entry point
-│   │   └── lib.rs      # Tauri commands
-│   ├── Cargo.toml
-│   ├── tauri.conf.json # Tauri configuration
-│   └── capabilities/   # Permissions
-├── src/                # React frontend
-│   ├── main.tsx
-│   ├── App.tsx
-│   └── styles/
-├── index.html
-├── vite.config.ts
+├── src/mainview/              # Svelte WebView UI
+│   ├── components/            # Svelte components
+│   ├── data/                  # TanStack DB collections and sync helpers
+│   ├── graph/                 # Revision graph layout utilities
+│   └── main.ts                # Svelte entry point
+├── src-electrobun/            # Bun/Electrobun backend
+│   ├── bun/                   # Window, RPC, services, native loader
+│   └── shared/                # Shared RPC/schema types
+├── native/tatami-jj-native/   # Rust Node-API addon for jj-lib
+├── electrobun.config.ts
+├── vite.electrobun.config.ts
 └── package.json
 ```
 
 ## Notes
 
-- The app window displays "Tatami" as the title
-- Default window size: 1200x800
-- Icon generated at `src-tauri/icons/icon.png`
+- The app window displays "Tatami" as the title.
+- Default window size is configured in `electrobun.config.ts`.
+- The native addon is loaded by `src-electrobun/bun/native.ts`.

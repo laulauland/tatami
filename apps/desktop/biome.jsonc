@@ -7,7 +7,12 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["src/**/*.{ts,tsx,js,jsx,json,jsonc,json5}"]
+		"includes": [
+			"src/**/*.{ts,js,json,jsonc,json5}",
+			"src-electrobun/**/*.{ts,js,json,jsonc,json5}",
+			"native/**/*.ts",
+			"*.{ts,json,jsonc,json5}"
+		]
 	},
 	"formatter": {
 		"enabled": true,

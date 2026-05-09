@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { RevisionStub } from "../../../../src-electrobun/shared/rpc.ts";
-	import { LANE_PADDING, LANE_WIDTH, ROW_HEIGHT } from "../../../components/revision-graph/constants";
+	import { LANE_PADDING, LANE_WIDTH, ROW_HEIGHT } from "../../graph/constants.ts";
 	import BookmarkTag from "./BookmarkTag.svelte";
 	import GraphNode from "./GraphNode.svelte";
 

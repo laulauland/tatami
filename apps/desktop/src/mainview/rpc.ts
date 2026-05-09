@@ -2,7 +2,7 @@ import Electrobun, { Electroview } from "electrobun/view";
 import type { AppRPC } from "../../src-electrobun/shared/rpc.ts";
 
 const rpc = Electroview.defineRPC<AppRPC>({
-	maxRequestTime: 5000,
+	maxRequestTime: 120000,
 	handlers: {
 		requests: {},
 		messages: {

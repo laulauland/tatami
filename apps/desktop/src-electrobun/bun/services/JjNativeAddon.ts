@@ -14,7 +14,11 @@ export type JjNativeAddonOperation =
 	| "jjAbandon"
 	| "jjDescribe"
 	| "jjSquash"
-	| "jjRebase";
+	| "jjRebase"
+	| "getOperationsJson"
+	| "undoOperation"
+	| "jjGitFetch"
+	| "jjGitPush";
 
 export class JjNativeAddonError extends Data.TaggedError("JjNativeAddonError")<{
 	readonly operation: JjNativeAddonOperation;
@@ -67,6 +71,23 @@ export class JjNativeAddon extends Context.Tag("tatami/JjNativeAddon")<
 			repoPath: string,
 			sourceChangeId: string,
 			destinationChangeId: string,
+		) => Effect.Effect<string, JjNativeAddonError>;
+		readonly getOperationsJson: (
+			repoPath: string,
+			limit: number,
+		) => Effect.Effect<string, JjNativeAddonError>;
+		readonly undoOperation: (
+			repoPath: string,
+			operationId: string,
+		) => Effect.Effect<string, JjNativeAddonError>;
+		readonly jjGitFetch: (
+			repoPath: string,
+			remote?: string | null,
+		) => Effect.Effect<string, JjNativeAddonError>;
+		readonly jjGitPush: (
+			repoPath: string,
+			remote: string | null,
+			bookmarkNames: string[],
 		) => Effect.Effect<string, JjNativeAddonError>;
 	}
 >() {
@@ -143,6 +164,26 @@ export class JjNativeAddon extends Context.Tag("tatami/JjNativeAddon")<
 						Effect.try({
 							try: () => addon.jjRebase(repoPath, sourceChangeId, destinationChangeId),
 							catch: (cause) => new JjNativeAddonError({ operation: "jjRebase", cause }),
+						}),
+					getOperationsJson: (repoPath, limit) =>
+						Effect.try({
+							try: () => addon.getOperationsJson(repoPath, limit),
+							catch: (cause) => new JjNativeAddonError({ operation: "getOperationsJson", cause }),
+						}),
+					undoOperation: (repoPath, operationId) =>
+						Effect.try({
+							try: () => addon.undoOperation(repoPath, operationId),
+							catch: (cause) => new JjNativeAddonError({ operation: "undoOperation", cause }),
+						}),
+					jjGitFetch: (repoPath, remote = null) =>
+						Effect.try({
+							try: () => addon.jjGitFetch(repoPath, remote),
+							catch: (cause) => new JjNativeAddonError({ operation: "jjGitFetch", cause }),
+						}),
+					jjGitPush: (repoPath, remote, bookmarkNames) =>
+						Effect.try({
+							try: () => addon.jjGitPush(repoPath, remote, bookmarkNames),
+							catch: (cause) => new JjNativeAddonError({ operation: "jjGitPush", cause }),
 						}),
 				}),
 			),

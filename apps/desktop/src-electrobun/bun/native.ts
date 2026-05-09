@@ -20,6 +20,10 @@ export type NativeAddon = {
 	jjDescribe: (repoPath: string, changeId: string, description: string) => string;
 	jjSquash: (repoPath: string, changeId: string) => string;
 	jjRebase: (repoPath: string, sourceChangeId: string, destinationChangeId: string) => string;
+	getOperationsJson: (repoPath: string, limit: number) => string;
+	undoOperation: (repoPath: string, operationId: string) => string;
+	jjGitFetch: (repoPath: string, remote?: string | null) => string;
+	jjGitPush: (repoPath: string, remote: string | null, bookmarkNames: string[]) => string;
 };
 
 const require = createRequire(import.meta.url);
@@ -110,6 +114,10 @@ export function loadNativeAddon(): NativeAddon {
 			"jjDescribe",
 			"jjSquash",
 			"jjRebase",
+			"getOperationsJson",
+			"undoOperation",
+			"jjGitFetch",
+			"jjGitPush",
 		] as const;
 		for (const exportName of expectedExports) {
 			if (typeof addon[exportName] !== "function") {

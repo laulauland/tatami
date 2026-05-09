@@ -48,6 +48,20 @@ export const MutationResult = Schema.Struct({
 });
 export type MutationResult = typeof MutationResult.Type;
 
+export const Operation = Schema.Struct({
+	id: Schema.String,
+	parent_ids: Schema.Array(Schema.String),
+	description: Schema.String,
+	timestamp: Schema.String,
+	user: Schema.String,
+	hostname: Schema.String,
+	working_copy_change_id: Schema.NullOr(Schema.String),
+});
+export type Operation = typeof Operation.Type;
+
+export const Operations = Schema.Array(Operation);
+export type Operations = typeof Operations.Type;
+
 export const ChangeIds = Schema.Array(Schema.String);
 export type ChangeIds = typeof ChangeIds.Type;
 

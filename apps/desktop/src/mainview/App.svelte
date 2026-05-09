@@ -3,6 +3,7 @@
 	import { Effect } from "effect";
 	import { onMount } from "svelte";
 	import DiffPanel from "./components/DiffPanel.svelte";
+	import OperationsLog from "./components/OperationsLog.svelte";
 	import ProjectPicker from "./components/ProjectPicker.svelte";
 	import RevisionGraph from "./components/revision-graph/RevisionGraph.svelte";
 	import {
@@ -14,8 +15,10 @@
 		jjSquash,
 		type RevisionMutationOperation,
 	} from "./data/mutations.ts";
+	import { populateOperations } from "./data/operations.ts";
 	import { populateRepositories, repositoriesCollection } from "./data/repositories.ts";
 	import { populateRevisions, revisionsCollection } from "./data/revisions.ts";
+	import { syncRepository } from "./data/sync.ts";
 	import { FrontendRuntime } from "./runtime.ts";
 	import { NativeClient } from "./services/NativeClient.ts";
 	import type { Project } from "../../src-electrobun/shared/rpc.ts";
@@ -26,6 +29,8 @@
 	let activeProjectId = $state<string | null>(null);
 	let isProjectBusy = $state(false);
 	let mutationInFlight = $state<RevisionMutationOperation | null>(null);
+	let isSyncing = $state(false);
+	let operationsLogOpen = $state(false);
 
 	const revisionsQuery = useLiveQuery((query) =>
 		query.from({ revisions: revisionsCollection }).select(({ revisions }) => revisions),
@@ -52,9 +57,11 @@
 	async function loadRevisionsForProject(project: Project | null): Promise<void> {
 		if (project == null) {
 			await populateRevisions([]);
+			await populateOperations([]);
 			return;
 		}
 
+		await populateOperations([]);
 		const loadedRevisions = await FrontendRuntime.runPromise(
 			Effect.gen(function* () {
 				const nativeClient = yield* NativeClient;
@@ -157,6 +164,24 @@
 	async function squashRevision(changeId: string): Promise<void> {
 		if (!window.confirm("Squash this revision into its parent?")) return;
 		await runRevisionMutation("jjSquash", (repoPath) => jjSquash(repoPath, changeId));
+	}
+
+	async function runSync(): Promise<void> {
+		if (activeProject == null || isSyncing) return;
+		isSyncing = true;
+		errorMessage = null;
+		projectMessage = null;
+		try {
+			const result = await syncRepository(activeProject.path);
+			projectMessage = result.pushedBookmarks.length > 0
+				? `Fetched and pushed ${result.pushedBookmarks.join(", ")}.`
+				: "Fetched latest remote changes.";
+		} catch (error) {
+			errorMessage = `Sync failed: ${formatError(error)}`;
+			console.error("Sync failed", error);
+		} finally {
+			isSyncing = false;
+		}
 	}
 
 	async function rebaseRevision(sourceChangeId: string): Promise<void> {
@@ -274,12 +299,18 @@
 				<p class="eyebrow">Electrobun RPC native smoke test</p>
 				<h2 id="rpc-title">Real jj revisions</h2>
 			</div>
-			<span class="status">{activeProject ? activeProject.name : "no repository"}</span>
+			<div class="toolbar-actions">
+				<button type="button" class="secondary" onclick={() => operationsLogOpen = true} disabled={!activeProject}>Operations</button>
+				<button type="button" onclick={() => void runSync()} disabled={!activeProject || isSyncing}>
+					{isSyncing ? "Syncing…" : "Sync"}
+				</button>
+				<span class="status">{activeProject ? activeProject.name : "no repository"}</span>
+			</div>
 		</div>
 
 		{#if errorMessage}
 			<p class="error">RPC failed: {errorMessage}</p>
-		{:else if projectMessage}
+		{:else if projectMessage && !activeProject}
 			<p class="muted">{projectMessage}</p>
 		{:else if !activeProject}
 			<div class="empty-state">
@@ -290,8 +321,14 @@
 		{:else if isProjectBusy || isLoading}
 			<p class="muted">Loading jj revisions through typed webview-to-Bun RPC…</p>
 		{:else}
+			{#if projectMessage}
+				<p class="muted status-line">{projectMessage}</p>
+			{/if}
 			{#if mutationInFlight}
-				<p class="muted">Running {mutationInFlight}…</p>
+				<p class="muted status-line">Running {mutationInFlight}…</p>
+			{/if}
+			{#if isSyncing}
+				<p class="muted status-line">Sync in progress…</p>
 			{/if}
 			<RevisionGraph
 				{revisions}
@@ -307,6 +344,14 @@
 	</section>
 
 	<DiffPanel {activeProject} revisions={revisions ?? []} />
+
+	<OperationsLog
+		repoPath={activeProject?.path ?? null}
+		open={operationsLogOpen}
+		onClose={() => operationsLogOpen = false}
+		onError={(message) => errorMessage = message}
+		onMessage={(message) => projectMessage = message}
+	/>
 
 </main>
 
@@ -405,8 +450,10 @@
 		line-height: 1;
 	}
 
-	.actions {
+	.actions,
+	.toolbar-actions {
 		display: flex;
+		align-items: center;
 		gap: 10px;
 	}
 
@@ -467,6 +514,10 @@
 	.muted,
 	.error {
 		color: #c8c0b2;
+	}
+
+	.status-line {
+		margin-bottom: 10px;
 	}
 
 	.error {

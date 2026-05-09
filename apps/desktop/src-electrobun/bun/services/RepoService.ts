@@ -6,6 +6,7 @@ import type {
 	JjNewParams,
 	JjRebaseParams,
 	MutationResult,
+	Operation,
 	RevisionChanges,
 	RevisionDiff,
 	RevisionStub,
@@ -14,6 +15,7 @@ import {
 	ChangeIds,
 	ChangedFiles,
 	MutationResult as MutationResultSchema,
+	Operations,
 	RevisionChangesBatch,
 	RevisionDiffs,
 	Revisions,
@@ -32,7 +34,11 @@ export type RepoOperation =
 	| "jjAbandon"
 	| "jjDescribe"
 	| "jjSquash"
-	| "jjRebase";
+	| "jjRebase"
+	| "getOperations"
+	| "undoOperation"
+	| "gitFetch"
+	| "gitPush";
 
 export class RepoError extends Data.TaggedError("RepoError")<{
 	readonly operation: RepoOperation;
@@ -96,6 +102,10 @@ export class RepoService extends Context.Tag("tatami/RepoService")<
 		readonly jjDescribe: (params: JjDescribeParams) => Effect.Effect<MutationResult, RepoError>;
 		readonly jjSquash: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, RepoError>;
 		readonly jjRebase: (params: JjRebaseParams) => Effect.Effect<MutationResult, RepoError>;
+		readonly getOperations: (params: { repoPath: string; limit: number }) => Effect.Effect<Operation[], RepoError>;
+		readonly undoOperation: (params: { repoPath: string; operationId: string }) => Effect.Effect<MutationResult, RepoError>;
+		readonly gitFetch: (params: { repoPath: string; remote?: string | null }) => Effect.Effect<MutationResult, RepoError>;
+		readonly gitPush: (params: { repoPath: string; bookmarkNames: string[]; remote?: string | null }) => Effect.Effect<MutationResult, RepoError>;
 	}
 >() {
 	static readonly Live = Layer.effect(
@@ -182,6 +192,28 @@ export class RepoService extends Context.Tag("tatami/RepoService")<
 					addon.jjRebase(repoPath, sourceChangeId, destinationChangeId).pipe(
 						Effect.mapError((cause) => nativeError("jjRebase", cause)),
 						Effect.flatMap((json) => decodeMutationResult("jjRebase", json)),
+					),
+				getOperations: ({ repoPath, limit }) =>
+					addon.getOperationsJson(repoPath, limit).pipe(
+						Effect.mapError((cause) => nativeError("getOperations", cause)),
+						Effect.flatMap((json) => parseJson("getOperations", json)),
+						Effect.flatMap((input) => decodeWith("getOperations", Operations, input)),
+						Effect.map((operations) => [...operations] as Operation[]),
+					),
+				undoOperation: ({ repoPath, operationId }) =>
+					addon.undoOperation(repoPath, operationId).pipe(
+						Effect.mapError((cause) => nativeError("undoOperation", cause)),
+						Effect.flatMap((json) => decodeMutationResult("undoOperation", json)),
+					),
+				gitFetch: ({ repoPath, remote = null }) =>
+					addon.jjGitFetch(repoPath, remote).pipe(
+						Effect.mapError((cause) => nativeError("gitFetch", cause)),
+						Effect.flatMap((json) => decodeMutationResult("gitFetch", json)),
+					),
+				gitPush: ({ repoPath, remote = null, bookmarkNames }) =>
+					addon.jjGitPush(repoPath, remote, bookmarkNames).pipe(
+						Effect.mapError((cause) => nativeError("gitPush", cause)),
+						Effect.flatMap((json) => decodeMutationResult("gitPush", json)),
 					),
 			});
 		}),

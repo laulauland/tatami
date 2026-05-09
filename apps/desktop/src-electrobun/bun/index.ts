@@ -9,6 +9,7 @@ import type {
 	JjNewParams,
 	JjRebaseParams,
 	MutationResult,
+	Operation,
 	Project,
 	RevisionChanges,
 	RevisionDiff,
@@ -165,6 +166,34 @@ async function jjRebase(params: JjRebaseParams): Promise<MutationResult> {
 	}));
 }
 
+async function getOperations(params: { repoPath: string; limit: number }): Promise<Operation[]> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.getOperations(params);
+	}));
+}
+
+async function undoOperation(params: { repoPath: string; operationId: string }): Promise<MutationResult> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.undoOperation(params);
+	}));
+}
+
+async function gitFetch(params: { repoPath: string; remote?: string | null }): Promise<MutationResult> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.gitFetch(params);
+	}));
+}
+
+async function gitPush(params: { repoPath: string; bookmarkNames: string[]; remote?: string | null }): Promise<MutationResult> {
+	return BackendRuntime.runPromise(Effect.gen(function* () {
+		const repo = yield* RepoService;
+		return yield* repo.gitPush(params);
+	}));
+}
+
 async function getProjects(): Promise<Project[]> {
 	return BackendRuntime.runPromise(
 		Effect.gen(function* () {
@@ -235,6 +264,10 @@ const appRpc = BrowserView.defineRPC<AppRPC>({
 			jjDescribe,
 			jjSquash,
 			jjRebase,
+			getOperations,
+			undoOperation,
+			gitFetch,
+			gitPush,
 			getProjects,
 			upsertProject,
 			removeProject,

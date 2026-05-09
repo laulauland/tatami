@@ -7,6 +7,7 @@ import type {
 	JjNewParams,
 	JjRebaseParams,
 	MutationResult,
+	Operation,
 	Project,
 	RevisionChanges,
 	RevisionDiff,
@@ -29,6 +30,10 @@ export class NativeClientError extends Data.TaggedError("NativeClientError")<{
 		| "jjDescribe"
 		| "jjSquash"
 		| "jjRebase"
+		| "getOperations"
+		| "undoOperation"
+		| "gitFetch"
+		| "gitPush"
 		| "getProjects"
 		| "upsertProject"
 		| "removeProject"
@@ -60,13 +65,44 @@ export class NativeClient extends Context.Tag("tatami/NativeClient")<
 			repoPath: string;
 			changeIds: string[];
 		}) => Effect.Effect<RevisionDiff[], NativeClientError>;
-		readonly generateChangeIds: (params: { repoPath: string; count: number }) => Effect.Effect<string[], NativeClientError>;
+		readonly generateChangeIds: (params: {
+			repoPath: string;
+			count: number;
+		}) => Effect.Effect<string[], NativeClientError>;
 		readonly jjNew: (params: JjNewParams) => Effect.Effect<MutationResult, NativeClientError>;
-		readonly jjEdit: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, NativeClientError>;
-		readonly jjAbandon: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, NativeClientError>;
-		readonly jjDescribe: (params: JjDescribeParams) => Effect.Effect<MutationResult, NativeClientError>;
-		readonly jjSquash: (params: { repoPath: string; changeId: string }) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly jjEdit: (params: {
+			repoPath: string;
+			changeId: string;
+		}) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly jjAbandon: (params: {
+			repoPath: string;
+			changeId: string;
+		}) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly jjDescribe: (
+			params: JjDescribeParams,
+		) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly jjSquash: (params: {
+			repoPath: string;
+			changeId: string;
+		}) => Effect.Effect<MutationResult, NativeClientError>;
 		readonly jjRebase: (params: JjRebaseParams) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly getOperations: (params: {
+			repoPath: string;
+			limit: number;
+		}) => Effect.Effect<Operation[], NativeClientError>;
+		readonly undoOperation: (params: {
+			repoPath: string;
+			operationId: string;
+		}) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly gitFetch: (params: {
+			repoPath: string;
+			remote?: string | null;
+		}) => Effect.Effect<MutationResult, NativeClientError>;
+		readonly gitPush: (params: {
+			repoPath: string;
+			bookmarkNames: string[];
+			remote?: string | null;
+		}) => Effect.Effect<MutationResult, NativeClientError>;
 		readonly getProjects: () => Effect.Effect<Project[], NativeClientError>;
 		readonly upsertProject: (
 			params: UpsertProjectParams,
@@ -139,6 +175,26 @@ export class NativeClient extends Context.Tag("tatami/NativeClient")<
 				Effect.tryPromise({
 					try: () => appRpc.request.jjRebase(params),
 					catch: (cause) => new NativeClientError({ operation: "jjRebase", cause }),
+				}),
+			getOperations: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.getOperations(params),
+					catch: (cause) => new NativeClientError({ operation: "getOperations", cause }),
+				}),
+			undoOperation: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.undoOperation(params),
+					catch: (cause) => new NativeClientError({ operation: "undoOperation", cause }),
+				}),
+			gitFetch: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.gitFetch(params),
+					catch: (cause) => new NativeClientError({ operation: "gitFetch", cause }),
+				}),
+			gitPush: (params) =>
+				Effect.tryPromise({
+					try: () => appRpc.request.gitPush(params),
+					catch: (cause) => new NativeClientError({ operation: "gitPush", cause }),
 				}),
 			getProjects: () =>
 				Effect.tryPromise({

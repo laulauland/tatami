@@ -337,3 +337,51 @@ pub fn jj_rebase(
         .map_err(to_napi_error)?;
     mutation_result_to_json(result)
 }
+
+#[napi]
+pub fn get_operations_json(repo_path: String, limit: u32) -> Result<String> {
+    let jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    let operations = jj_repo
+        .list_operations(limit as usize)
+        .map_err(to_napi_error)?;
+    serde_json::to_string(&operations).map_err(to_napi_error)
+}
+
+#[napi]
+pub fn undo_operation(repo_path: String, operation_id: String) -> Result<String> {
+    let mut jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    jj_repo
+        .undo_operation(&operation_id)
+        .map_err(to_napi_error)?;
+    let new_operation_id = jj_repo
+        .list_operations(1)
+        .map_err(to_napi_error)?
+        .into_iter()
+        .next()
+        .map(|operation| operation.id)
+        .ok_or_else(|| Error::from_reason("Undo completed but no operation id was found"))?;
+    mutation_result_to_json(MutationResult {
+        operation_id: new_operation_id,
+        change_id: None,
+    })
+}
+
+#[napi]
+pub fn jj_git_fetch(repo_path: String, remote: Option<String>) -> Result<String> {
+    let mut jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    let result = jj_repo.git_fetch(remote).map_err(to_napi_error)?;
+    mutation_result_to_json(result)
+}
+
+#[napi]
+pub fn jj_git_push(
+    repo_path: String,
+    remote: Option<String>,
+    bookmark_names: Vec<String>,
+) -> Result<String> {
+    let mut jj_repo = JjRepo::open(Path::new(&repo_path)).map_err(to_napi_error)?;
+    let result = jj_repo
+        .git_push(remote, bookmark_names)
+        .map_err(to_napi_error)?;
+    mutation_result_to_json(result)
+}

@@ -41,6 +41,16 @@ export type MutationResult = {
 	change_id: string | null;
 };
 
+export type Operation = {
+	id: string;
+	parent_ids: string[];
+	description: string;
+	timestamp: string;
+	user: string;
+	hostname: string;
+	working_copy_change_id: string | null;
+};
+
 export type JjNewParams = {
 	repoPath: string;
 	parentChangeIds: string[];
@@ -145,6 +155,22 @@ export type AppRPC = {
 			};
 			jjRebase: {
 				params: JjRebaseParams;
+				response: MutationResult;
+			};
+			getOperations: {
+				params: { repoPath: string; limit: number };
+				response: Operation[];
+			};
+			undoOperation: {
+				params: { repoPath: string; operationId: string };
+				response: MutationResult;
+			};
+			gitFetch: {
+				params: { repoPath: string; remote?: string | null };
+				response: MutationResult;
+			};
+			gitPush: {
+				params: { repoPath: string; bookmarkNames: string[]; remote?: string | null };
 				response: MutationResult;
 			};
 			getProjects: {

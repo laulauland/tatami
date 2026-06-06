@@ -25,20 +25,36 @@ import { RepoService } from "./services/RepoService.ts";
 import { StorageService } from "./services/StorageService.ts";
 import { WatcherService } from "./services/WatcherService.ts";
 
-const DEV_SERVER_PORT = 5174;
-const DEV_SERVER_URL = `http://localhost:${DEV_SERVER_PORT}`;
+// dev:hmr exports this so the backend knows HMR is intended and which origin to
+// load. Plain `bun run dev` leaves it unset and goes straight to the built bundle.
+const DEV_SERVER_URL = process.env.ELECTROBUN_DEV_SERVER_URL;
+const DEV_SERVER_PROBE_ATTEMPTS = 60;
+const DEV_SERVER_PROBE_INTERVAL_MS = 250;
 const DEFAULT_REVISION_LIMIT = 50;
+
+async function isDevServerReachable(url: string): Promise<boolean> {
+	try {
+		await fetch(url, { method: "HEAD" });
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 async function getMainViewUrl(): Promise<string> {
 	const channel = await Updater.localInfo.channel();
-	if (channel === "dev") {
-		try {
-			await fetch(DEV_SERVER_URL, { method: "HEAD" });
-			console.log(`HMR enabled: using Vite dev server at ${DEV_SERVER_URL}`);
-			return DEV_SERVER_URL;
-		} catch {
-			console.log("Vite dev server not running. Run 'bun run electrobun:dev:hmr' for HMR support.");
+	// The Vite dev server and the Electrobun app boot concurrently (see dev:hmr),
+	// so poll instead of probing once: a single probe loses the race on a cold
+	// start and silently falls back to the built bundle with no HMR.
+	if (channel === "dev" && DEV_SERVER_URL != null) {
+		for (let attempt = 0; attempt < DEV_SERVER_PROBE_ATTEMPTS; attempt++) {
+			if (await isDevServerReachable(DEV_SERVER_URL)) {
+				console.log(`HMR enabled: using Vite dev server at ${DEV_SERVER_URL}`);
+				return DEV_SERVER_URL;
+			}
+			await Bun.sleep(DEV_SERVER_PROBE_INTERVAL_MS);
 		}
+		console.log(`Vite dev server at ${DEV_SERVER_URL} never came up; using built bundle.`);
 	}
 
 	return "views://mainview/index.html";

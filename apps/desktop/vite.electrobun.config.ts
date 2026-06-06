@@ -21,7 +21,9 @@ export default defineConfig({
 		format: "es",
 	},
 	server: {
-		port: 5174,
+		// Single source of truth for the dev-server port: the dev:hmr / dev:attach
+		// scripts and the Electrobun backend probe all derive from DEV_SERVER_PORT.
+		port: Number(process.env.DEV_SERVER_PORT) || 5174,
 		strictPort: true,
 	},
 });
